@@ -21,3 +21,42 @@ def test_html_to_pdf_returns_pdf_bytes():
     assert isinstance(out, bytes)
     assert out[:5] == b"%PDF-"
     assert len(out) > 1000
+
+
+def test_with_base_injects_into_existing_head():
+    from app.reports.pdf import _with_base
+    out = _with_base(
+        "<html><head><title>x</title></head><body>hi</body></html>",
+        "https://example.com/assets/",
+    )
+    assert '<base href="https://example.com/assets/">' in out
+    # Injected inside <head>, before the title, not in the body.
+    head = out[out.index("<head") : out.index("</head>")]
+    assert '<base href="https://example.com/assets/">' in head
+
+
+def test_with_base_ignores_header_tag_in_body():
+    from app.reports.pdf import _with_base
+    # No real <head>; a <header> element lives in the body. The base tag must
+    # NOT be injected after <header> -- a synthetic <head> is created instead.
+    out = _with_base(
+        "<html><body><header>Report</header><p>hi</p></body></html>",
+        "https://example.com/assets/",
+    )
+    assert '<base href="https://example.com/assets/">' in out
+    # The base/head must appear before the <header> element, not inside it.
+    assert out.index("<base") < out.index("<header>")
+    assert "<head>" in out
+
+
+def test_with_base_escapes_url():
+    from app.reports.pdf import _with_base
+    out = _with_base("<html><head></head><body></body></html>", 'x"><script>')
+    assert '"><script>' not in out
+    assert "&quot;&gt;&lt;script&gt;" in out
+
+
+def test_with_base_noop_when_none():
+    from app.reports.pdf import _with_base
+    html = "<html><head></head><body>hi</body></html>"
+    assert _with_base(html, None) == html

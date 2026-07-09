@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from html import escape
 
 from playwright.sync_api import sync_playwright
 
@@ -16,12 +17,12 @@ def _with_base(html: str, base_url: str | None) -> str:
     """
     if not base_url:
         return html
-    base_tag = f'<base href="{base_url}">'
-    head_match = re.search(r"<head[^>]*>", html, flags=re.IGNORECASE)
+    base_tag = f'<base href="{escape(base_url, quote=True)}">'
+    head_match = re.search(r"<head(?=[\s>])[^>]*>", html, flags=re.IGNORECASE)
     if head_match:
         idx = head_match.end()
         return html[:idx] + base_tag + html[idx:]
-    html_match = re.search(r"<html[^>]*>", html, flags=re.IGNORECASE)
+    html_match = re.search(r"<html(?=[\s>])[^>]*>", html, flags=re.IGNORECASE)
     if html_match:
         idx = html_match.end()
         return html[:idx] + f"<head>{base_tag}</head>" + html[idx:]
