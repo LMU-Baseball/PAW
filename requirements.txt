@@ -1,0 +1,22 @@
+# Web framework
+Flask>=3.0
+Flask-Login>=0.6
+Flask-SQLAlchemy>=3.1   # user/account store (app DB, separate from analytics)
+Flask-WTF>=1.2          # login form + CSRF protection
+gunicorn>=22.0          # production WSGI server (deploy later)
+
+# Interactive dashboards (mounted on Flask)
+dash>=2.17
+plotly>=5.22
+
+# Data layer
+pandas>=2.2
+SQLAlchemy>=2.0
+PyMySQL>=1.1
+
+# Config / env
+python-dotenv>=1.0
+
+# Reports (HTML -> PDF)
+playwright>=1.44     # headless Chromium for PDF rendering
+kaleido>=0.2         # Plotly static image export
