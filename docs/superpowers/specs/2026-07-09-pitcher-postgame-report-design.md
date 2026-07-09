@@ -61,7 +61,11 @@ because postgame reports target current games flowing through the live pipeline.
 ## Report sections (same as the old report; curated layout)
 
 1. **Header** — LMU logo (`lmu.png`), pitcher name, handedness, opponent + game date +
-   game type (from `dim_tm_game` / recent-outings view).
+   game type (from `dim_tm_game` / recent-outings view), and **final score**. The score
+   is derived from the warehouse: sum `fact_tm_game_pitch.runs_scored` grouped by
+   `top_bottom` (Top = away batting, Bottom = home batting) over all pitches of the game,
+   then map home/away to LMU-vs-opponent. Scraping the LMU baseball site is a documented
+   fallback only if the derived total proves unreliable.
 2. **Game Overall** — appearance line: pitches, batters faced, K, BB, strike%, whiff%,
    in-zone%, chase%, first-pitch-strike%, runs. Derived from `fact_tm_game_pitch`
    (`pitch_call`, `play_result`, `korbb`, `runs_scored`).
@@ -102,7 +106,8 @@ because postgame reports target current games flowing through the live pipeline.
 Mirrors the shape of `app/data/hitting.py` (queries via `app.db.query_df`, transforms in
 pandas). Report-only subset:
 
-- **Queries:** `game_context(game_id)`, `game_pitches(game_id, pitcher_id)`,
+- **Queries:** `game_context(game_id)` (incl. `final_score(game_id)`: runs summed by
+  `top_bottom`), `game_pitches(game_id, pitcher_id)`,
   `recent_outings(pitcher_id, game_id)` (from `vw_pitcher_recent_outings`),
   `velo_trend(pitcher_id)` (from `vw_pitcher_velo_trend`),
   `pitchers_for_game(game_id)` (from `vw_game_pitchers`).
@@ -113,8 +118,8 @@ pandas). Report-only subset:
   `fig_movement`, `fig_location`, `fig_velo_trend`, `fig_location_split`,
   `fig_heatmap_overall`, `fig_heatmaps_by_pitch_type`.
 
-Pitch-type field: default to `ml_pitch_type`, falling back to `auto_pitch_type` then
-`tagged_pitch_type` when null (decided during implementation from data completeness).
+Pitch-type field: use **`tagged_pitch_type`** (the human-tagged type the staff trusts).
+`auto_pitch_type` is a fallback only when the tag is null.
 
 ### 3. Assembler — `app/reports/pitcher_postgame.py`
 
@@ -184,13 +189,12 @@ No `scipy` — heatmaps use Plotly's built-in 2D density.
 
 - The full pitcher Dash UI (only the report + its data are built here).
 - Historical (pre-Fall-2025) game support.
-- Final team score in the header (not in the warehouse game dimension; add later if a
-  source is identified).
 - Video, catcher, and hitting reports (the engine is reusable for them later).
 
 ## Open implementation questions (resolved during build, not blockers)
 
-1. Exact `ml_pitch_type` vs `auto_pitch_type` null rates → pick the fallback order from
-   real data.
+1. `tagged_pitch_type` null rate → confirm `auto_pitch_type` fallback is rarely needed.
 2. Whether to cache the Chromium browser process across requests vs launch-per-request
    (start simple: launch-per-request; optimize if slow).
+3. Sanity-check derived final scores (summed `runs_scored`) against a few known games;
+   fall back to LMU-site scraping only if they don't reconcile.
