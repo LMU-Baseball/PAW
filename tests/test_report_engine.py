@@ -60,3 +60,15 @@ def test_with_base_noop_when_none():
     from app.reports.pdf import _with_base
     html = "<html><head></head><body>hi</body></html>"
     assert _with_base(html, None) == html
+
+
+def test_fig_to_data_uri_embeds_png():
+    import base64
+    import plotly.graph_objects as go
+    from app.reports.charts import fig_to_data_uri
+
+    fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[3, 1, 2]))
+    uri = fig_to_data_uri(fig, width=300, height=200)
+    assert uri.startswith("data:image/png;base64,")
+    raw = base64.b64decode(uri.split(",", 1)[1])
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
