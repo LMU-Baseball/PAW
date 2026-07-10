@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2 style="margin-top: 0;">Welcome, {{ user.name }}</h2>
+  {% if user.is_coach %}
+    <p>You are signed in as a <strong>coach</strong> — you can view every LMU player
+       and add game notes.</p>
+  {% else %}
+    <p>You are signed in as a <strong>player</strong> — you can view your own
+       postgame data.</p>
+  {% endif %}
+  <h3>Dashboards</h3>
+  <ul>
+    <li><a href="/dash/hitting/">Hitting</a></li>
+    <li>Pitching <em>(coming soon)</em></li>
+    <li>Catching <em>(coming soon)</em></li>
+  </ul>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}The PAW — LMU Baseball{% endblock %}</title>
+  <style>
+    :root { --crimson: #9A0021; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; color: #1a1a1a; background: #f5f5f5; }
+    header.bar {
+      background: var(--crimson); color: #fff; padding: 0 20px; height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header.bar .brand { font-size: 22px; font-weight: 700; letter-spacing: .5px; }
+    header.bar a { color: #fff; }
+    .user { font-size: 14px; }
+    main.wrap { max-width: 900px; margin: 32px auto; padding: 0 20px; }
+    .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 14px; }
+    .flash.error { background: #fdecea; color: #a3271f; border: 1px solid #f3b6b1; }
+    .flash.info  { background: #e8f1fb; color: #1c5390; border: 1px solid #b6d4f3; }
+    .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; padding: 24px; }
+    .btn {
+      display: inline-block; background: var(--crimson); color: #fff; border: none;
+      padding: 10px 18px; border-radius: 6px; font-size: 15px; cursor: pointer; text-decoration: none;
+    }
+    label { display: block; margin: 12px 0 4px; font-size: 14px; font-weight: 600; }
+    input[type=text], input[type=password] {
+      width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <span class="brand">THE PAW</span>
+    {% if current_user.is_authenticated %}
+      <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
+        <a href="{{ url_for('auth.logout') }}">Log out</a></span>
+    {% endif %}
+  </header>
+  <main class="wrap">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

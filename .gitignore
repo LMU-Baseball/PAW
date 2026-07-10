@@ -1,0 +1,35 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# Generated reports / assets
+instance/
+*.pdf
+!docs/**/*.pdf
+
+# Reference R Shiny source — contains hardcoded RDS credentials; do not commit
+src/
+
+# Original email asset drop (videos, PDFs, report leftovers) — needed assets
+# were already copied into app/static/reports/
+Re_ PAW scripts/
+
+# Local-only: agent memory and subagent-driven-development scratch
+memory/
+.superpowers/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

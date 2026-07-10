@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Sign in — The PAW{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 380px; margin: 40px auto;">
+  <h2 style="margin-top: 0;">Sign in</h2>
+  <form method="post" action="{{ url_for('auth.login', next=request.args.get('next')) }}">
+    {{ form.hidden_tag() }}
+    <label for="email">Email</label>
+    {{ form.email(id="email", type="text", autofocus=true) }}
+    <label for="password">Password</label>
+    {{ form.password(id="password") }}
+    <div style="margin-top: 20px;">{{ form.submit(class="btn") }}</div>
+  </form>
+</div>
+{% endblock %}
