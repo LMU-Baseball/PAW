@@ -20,6 +20,9 @@ def test_game_context_has_score_and_teams():
     assert ctx["home_team"] and ctx["away_team"]
     assert ctx["lmu_runs"] >= 0 and ctx["opp_runs"] >= 0
     assert isinstance(ctx["lmu_is_home"], bool)
+    # Known fixture: game 166 is LMU hosting SMC, so LMU is home.
+    assert ctx["home_team"] == "LMU"
+    assert ctx["lmu_is_home"] is True
 
 
 def test_recent_outings_capped_and_ordered():
@@ -30,9 +33,15 @@ def test_recent_outings_capped_and_ordered():
 
 
 def test_pitch_type_prefers_tagged():
-    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    """Unit test (no DB): tagged wins, else auto, else 'Undefined'."""
+    df = pd.DataFrame(
+        {
+            "tagged_pitch_type": ["Slider", None, ""],
+            "auto_pitch_type": ["Fastball", "Curveball", None],
+        }
+    )
     pt = P.pitch_type(df)
-    assert pt.notna().all()
+    assert list(pt) == ["Slider", "Curveball", "Undefined"]
 
 
 def test_pitcher_tm_id_resolves():

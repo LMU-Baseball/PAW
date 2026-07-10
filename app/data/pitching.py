@@ -11,7 +11,7 @@ import pandas as pd
 
 from app.db import query_df
 
-LMU_TEAMS = ("LOY_LIO", "LMU")
+LMU_TEAM_ID = 78  # tm_team.team_name='LMU'; stable id (no collisions among teams)
 PITCH_TYPE_COL = "tagged_pitch_type"
 
 
@@ -69,8 +69,7 @@ def game_context(game_id: int) -> dict:
     away_runs = int(runs.get("Top", 0))
     home_runs = int(runs.get("Bottom", 0))
 
-    lmu_is_home = str(row["home_team"]).upper().startswith("LMU") or \
-        str(row["home_team"]) in LMU_TEAMS
+    lmu_is_home = row["home_team_id"] == LMU_TEAM_ID
     return {
         "game_date": row["game_date"],
         "season_label": row["season_label"],
