@@ -162,3 +162,26 @@ def test_build_raises_on_empty():
     import pytest
     with pytest.raises(ReportDataError):
         build_pitcher_postgame(166, 99999999)
+
+
+def test_build_html_splits_usage_renders_records():
+    # Guards against passing a DataFrame where the template iterates records:
+    # iterating a DataFrame yields column-name strings, so {{ r.count }}
+    # renders str.count's repr ("<built-in method ...>") and the per-side
+    # Usage cells come out empty. The assembler must feed records instead.
+    from app.reports.pitcher_postgame import _build_html
+    from app.data import pitching as P
+
+    html = _build_html(166, 1)
+    # The DataFrame-iteration bug leaks a bound-method repr into the cells.
+    assert "built-in method" not in html
+    assert "&lt;built-in method" not in html
+
+    # A real per-side usage_pct value must actually appear in the HTML.
+    df = P.game_pitches(166, 1)
+    splits = P.splits_by_batter_side(df)
+    values = [rec["usage_pct"]
+              for side in splits.values()
+              for rec in side["usage"].to_dict("records")]
+    assert values, "fixture should have at least one per-side usage row"
+    assert any(str(v) in html for v in values)
