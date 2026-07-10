@@ -46,3 +46,59 @@ def test_pitch_type_prefers_tagged():
 
 def test_pitcher_tm_id_resolves():
     assert P.pitcher_tm_id_for(PITCHER_ID) is not None
+
+
+def test_game_overall_line_counts_are_consistent():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    line = P.game_overall_line(df)
+    assert line["pitches"] == len(df)
+    assert 0 <= line["strike_pct"] <= 100
+    assert line["strikes"] + line["balls"] <= line["pitches"]
+
+
+def test_game_overall_line_empty_df_no_divide_by_zero():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    line = P.game_overall_line(df.iloc[0:0])
+    assert line["pitches"] == 0
+    assert line["strike_pct"] == 0.0
+    assert line["whiff_pct"] == 0.0
+    assert line["first_pitch_strike_pct"] == 0.0
+
+
+def test_pitch_characteristics_usage_sums_to_100():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    ch = P.pitch_characteristics(df)
+    assert len(ch) >= 1
+    assert abs(ch["usage_pct"].sum() - 100.0) < 0.5
+
+
+def test_pitch_usage_sums_to_100():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    u = P.pitch_usage(df)
+    assert abs(u["usage_pct"].sum() - 100.0) < 0.5
+
+
+def test_zone_location_pct_in_range():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    z = P.zone_location(df)
+    assert len(z) >= 1
+    assert z["in_zone_pct"].between(0, 100).all()
+
+
+def test_usage_by_count_has_count_state_column():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    uc = P.usage_by_count(df)
+    assert "count_state" in uc.columns
+    assert len(uc) >= 1
+
+
+def test_splits_cover_both_sides_keys():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    splits = P.splits_by_batter_side(df)
+    assert set(splits.keys()) == {"Left", "Right"}
+
+
+def test_averages_last5_rowcount_matches_recent():
+    recent = P.recent_outings(PITCHER_ID, GAME_ID, n=5)
+    avg = P.averages_last5(recent)
+    assert len(avg) == len(recent)

@@ -139,3 +139,126 @@ def pitcher_tm_id_for(pitcher_id: int) -> int | None:
         {"pid": pitcher_id},
     )
     return None if df.empty else int(df.iloc[0]["pitcher_tm_id"])
+
+
+# ============================ TRANSFORMS ==================================
+#
+# NOTE on column-semantics adjustments made after checking against the live
+# fixture (game_id=166, pitcher_id=1) and a full-table scan of distinct
+# values:
+#
+# - pitch_call: the live values are StrikeCalled, StrikeSwinging, InPlay,
+#   BallCalled, HitByPitch, Undefined, FoulBallNotFieldable,
+#   FoulBallFieldable, BallinDirt, BallIntentional, AutomaticBall — there is
+#   no plain "FoulBall" and balls aren't only "BallCalled". _STRIKE_CALLS/
+#   _SWING_CALLS use the two Foul* variants instead of "FoulBall", and a new
+#   _BALL_CALLS set covers all called/no-swing ball variants (BallCalled,
+#   BallinDirt, BallIntentional, AutomaticBall). HitByPitch and Undefined are
+#   intentionally excluded from both strikes and balls (dead-ball / no call).
+#
+# - zi: this column is NULL for every row in fact_tm_game_pitch (verified
+#   warehouse-wide), so it cannot be used as an in-zone indicator. zone
+#   location instead derives in-zone from izt_zone, whose values are the
+#   strings "1".."9" (the 3x3 strike-zone grid), "Shadow" (borderline), and
+#   "Ball" (clearly out). in_zone_pct = % of pitches with izt_zone in 1..9.
+
+_STRIKE_CALLS = {"StrikeCalled", "StrikeSwinging", "FoulBallNotFieldable",
+                  "FoulBallFieldable", "InPlay"}
+_WHIFF_CALLS = {"StrikeSwinging"}
+_SWING_CALLS = {"StrikeSwinging", "FoulBallNotFieldable", "FoulBallFieldable", "InPlay"}
+_BALL_CALLS = {"BallCalled", "BallinDirt", "BallIntentional", "AutomaticBall"}
+_IN_ZONE_CODES = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+
+
+def game_overall_line(df: pd.DataFrame) -> dict:
+    n = len(df)
+    calls = df["pitch_call"]
+    strikes = int(calls.isin(_STRIKE_CALLS).sum())
+    balls = int(calls.isin(_BALL_CALLS).sum())
+    swings = int(calls.isin(_SWING_CALLS).sum())
+    whiffs = int(calls.isin(_WHIFF_CALLS).sum())
+    korbb = df["korbb"]
+    first_pitch = df[df["pitch_of_pa"] == 1]
+    fps = int(first_pitch["pitch_call"].isin(_STRIKE_CALLS).sum())
+
+    def pct(a, b):
+        return round(100.0 * a / b, 1) if b else 0.0
+
+    return {
+        "pitches": n,
+        "batters_faced": int(df["batters_faced"].max() or 0) if n else 0,
+        "strikes": strikes,
+        "balls": balls,
+        "strike_pct": pct(strikes, n),
+        "whiff_pct": pct(whiffs, swings),
+        "k": int((korbb == "Strikeout").sum()),
+        "bb": int((korbb == "Walk").sum()),
+        "first_pitch_strike_pct": pct(fps, len(first_pitch)),
+        "runs": int(df["runs_scored"].sum()) if n else 0,
+    }
+
+
+def pitch_characteristics(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.assign(_pt=pitch_type(df))
+    n = len(d)
+    g = d.groupby("_pt")
+    out = pd.DataFrame({
+        "count": g.size(),
+        "avg_velo": g["rel_speed"].mean().round(1),
+        "max_velo": g["rel_speed"].max().round(1),
+        "spin_rate": g["spin_rate"].mean().round(0),
+        "ivb": g["induced_vert_break"].mean().round(1),
+        "hb": g["horz_break"].mean().round(1),
+        "rel_height": g["rel_height"].mean().round(2),
+        "rel_side": g["rel_side"].mean().round(2),
+        "extension": g["extension"].mean().round(2),
+    }).reset_index(names="pitch")
+    out["usage_pct"] = (100.0 * out["count"] / n).round(1)
+    return out.sort_values("count", ascending=False).reset_index(drop=True)
+
+
+def pitch_usage(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.assign(_pt=pitch_type(df))
+    n = len(d)
+    out = (d.groupby("_pt").size().reset_index(name="count")
+             .rename(columns={"_pt": "pitch"}))
+    out["usage_pct"] = (100.0 * out["count"] / n).round(1)
+    return out.sort_values("count", ascending=False).reset_index(drop=True)
+
+
+def zone_location(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.assign(_pt=pitch_type(df),
+                  _in_zone=df["izt_zone"].isin(_IN_ZONE_CODES))
+    g = d.groupby("_pt")
+    out = pd.DataFrame({
+        "count": g.size(),
+        "in_zone_pct": (100.0 * g["_in_zone"].mean()).round(1),
+    }).reset_index(names="pitch")
+    return out.sort_values("count", ascending=False).reset_index(drop=True)
+
+
+def usage_by_count(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.assign(_pt=pitch_type(df),
+                  count_state=df["balls"].astype(str) + "-" + df["strikes"].astype(str))
+    return (d.pivot_table(index="count_state", columns="_pt", values="pitch_no",
+                          aggfunc="count", fill_value=0)
+              .reset_index())
+
+
+def splits_by_batter_side(df: pd.DataFrame) -> dict:
+    out = {}
+    for side in ("Left", "Right"):
+        sub = df[df["batter_side"] == side]
+        out[side] = {
+            "overall": game_overall_line(sub) if len(sub) else game_overall_line(df.iloc[0:0]),
+            "usage": pitch_usage(sub) if len(sub) else pitch_usage(df.iloc[0:0]),
+        }
+    return out
+
+
+def averages_last5(recent_df: pd.DataFrame) -> pd.DataFrame:
+    if recent_df.empty:
+        return recent_df
+    cols = ["game_date", "away_team_name", "home_team_name",
+            "appearance_avg_velo", "appearance_max_velo", "pitch_count"]
+    return recent_df[cols].copy()
