@@ -148,3 +148,17 @@ def test_template_renders_with_empty_sections():
     # No per-side tables should be rendered when splits is empty.
     assert "vs Left" not in html
     assert "vs Right" not in html
+
+
+def test_build_pitcher_postgame_smoke():
+    from app.reports.pitcher_postgame import build_pitcher_postgame
+    pdf = build_pitcher_postgame(166, 1)
+    assert pdf[:5] == b"%PDF-"
+    assert len(pdf) > 5000
+
+
+def test_build_raises_on_empty():
+    from app.reports.pitcher_postgame import build_pitcher_postgame, ReportDataError
+    import pytest
+    with pytest.raises(ReportDataError):
+        build_pitcher_postgame(166, 99999999)
