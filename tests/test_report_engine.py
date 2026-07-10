@@ -100,17 +100,22 @@ def _render_template(**overrides):
 
 def test_template_renders_sections():
     html = _render_template(
+        css="section > table{}",
+        context={"game_date": "2026-05-10", "season_label": "Spring 2026",
+                 "game_type": "Conference", "home_team": "LMU",
+                 "away_team": "SMC", "lmu_runs": 5, "opp_runs": 3,
+                 "lmu_is_home": True},
         usage=[{"pitch": "Fastball", "count": 20, "usage_pct": 55.6}],
         zone=[{"pitch": "Fastball", "count": 20, "in_zone_pct": 48.0}],
         splits={
             "Left": {"overall": {"pitches": 18, "k": 2, "bb": 1,
                                  "strike_pct": 63.3, "whiff_pct": 22.2},
-                     "usage": [{"pitch": "Fastball", "count": 10,
-                                "usage_pct": 55.6}]},
+                     "usage": [{"pitch": "Fastball", "count": 12,
+                                "usage_pct": 66.7}]},
             "Right": {"overall": {"pitches": 18, "k": 2, "bb": 0,
                                   "strike_pct": 58.9, "whiff_pct": 17.8},
-                      "usage": [{"pitch": "Fastball", "count": 10,
-                                 "usage_pct": 55.6}]},
+                      "usage": [{"pitch": "Slider", "count": 8,
+                                 "usage_pct": 44.4}]},
         },
     )
     assert "Avery Laine" in html
@@ -125,6 +130,13 @@ def test_template_renders_sections():
     assert "vs Left" in html
     assert "vs Right" in html
     assert "63.3" in html
+    # Per-side usage tables (spec 10: Overall AND Usage split by side).
+    assert "66.7" in html
+    assert "44.4" in html
+    # Season label in the header.
+    assert "Spring 2026" in html
+    # css | safe: '>' must survive verbatim, not be escaped to &gt;.
+    assert "section > table{}" in html
 
 
 def test_template_renders_with_empty_sections():

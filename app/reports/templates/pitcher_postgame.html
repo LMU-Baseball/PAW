@@ -1,13 +1,13 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><style>{{ css }}</style></head>
+<head><meta charset="utf-8"><style>{{ css | safe }}</style></head>
 <body>
   <div class="header">
     <img src="{{ assets.lmu_png }}" alt="LMU">
     <h1>{{ pitcher }} — Postgame Report</h1>
     <div class="meta">
       {{ context.away_team }} @ {{ context.home_team }}<br>
-      {{ context.game_date }} · {{ context.game_type }}<br>
+      {{ context.game_date }} · {{ context.game_type }} · {{ context.season_label }}<br>
       <span class="score">LMU {{ context.lmu_runs }} – {{ context.opp_runs }} OPP</span>
     </div>
   </div>
@@ -80,7 +80,7 @@
           <td>{{ r.pitch_count }}</td></tr>
       {% endfor %}
     </table>
-    <div class="charts"><img src="{{ charts.velo_trend }}"><img src="{{ charts.location_split }}"></div>
+    <div class="charts"><img src="{{ charts.velo_trend }}"></div>
   </section>
 
   <section>
@@ -94,8 +94,15 @@
           <td>{{ splits[side].overall.bb }}</td><td>{{ splits[side].overall.strike_pct }}</td>
           <td>{{ splits[side].overall.whiff_pct }}</td></tr>
     </table>
+    <table>
+      <tr><th>Pitch</th><th>#</th><th>Usage%</th></tr>
+      {% for r in splits[side].usage %}
+      <tr><td>{{ r.pitch }}</td><td>{{ r.count }}</td><td>{{ r.usage_pct }}</td></tr>
+      {% endfor %}
+    </table>
     {% endif %}{% endfor %}
     {% endif %}
+    <div class="charts"><img src="{{ charts.location_split }}"></div>
   </section>
 
   <section>
