@@ -72,3 +72,28 @@ def test_fig_to_data_uri_embeds_png():
     assert uri.startswith("data:image/png;base64,")
     raw = base64.b64decode(uri.split(",", 1)[1])
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_template_renders_sections():
+    from jinja2 import Environment, FileSystemLoader
+    from pathlib import Path
+    tmpl_dir = Path(__file__).resolve().parents[1] / "app" / "reports" / "templates"
+    env = Environment(loader=FileSystemLoader(str(tmpl_dir)), autoescape=True)
+    html = env.get_template("pitcher_postgame.html").render(
+        pitcher="Avery Laine",
+        context={"game_date": "2026-05-10", "season_label": "Spring 2026",
+                 "game_type": "Conference", "home_team": "LMU",
+                 "away_team": "SMC", "lmu_runs": 5, "opp_runs": 3,
+                 "lmu_is_home": True},
+        overall={"pitches": 36, "batters_faced": 12, "strikes": 22, "balls": 14,
+                 "strike_pct": 61.1, "whiff_pct": 20.0, "k": 4, "bb": 1,
+                 "first_pitch_strike_pct": 58.3, "runs": 3},
+        characteristics=[], usage=[], zone=[], splits={}, averages=[],
+        charts={"velo_inning": "data:image/png;base64,AAAA"},
+        heatmaps=[("Fastball", "data:image/png;base64,AAAA")],
+        css="body{}",
+        assets={"lmu_png": "file:///lmu.png"},
+    )
+    assert "Avery Laine" in html
+    assert "Game Overall" in html
+    assert "data:image/png;base64,AAAA" in html

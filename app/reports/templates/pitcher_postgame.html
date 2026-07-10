@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>{{ css }}</style></head>
+<body>
+  <div class="header">
+    <img src="{{ assets.lmu_png }}" alt="LMU">
+    <h1>{{ pitcher }} — Postgame Report</h1>
+    <div class="meta">
+      {{ context.away_team }} @ {{ context.home_team }}<br>
+      {{ context.game_date }} · {{ context.game_type }}<br>
+      <span class="score">LMU {{ context.lmu_runs }} – {{ context.opp_runs }} OPP</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>Game Overall</h2>
+    <table>
+      <tr><th>Pitches</th><th>BF</th><th>K</th><th>BB</th>
+          <th>Strike%</th><th>Whiff%</th><th>1st-Pitch K%</th><th>Runs</th></tr>
+      <tr><td>{{ overall.pitches }}</td><td>{{ overall.batters_faced }}</td>
+          <td>{{ overall.k }}</td><td>{{ overall.bb }}</td>
+          <td>{{ overall.strike_pct }}</td><td>{{ overall.whiff_pct }}</td>
+          <td>{{ overall.first_pitch_strike_pct }}</td><td>{{ overall.runs }}</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Pitch Characteristics</h2>
+    <table>
+      <tr><th>Pitch</th><th>#</th><th>Usage%</th><th>Avg</th><th>Max</th>
+          <th>Spin</th><th>IVB</th><th>HB</th><th>RelH</th><th>RelS</th><th>Ext</th></tr>
+      {% for r in characteristics %}
+      <tr><td>{{ r.pitch }}</td><td>{{ r.count }}</td><td>{{ r.usage_pct }}</td>
+          <td>{{ r.avg_velo }}</td><td>{{ r.max_velo }}</td><td>{{ r.spin_rate }}</td>
+          <td>{{ r.ivb }}</td><td>{{ r.hb }}</td><td>{{ r.rel_height }}</td>
+          <td>{{ r.rel_side }}</td><td>{{ r.extension }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section>
+    <h2>Velocity</h2>
+    <div class="charts">
+      <img src="{{ charts.velo_inning }}"><img src="{{ charts.velo_pitch }}">
+    </div>
+  </section>
+
+  <section>
+    <h2>Movement &amp; Location</h2>
+    <div class="charts"><img src="{{ charts.movement }}"><img src="{{ charts.location }}"></div>
+  </section>
+
+  <section>
+    <h2>Last 5 Outings</h2>
+    <table>
+      <tr><th>Date</th><th>Matchup</th><th>Avg Velo</th><th>Max Velo</th><th>Pitches</th></tr>
+      {% for r in averages %}
+      <tr><td>{{ r.game_date }}</td><td>{{ r.away_team_name }} @ {{ r.home_team_name }}</td>
+          <td>{{ r.appearance_avg_velo }}</td><td>{{ r.appearance_max_velo }}</td>
+          <td>{{ r.pitch_count }}</td></tr>
+      {% endfor %}
+    </table>
+    <div class="charts"><img src="{{ charts.velo_trend }}"><img src="{{ charts.location_split }}"></div>
+  </section>
+
+  <section>
+    <h2>Heatmaps</h2>
+    <div class="charts"><img src="{{ charts.heatmap_overall }}"></div>
+    <div class="charts heatmaps">
+      {% for label, uri in heatmaps %}<img src="{{ uri }}" title="{{ label }}">{% endfor %}
+    </div>
+  </section>
+</body>
+</html>

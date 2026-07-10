@@ -1,0 +1,20 @@
+@font-face { font-family: 'Teko'; src: url('Teko-Regular.ttf'); font-weight: 400; }
+@font-face { font-family: 'Teko'; src: url('Teko-Bold.ttf'); font-weight: 700; }
+@page { size: Letter; margin: 0.5in; }
+* { box-sizing: border-box; }
+body { font-family: 'Teko', Arial, sans-serif; color: #111; margin: 0; }
+.header { display: flex; align-items: center; gap: 16px;
+          border-bottom: 3px solid #8c1515; padding-bottom: 8px; }
+.header img { height: 64px; }
+.header h1 { font-size: 30px; margin: 0; }
+.header .meta { margin-left: auto; text-align: right; font-size: 18px; }
+.score { font-size: 26px; font-weight: 700; }
+h2 { font-size: 22px; color: #8c1515; margin: 18px 0 6px;
+     border-bottom: 1px solid #ccc; }
+section { break-inside: avoid; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { border: 1px solid #ddd; padding: 3px 6px; text-align: center; }
+th { background: #f2f2f2; }
+.charts { display: flex; flex-wrap: wrap; gap: 8px; }
+.charts img { width: 49%; }
+.heatmaps img { width: 32%; }
