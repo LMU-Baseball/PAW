@@ -102,3 +102,30 @@ def test_averages_last5_rowcount_matches_recent():
     recent = P.recent_outings(PITCHER_ID, GAME_ID, n=5)
     avg = P.averages_last5(recent)
     assert len(avg) == len(recent)
+
+
+import plotly.graph_objects as go
+
+
+def test_figure_builders_return_figures():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    for fn in (P.fig_velo_by_inning, P.fig_velo_by_pitch, P.fig_movement,
+               P.fig_location, P.fig_location_split, P.fig_heatmap_overall):
+        fig = fn(df)
+        assert isinstance(fig, go.Figure)
+        assert len(fig.data) >= 1
+
+
+def test_velo_trend_figure():
+    trend = P.velo_trend(PITCHER_ID)
+    fig = P.fig_velo_trend(trend)
+    assert isinstance(fig, go.Figure)
+
+
+def test_heatmaps_by_pitch_type_labeled():
+    df = P.game_pitches(GAME_ID, PITCHER_ID)
+    items = P.fig_heatmaps_by_pitch_type(df)
+    assert len(items) >= 1
+    for label, fig in items:
+        assert isinstance(label, str)
+        assert isinstance(fig, go.Figure)

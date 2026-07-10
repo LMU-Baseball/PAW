@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 from app.db import query_df
 
@@ -262,3 +263,113 @@ def averages_last5(recent_df: pd.DataFrame) -> pd.DataFrame:
     cols = ["game_date", "away_team_name", "home_team_name",
             "appearance_avg_velo", "appearance_max_velo", "pitch_count"]
     return recent_df[cols].copy()
+
+
+# ============================ FIGURES =====================================
+
+_SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)  # approx strike zone (ft)
+
+
+def _base_layout(fig: go.Figure, title: str) -> go.Figure:
+    fig.update_layout(
+        title=title, template="simple_white",
+        font=dict(family="Teko, sans-serif", size=16),
+        margin=dict(l=40, r=20, t=50, b=40), showlegend=True,
+    )
+    return fig
+
+
+def fig_velo_by_inning(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["rel_speed"])
+    g = d.groupby("inning")["rel_speed"].mean().reset_index()
+    fig = go.Figure(go.Bar(x=g["inning"], y=g["rel_speed"].round(1)))
+    fig.update_xaxes(title="Inning"); fig.update_yaxes(title="Avg Velo (mph)")
+    return _base_layout(fig, "Velocity by Inning")
+
+
+def fig_velo_by_pitch(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["rel_speed"]).copy()
+    d["_pt"] = pitch_type(d)
+    fig = go.Figure()
+    for pt, sub in d.groupby("_pt"):
+        fig.add_trace(go.Scatter(x=sub["pitch_no"], y=sub["rel_speed"],
+                                 mode="markers+lines", name=pt))
+    fig.update_xaxes(title="Pitch #"); fig.update_yaxes(title="Velo (mph)")
+    return _base_layout(fig, "Velocity Across Outing")
+
+
+def fig_movement(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["horz_break", "induced_vert_break"]).copy()
+    d["_pt"] = pitch_type(d)
+    fig = go.Figure()
+    for pt, sub in d.groupby("_pt"):
+        fig.add_trace(go.Scatter(x=sub["horz_break"], y=sub["induced_vert_break"],
+                                 mode="markers", name=pt))
+    fig.update_xaxes(title="Horizontal Break (in)", zeroline=True)
+    fig.update_yaxes(title="Induced Vert Break (in)", zeroline=True)
+    return _base_layout(fig, "Pitch Movement")
+
+
+def _add_zone(fig: go.Figure) -> None:
+    fig.add_shape(type="rect", line=dict(color="black", width=2), **_SZ)
+
+
+def fig_location(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
+    d["_pt"] = pitch_type(d)
+    fig = go.Figure()
+    for pt, sub in d.groupby("_pt"):
+        fig.add_trace(go.Scatter(x=sub["plate_loc_side"], y=sub["plate_loc_height"],
+                                 mode="markers", name=pt))
+    _add_zone(fig)
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    return _base_layout(fig, "Pitch Location (Catcher View)")
+
+
+def fig_location_split(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
+    fig = go.Figure()
+    for side, sub in d.groupby("batter_side"):
+        fig.add_trace(go.Scatter(x=sub["plate_loc_side"], y=sub["plate_loc_height"],
+                                 mode="markers", name=f"vs {side}"))
+    _add_zone(fig)
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    return _base_layout(fig, "Location vs LHH/RHH")
+
+
+def fig_velo_trend(trend_df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    if not trend_df.empty:
+        fig.add_trace(go.Scatter(x=trend_df["game_date"], y=trend_df["avg_velo"],
+                                 mode="markers+lines", name="Avg Velo"))
+    fig.update_xaxes(title="Game Date"); fig.update_yaxes(title="Avg Velo (mph)")
+    return _base_layout(fig, "Velocity Trend (Season)")
+
+
+def _heatmap(d: pd.DataFrame, title: str) -> go.Figure:
+    fig = go.Figure(go.Histogram2dContour(
+        x=d["plate_loc_side"], y=d["plate_loc_height"],
+        colorscale="YlOrRd", showscale=False, ncontours=12,
+    ))
+    _add_zone(fig)
+    fig.update_xaxes(title="", range=[-2.5, 2.5], showticklabels=False)
+    fig.update_yaxes(title="", range=[0, 5], scaleanchor="x", showticklabels=False)
+    out = _base_layout(fig, title); out.update_layout(showlegend=False)
+    return out
+
+
+def fig_heatmap_overall(df: pd.DataFrame) -> go.Figure:
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"])
+    return _heatmap(d, "Location Heatmap (All Pitches)")
+
+
+def fig_heatmaps_by_pitch_type(df: pd.DataFrame) -> list:
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
+    d["_pt"] = pitch_type(d)
+    items = []
+    for pt, sub in d.groupby("_pt"):
+        if len(sub) >= 3:
+            items.append((pt, _heatmap(sub, pt)))
+    return items
