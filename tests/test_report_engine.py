@@ -74,12 +74,12 @@ def test_fig_to_data_uri_embeds_png():
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_template_renders_sections():
+def _render_template(**overrides):
     from jinja2 import Environment, FileSystemLoader
     from pathlib import Path
     tmpl_dir = Path(__file__).resolve().parents[1] / "app" / "reports" / "templates"
     env = Environment(loader=FileSystemLoader(str(tmpl_dir)), autoescape=True)
-    html = env.get_template("pitcher_postgame.html").render(
+    ctx = dict(
         pitcher="Avery Laine",
         context={"game_date": "2026-05-10", "season_label": "Spring 2026",
                  "game_type": "Conference", "home_team": "LMU",
@@ -94,6 +94,45 @@ def test_template_renders_sections():
         css="body{}",
         assets={"lmu_png": "file:///lmu.png"},
     )
+    ctx.update(overrides)
+    return env.get_template("pitcher_postgame.html").render(**ctx)
+
+
+def test_template_renders_sections():
+    html = _render_template(
+        usage=[{"pitch": "Fastball", "count": 20, "usage_pct": 55.6}],
+        zone=[{"pitch": "Fastball", "count": 20, "in_zone_pct": 48.0}],
+        splits={
+            "Left": {"overall": {"pitches": 18, "k": 2, "bb": 1,
+                                 "strike_pct": 63.3, "whiff_pct": 22.2},
+                     "usage": [{"pitch": "Fastball", "count": 10,
+                                "usage_pct": 55.6}]},
+            "Right": {"overall": {"pitches": 18, "k": 2, "bb": 0,
+                                  "strike_pct": 58.9, "whiff_pct": 17.8},
+                      "usage": [{"pitch": "Fastball", "count": 10,
+                                 "usage_pct": 55.6}]},
+        },
+    )
     assert "Avery Laine" in html
     assert "Game Overall" in html
     assert "data:image/png;base64,AAAA" in html
+    # New sections and representative sample values.
+    assert "Pitch Usage" in html
+    assert "55.6" in html
+    assert "Zone Location" in html
+    assert "48.0" in html
+    assert "Splits vs LHH / RHH" in html
+    assert "vs Left" in html
+    assert "vs Right" in html
+    assert "63.3" in html
+
+
+def test_template_renders_with_empty_sections():
+    # The {% if splits %} guard and empty loops must not raise.
+    html = _render_template(usage=[], zone=[], splits={})
+    assert "Pitch Usage" in html
+    assert "Zone Location" in html
+    assert "Splits vs LHH / RHH" in html
+    # No per-side tables should be rendered when splits is empty.
+    assert "vs Left" not in html
+    assert "vs Right" not in html

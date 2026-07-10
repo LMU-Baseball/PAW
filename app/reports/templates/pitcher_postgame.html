@@ -39,6 +39,26 @@
   </section>
 
   <section>
+    <h2>Pitch Usage</h2>
+    <table>
+      <tr><th>Pitch</th><th>#</th><th>Usage%</th></tr>
+      {% for r in usage %}
+      <tr><td>{{ r.pitch }}</td><td>{{ r.count }}</td><td>{{ r.usage_pct }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section>
+    <h2>Zone Location</h2>
+    <table>
+      <tr><th>Pitch</th><th>#</th><th>In-Zone%</th></tr>
+      {% for r in zone %}
+      <tr><td>{{ r.pitch }}</td><td>{{ r.count }}</td><td>{{ r.in_zone_pct }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section>
     <h2>Velocity</h2>
     <div class="charts">
       <img src="{{ charts.velo_inning }}"><img src="{{ charts.velo_pitch }}">
@@ -61,6 +81,21 @@
       {% endfor %}
     </table>
     <div class="charts"><img src="{{ charts.velo_trend }}"><img src="{{ charts.location_split }}"></div>
+  </section>
+
+  <section>
+    <h2>Splits vs LHH / RHH</h2>
+    {% if splits %}
+    {% for side in ['Left', 'Right'] %}{% if side in splits %}
+    <h3>vs {{ side }}</h3>
+    <table>
+      <tr><th>Pitches</th><th>K</th><th>BB</th><th>Strike%</th><th>Whiff%</th></tr>
+      <tr><td>{{ splits[side].overall.pitches }}</td><td>{{ splits[side].overall.k }}</td>
+          <td>{{ splits[side].overall.bb }}</td><td>{{ splits[side].overall.strike_pct }}</td>
+          <td>{{ splits[side].overall.whiff_pct }}</td></tr>
+    </table>
+    {% endif %}{% endfor %}
+    {% endif %}
   </section>
 
   <section>
