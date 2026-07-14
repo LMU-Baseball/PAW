@@ -142,6 +142,45 @@ def pitcher_tm_id_for(pitcher_id: int) -> int | None:
     return None if df.empty else int(df.iloc[0]["pitcher_tm_id"])
 
 
+def recent_games(limit: int = 25) -> pd.DataFrame:
+    """LMU games (home or away), newest first, for the report picker.
+
+    Team names come from tm_team.team_name (the same display column
+    game_context() uses); LMU is team_id 78. `dim_tm_game` holds non-LMU
+    games too, so we filter to games LMU played in.
+    """
+    return query_df(
+        """
+        SELECT g.game_id, g.game_date, g.season_label, g.game_type,
+               ht.team_name AS home_team, at.team_name AS away_team
+          FROM dim_tm_game g
+          LEFT JOIN tm_team ht ON ht.team_id = g.home_team_id
+          LEFT JOIN tm_team at ON at.team_id = g.away_team_id
+         WHERE g.home_team_id = :lmu OR g.away_team_id = :lmu
+         ORDER BY g.game_date DESC, g.game_id DESC
+         LIMIT :lim
+        """,
+        {"lmu": LMU_TEAM_ID, "lim": limit},
+    )
+
+
+def pitchers_for_game(game_id: int) -> pd.DataFrame:
+    """Pitchers who appeared in a game (both teams), name-sorted.
+
+    Reads vw_game_pitchers (game_id, player_id, display_name). display_name is
+    already "Last, First".
+    """
+    return query_df(
+        """
+        SELECT game_id, player_id, display_name
+          FROM vw_game_pitchers
+         WHERE game_id = :gid
+         ORDER BY display_name
+        """,
+        {"gid": game_id},
+    )
+
+
 # ============================ TRANSFORMS ==================================
 #
 # NOTE on column-semantics adjustments made after checking against the live

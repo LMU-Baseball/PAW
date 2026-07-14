@@ -129,3 +129,28 @@ def test_heatmaps_by_pitch_type_labeled():
     for label, fig in items:
         assert isinstance(label, str)
         assert isinstance(fig, go.Figure)
+
+
+# ============ Landing-page helpers (recent_games / pitchers_for_game) ========
+
+def test_recent_games_newest_first_and_capped():
+    df = P.recent_games(limit=10)
+    assert isinstance(df, pd.DataFrame)
+    assert 1 <= len(df) <= 10
+    dates = pd.to_datetime(df["game_date"])
+    assert list(dates) == sorted(dates, reverse=True)
+
+
+def test_recent_games_all_involve_lmu():
+    df = P.recent_games(limit=25)
+    involved = (df["home_team"] == "LMU") | (df["away_team"] == "LMU")
+    assert involved.all()
+
+
+def test_pitchers_for_game_lists_known_pitcher():
+    df = P.pitchers_for_game(GAME_ID)
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) > 0
+    assert (df["game_id"] == GAME_ID).all()
+    assert {"player_id", "display_name"}.issubset(df.columns)
+    assert PITCHER_ID in set(df["player_id"])
