@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Pitching Reports — The PAW{% endblock %}
+{% block content %}
+<div class="card">
+  <h2 style="margin-top: 0;">Pitching Reports</h2>
+  <p>Pick a game, then download a pitcher's postgame report.</p>
+
+  <form method="get" action="{{ url_for('reports.pitching_landing') }}">
+    <label for="game_id">Game</label>
+    <select name="game_id" id="game_id"
+            style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 15px;">
+      <option value="">— Select a game —</option>
+      {% for g in games %}
+        <option value="{{ g.game_id }}" {% if g.game_id == game_id %}selected{% endif %}>
+          {{ g.game_date }} · {{ g.away_team }} @ {{ g.home_team }}
+          ({{ g.season_label }}{% if g.game_type %} · {{ g.game_type }}{% endif %})
+        </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn" style="margin-top: 12px;">Show pitchers</button>
+  </form>
+</div>
+
+{% if game_id is not none %}
+<div class="card" style="margin-top: 20px;">
+  {% if selected_game %}
+    <h3 style="margin-top: 0;">
+      {{ selected_game.game_date }} · {{ selected_game.away_team }} @ {{ selected_game.home_team }}
+    </h3>
+  {% else %}
+    <h3 style="margin-top: 0;">Selected game</h3>
+  {% endif %}
+
+  {% if pitchers %}
+    <ul>
+      {% for p in pitchers %}
+        <li style="margin: 8px 0;">
+          {{ p.display_name }} —
+          <a href="{{ url_for('reports.pitcher_pdf', game_id=game_id, pitcher_id=p.player_id) }}">
+            Download Game Report (PDF)
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No pitchers found for this game.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
