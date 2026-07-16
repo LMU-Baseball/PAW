@@ -236,6 +236,100 @@ _SWING_CALLS = {"StrikeSwinging", "FoulBallNotFieldable", "FoulBallFieldable", "
 _BALL_CALLS = {"BallCalled", "BallinDirt", "BallIntentional", "AutomaticBall"}
 _IN_ZONE_CODES = {"1", "2", "3", "4", "5", "6", "7", "8", "9"}
 
+_HIT_RESULTS = {"Single", "Double", "Triple", "HomeRun"}
+
+
+def _pct(a: int, b: int) -> float:
+    return round(100.0 * a / b, 1) if b else 0.0
+
+
+def _pa_count(df: pd.DataFrame) -> int:
+    """Plate appearances = distinct (inning, pa_of_inning) among the pitches.
+
+    Split-safe (works on a batter-side subset), unlike batters_faced.max()
+    which is a running counter over the whole outing.
+    """
+    if df.empty:
+        return 0
+    return int(df[["inning", "pa_of_inning"]].drop_duplicates().shape[0])
+
+
+def strike_pct(df: pd.DataFrame) -> tuple[float, int]:
+    s = int(df["pitch_call"].isin(_STRIKE_CALLS).sum())
+    return _pct(s, len(df)), s
+
+
+def fps_pct(df: pd.DataFrame) -> tuple[float, int]:
+    fp = df[df["pitch_of_pa"] == 1]
+    s = int(fp["pitch_call"].isin(_STRIKE_CALLS).sum())
+    return _pct(s, len(fp)), s
+
+
+def k_pct(df: pd.DataFrame) -> tuple[float, int]:
+    k = int((df["korbb"] == "Strikeout").sum())
+    return _pct(k, _pa_count(df)), k
+
+
+def bb_pct(df: pd.DataFrame) -> tuple[float, int]:
+    bb = int((df["korbb"] == "Walk").sum())
+    return _pct(bb, _pa_count(df)), bb
+
+
+def ea_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Early & Ahead %. PROVISIONAL v1 definition (confirm with coaches):
+    share of PAs where the pitcher reached an ahead count (strikes-balls >= 1)
+    at any point in the PA. balls/strikes are the recorded count on each pitch.
+    """
+    if df.empty:
+        return 0.0, 0
+    ahead = df.groupby(["inning", "pa_of_inning"]).apply(
+        lambda p: bool(((p["strikes"] - p["balls"]).max()) >= 1))
+    return _pct(int(ahead.sum()), int(ahead.shape[0])), int(ahead.sum())
+
+
+def pre2k_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Pre-2K strike %. PROVISIONAL v1: strike% on pitches thrown in counts
+    with fewer than 2 strikes."""
+    sub = df[df["strikes"] < 2]
+    s = int(sub["pitch_call"].isin(_STRIKE_CALLS).sum())
+    return _pct(s, len(sub)), s
+
+
+def twok_kill_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """2K Kill %. PROVISIONAL v1: strikeouts / PAs that reached a 2-strike count."""
+    if df.empty:
+        return 0.0, 0
+    g = df.groupby(["inning", "pa_of_inning"])
+    reached = g.apply(lambda p: bool((p["strikes"] >= 2).any()))
+    ks = g.apply(lambda p: bool((p["korbb"] == "Strikeout").any()))
+    kills = int((reached & ks).sum())
+    return _pct(kills, int(reached.sum())), kills
+
+
+def barrel_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Barrel %. PROVISIONAL v1 (no launch-angle column in the warehouse):
+    barrels / balls in play, barrel ~ exit_speed >= 95 and tagged_hit_type in
+    {LineDrive, FlyBall}."""
+    bip = df[df["pitch_call"] == "InPlay"]
+    barrels = int(((bip["exit_speed"] >= 95)
+                   & (bip["tagged_hit_type"].isin({"LineDrive", "FlyBall"}))).sum())
+    return _pct(barrels, len(bip)), barrels
+
+
+def header_stat_line(df: pd.DataFrame) -> dict:
+    """The header line: batters faced (R/L), outs, hits, runs, BB, SO, pitches."""
+    return {
+        "bf": _pa_count(df),
+        "bf_r": _pa_count(df[df["batter_side"] == "Right"]),
+        "bf_l": _pa_count(df[df["batter_side"] == "Left"]),
+        "outs": int(df["outs_on_play"].sum()) if len(df) else 0,
+        "h": int(df["play_result"].isin(_HIT_RESULTS).sum()) if len(df) else 0,
+        "r": int(df["runs_scored"].sum()) if len(df) else 0,
+        "bb": int((df["korbb"] == "Walk").sum()) if len(df) else 0,
+        "so": int((df["korbb"] == "Strikeout").sum()) if len(df) else 0,
+        "pitches": len(df),
+    }
+
 
 def game_overall_line(df: pd.DataFrame) -> dict:
     n = len(df)
