@@ -283,7 +283,7 @@ def ea_pct(df: pd.DataFrame) -> tuple[float, int]:
     if df.empty:
         return 0.0, 0
     ahead = df.groupby(["inning", "pa_of_inning"]).apply(
-        lambda p: bool(((p["strikes"] - p["balls"]).max()) >= 1))
+        lambda p: bool(((p["strikes"] - p["balls"]).max()) >= 1), include_groups=False)
     return _pct(int(ahead.sum()), int(ahead.shape[0])), int(ahead.sum())
 
 
@@ -300,8 +300,8 @@ def twok_kill_pct(df: pd.DataFrame) -> tuple[float, int]:
     if df.empty:
         return 0.0, 0
     g = df.groupby(["inning", "pa_of_inning"])
-    reached = g.apply(lambda p: bool((p["strikes"] >= 2).any()))
-    ks = g.apply(lambda p: bool((p["korbb"] == "Strikeout").any()))
+    reached = g.apply(lambda p: bool((p["strikes"] >= 2).any()), include_groups=False)
+    ks = g.apply(lambda p: bool((p["korbb"] == "Strikeout").any()), include_groups=False)
     kills = int((reached & ks).sum())
     return _pct(kills, int(reached.sum())), kills
 
