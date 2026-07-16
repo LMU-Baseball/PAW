@@ -25,3 +25,9 @@ def test_plots_empty_input_safe():
     empty = _df().iloc[0:0]
     _is_png_uri(plots.zone_chart_uri(empty, "Left", "vLHH Zone"))
     _is_png_uri(plots.movement_map_uri(empty))
+
+
+def test_pitch_colors_stable_per_name():
+    assert plots._color_for("Fastball") == plots._color_for("Fastball")
+    # an unknown name is deterministic across calls
+    assert plots._color_for("Gyroball") == plots._color_for("Gyroball")

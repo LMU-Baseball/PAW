@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import io
+import zlib
 
 import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
@@ -21,17 +22,32 @@ _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)
 _PALETTE = ["#9A0021", "#2864a8", "#2e8b57", "#e08a1e", "#6a4c93",
             "#00897b", "#c2185b", "#555555"]
 
+# Stable color per pitch-type NAME so the same pitch renders identically across
+# all three charts on a report, regardless of which types appear in each subset.
+_PITCH_COLOR = {
+    "Fastball": "#9A0021", "Four-Seam": "#9A0021", "FourSeamFastBall": "#9A0021",
+    "Sinker": "#e08a1e", "TwoSeamFastBall": "#e08a1e",
+    "Cutter": "#6a4c93",
+    "Slider": "#2864a8", "Sweeper": "#00897b",
+    "Curveball": "#2e8b57", "ChangeUp": "#c2185b", "Changeup": "#c2185b",
+    "Splitter": "#555555",
+}
 
-def _color_map(pitch_types) -> dict:
-    uniq = sorted(set(pitch_types))
-    return {pt: _PALETTE[i % len(_PALETTE)] for i, pt in enumerate(uniq)}
+
+def _color_for(pt: str) -> str:
+    if pt in _PITCH_COLOR:
+        return _PITCH_COLOR[pt]
+    # deterministic (crc32 is stable across runs, unlike hash()) fallback
+    return _PALETTE[zlib.crc32(str(pt).encode()) % len(_PALETTE)]
 
 
 def _fig_to_uri(fig) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    try:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    finally:
+        plt.close(fig)
 
 
 def _draw_zone(ax) -> None:
@@ -53,10 +69,9 @@ def zone_chart_uri(df, batter_side: str, title: str) -> str:
     _draw_zone(ax)
     if not d.empty:
         d["_pt"] = pitch_type(d)
-        cmap = _color_map(d["_pt"])
         for pt, sub in d.groupby("_pt"):
             ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"],
-                       s=28, color=cmap[pt], edgecolor="white", linewidth=0.4,
+                       s=28, color=_color_for(pt), edgecolor="white", linewidth=0.4,
                        label=pt, zorder=3)
         ax.legend(fontsize=6, loc="upper right", framealpha=0.7)
     ax.set_xlim(-2.5, 2.5)
@@ -91,13 +106,13 @@ def movement_map_uri(df, title: str = "Movement Map") -> str:
     ax.axvline(0, color="#ccc", lw=0.8)
     if not d.empty:
         d["_pt"] = pitch_type(d)
-        cmap = _color_map(d["_pt"])
         for pt, sub in d.groupby("_pt"):
+            color = _color_for(pt)
             ax.scatter(sub["horz_break"], sub["induced_vert_break"],
-                       s=24, color=cmap[pt], edgecolor="white", linewidth=0.3,
+                       s=24, color=color, edgecolor="white", linewidth=0.3,
                        label=pt, zorder=3)
             _add_ellipse(ax, sub["horz_break"].to_numpy(),
-                         sub["induced_vert_break"].to_numpy(), cmap[pt])
+                         sub["induced_vert_break"].to_numpy(), color)
         ax.legend(fontsize=6, loc="upper right", framealpha=0.7)
     ax.set_xlim(-25, 25)
     ax.set_ylim(-25, 25)
