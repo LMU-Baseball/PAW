@@ -20,3 +20,5 @@ python-dotenv>=1.0
 # Reports (HTML -> PDF)
 playwright>=1.44     # headless Chromium for PDF rendering
 kaleido>=0.2         # Plotly static image export
+matplotlib           # one-pager chart rendering (Agg backend, no browser)
+Pillow               # PNG asset handling for report images

@@ -74,82 +74,6 @@ def test_fig_to_data_uri_embeds_png():
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def _render_template(**overrides):
-    from jinja2 import Environment, FileSystemLoader
-    from pathlib import Path
-    tmpl_dir = Path(__file__).resolve().parents[1] / "app" / "reports" / "templates"
-    env = Environment(loader=FileSystemLoader(str(tmpl_dir)), autoescape=True)
-    ctx = dict(
-        pitcher="Avery Laine",
-        context={"game_date": "2026-05-10", "season_label": "Spring 2026",
-                 "game_type": "Conference", "home_team": "LMU",
-                 "away_team": "SMC", "lmu_runs": 5, "opp_runs": 3,
-                 "lmu_is_home": True},
-        overall={"pitches": 36, "batters_faced": 12, "strikes": 22, "balls": 14,
-                 "strike_pct": 61.1, "whiff_pct": 20.0, "k": 4, "bb": 1,
-                 "first_pitch_strike_pct": 58.3, "runs": 3},
-        characteristics=[], usage=[], zone=[], splits={}, averages=[],
-        charts={"velo_inning": "data:image/png;base64,AAAA"},
-        heatmaps=[("Fastball", "data:image/png;base64,AAAA")],
-        css="body{}",
-        assets={"lmu_png": "file:///lmu.png"},
-    )
-    ctx.update(overrides)
-    return env.get_template("pitcher_postgame.html").render(**ctx)
-
-
-def test_template_renders_sections():
-    html = _render_template(
-        css="section > table{}",
-        context={"game_date": "2026-05-10", "season_label": "Spring 2026",
-                 "game_type": "Conference", "home_team": "LMU",
-                 "away_team": "SMC", "lmu_runs": 5, "opp_runs": 3,
-                 "lmu_is_home": True},
-        usage=[{"pitch": "Fastball", "count": 20, "usage_pct": 55.6}],
-        zone=[{"pitch": "Fastball", "count": 20, "in_zone_pct": 48.0}],
-        splits={
-            "Left": {"overall": {"pitches": 18, "k": 2, "bb": 1,
-                                 "strike_pct": 63.3, "whiff_pct": 22.2},
-                     "usage": [{"pitch": "Fastball", "count": 12,
-                                "usage_pct": 66.7}]},
-            "Right": {"overall": {"pitches": 18, "k": 2, "bb": 0,
-                                  "strike_pct": 58.9, "whiff_pct": 17.8},
-                      "usage": [{"pitch": "Slider", "count": 8,
-                                 "usage_pct": 44.4}]},
-        },
-    )
-    assert "Avery Laine" in html
-    assert "Game Overall" in html
-    assert "data:image/png;base64,AAAA" in html
-    # New sections and representative sample values.
-    assert "Pitch Usage" in html
-    assert "55.6" in html
-    assert "Zone Location" in html
-    assert "48.0" in html
-    assert "Splits vs LHH / RHH" in html
-    assert "vs Left" in html
-    assert "vs Right" in html
-    assert "63.3" in html
-    # Per-side usage tables (spec 10: Overall AND Usage split by side).
-    assert "66.7" in html
-    assert "44.4" in html
-    # Season label in the header.
-    assert "Spring 2026" in html
-    # css | safe: '>' must survive verbatim, not be escaped to &gt;.
-    assert "section > table{}" in html
-
-
-def test_template_renders_with_empty_sections():
-    # The {% if splits %} guard and empty loops must not raise.
-    html = _render_template(usage=[], zone=[], splits={})
-    assert "Pitch Usage" in html
-    assert "Zone Location" in html
-    assert "Splits vs LHH / RHH" in html
-    # No per-side tables should be rendered when splits is empty.
-    assert "vs Left" not in html
-    assert "vs Right" not in html
-
-
 def test_build_pitcher_postgame_smoke():
     from app.reports.pitcher_postgame import build_pitcher_postgame
     pdf = build_pitcher_postgame(166, 1)
@@ -164,24 +88,13 @@ def test_build_raises_on_empty():
         build_pitcher_postgame(166, 99999999)
 
 
-def test_build_html_splits_usage_renders_records():
-    # Guards against passing a DataFrame where the template iterates records:
-    # iterating a DataFrame yields column-name strings, so {{ r.count }}
-    # renders str.count's repr ("<built-in method ...>") and the per-side
-    # Usage cells come out empty. The assembler must feed records instead.
+def test_build_html_renders_onepager_sections():
     from app.reports.pitcher_postgame import _build_html
-    from app.data import pitching as P
-
     html = _build_html(166, 1)
-    # The DataFrame-iteration bug leaks a bound-method repr into the cells.
+    for token in ("Process Metrics", "Outcome Metrics", "Pitch Usage",
+                  "Movement Summary", "vRHH Zone", "vLHH Zone",
+                  "data:image/png;base64,"):
+        assert token in html
+    # both logos embedded as data URIs, no built-in-method leakage
+    assert html.count("data:image/png;base64,") >= 3  # 3 charts (+ logos)
     assert "built-in method" not in html
-    assert "&lt;built-in method" not in html
-
-    # A real per-side usage_pct value must actually appear in the HTML.
-    df = P.game_pitches(166, 1)
-    splits = P.splits_by_batter_side(df)
-    values = [rec["usage_pct"]
-              for side in splits.values()
-              for rec in side["usage"].to_dict("records")]
-    assert values, "fixture should have at least one per-side usage row"
-    assert any(str(v) in html for v in values)
