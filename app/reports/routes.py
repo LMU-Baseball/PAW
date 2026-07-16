@@ -45,5 +45,5 @@ def pitcher_pdf(game_id: int, pitcher_id: int):
     return Response(
         pdf, mimetype="application/pdf",
         headers={"Content-Disposition":
-                 f'inline; filename="pitcher_{pitcher_id}_game_{game_id}.pdf"'},
+                 f'attachment; filename="pitcher_{pitcher_id}_game_{game_id}.pdf"'},
     )

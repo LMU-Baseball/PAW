@@ -30,6 +30,7 @@
   .pitcher-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
   .pitcher-row .name { font-family: var(--font-display); font-weight: 600; font-size: 22px; }
   .empty { color: #777; font-style: italic; }
+  .hint { color: #777; font-size: 14px; margin: 0 0 14px; }
 </style>
 
 <div class="hero">
@@ -71,10 +72,12 @@
   {% endif %}
 
   {% if pitchers %}
+    <p class="hint">Reports open in a new tab and take ~30 seconds to generate — the file downloads when it's ready.</p>
     {% for p in pitchers %}
       <div class="pitcher-row">
         <span class="name">{{ p.display_name }}</span>
-        <a class="btn" href="{{ url_for('reports.pitcher_pdf', game_id=game_id, pitcher_id=p.player_id) }}">
+        <a class="btn" target="_blank" rel="noopener"
+           href="{{ url_for('reports.pitcher_pdf', game_id=game_id, pitcher_id=p.player_id) }}">
           Download Report ↓
         </a>
       </div>

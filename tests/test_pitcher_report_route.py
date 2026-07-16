@@ -59,6 +59,10 @@ def test_coach_gets_pdf(app_ctx):
     assert resp.status_code == 200
     assert resp.mimetype == "application/pdf"
     assert resp.data.startswith(b"%PDF-")
+    # Deliver as a real file download (not inline in the browser tab), so the
+    # "Download Report" button actually saves a file.
+    assert resp.headers["Content-Disposition"].startswith("attachment")
+    assert 'filename="pitcher_1_game_166.pdf"' in resp.headers["Content-Disposition"]
 
 
 # --------------------------- can_view_pitcher_report unit tests ------------
