@@ -1,14 +1,49 @@
 {% extends "base.html" %}
 {% block title %}Pitching Reports — The PAW{% endblock %}
 {% block content %}
-<div class="card">
-  <h2 style="margin-top: 0;">Pitching Reports</h2>
-  <p>Pick a game, then download a pitcher's postgame report.</p>
+<style>
+  .hero {
+    background: var(--crimson); color: #fff; border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 22px 26px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  }
+  .hero img { height: 56px; width: auto; display: block; }
+  .hero .hero-text h1 {
+    margin: 0; color: #fff; font-size: 40px; line-height: 1; text-transform: uppercase;
+  }
+  .hero .hero-text p { margin: 6px 0 0; color: rgba(255,255,255,.85); font-size: 15px; }
+  .matchup {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 16px;
+  }
+  .matchup h3 { margin: 0; font-size: 26px; }
+  .badge {
+    font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: #eee; color: #333;
+  }
+  .badge.date { background: rgba(40,100,168,.12); color: var(--blue); }
+  .pitcher-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap; padding: 14px 16px; border: 1px solid #e2e2e2;
+    border-radius: var(--radius); margin-bottom: 10px; background: #fff;
+    transition: box-shadow .15s, transform .05s;
+  }
+  .pitcher-row:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+  .pitcher-row .name { font-family: var(--font-display); font-weight: 600; font-size: 22px; }
+  .empty { color: #777; font-style: italic; }
+</style>
 
+<div class="hero">
+  <img src="{{ url_for('static', filename='reports/lmu-bsb.png') }}" alt="LMU Baseball">
+  <div class="hero-text">
+    <h1>Pitching Reports</h1>
+    <p>Pick a game, then download a pitcher's postgame report.</p>
+  </div>
+</div>
+
+<div class="card">
   <form method="get" action="{{ url_for('reports.pitching_landing') }}">
     <label for="game_id">Game</label>
-    <select name="game_id" id="game_id"
-            style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 15px;">
+    <select name="game_id" id="game_id">
       <option value="">— Select a game —</option>
       {% for g in games %}
         <option value="{{ g.game_id }}" {% if g.game_id == game_id %}selected{% endif %}>
@@ -17,33 +52,35 @@
         </option>
       {% endfor %}
     </select>
-    <button type="submit" class="btn" style="margin-top: 12px;">Show pitchers</button>
+    <button type="submit" class="btn" style="margin-top: 14px;">Show pitchers</button>
   </form>
 </div>
 
 {% if game_id is not none %}
 <div class="card" style="margin-top: 20px;">
   {% if selected_game %}
-    <h3 style="margin-top: 0;">
-      {{ selected_game.game_date }} · {{ selected_game.away_team }} @ {{ selected_game.home_team }}
-    </h3>
+    <div class="matchup">
+      <h3>{{ selected_game.away_team }} @ {{ selected_game.home_team }}</h3>
+      <span class="badge date">{{ selected_game.game_date }}</span>
+      {% if selected_game.season_label %}
+        <span class="badge">{{ selected_game.season_label }}{% if selected_game.game_type %} · {{ selected_game.game_type }}{% endif %}</span>
+      {% endif %}
+    </div>
   {% else %}
-    <h3 style="margin-top: 0;">Selected game</h3>
+    <div class="matchup"><h3>Selected game</h3></div>
   {% endif %}
 
   {% if pitchers %}
-    <ul>
-      {% for p in pitchers %}
-        <li style="margin: 8px 0;">
-          {{ p.display_name }} —
-          <a href="{{ url_for('reports.pitcher_pdf', game_id=game_id, pitcher_id=p.player_id) }}">
-            Download Game Report (PDF)
-          </a>
-        </li>
-      {% endfor %}
-    </ul>
+    {% for p in pitchers %}
+      <div class="pitcher-row">
+        <span class="name">{{ p.display_name }}</span>
+        <a class="btn" href="{{ url_for('reports.pitcher_pdf', game_id=game_id, pitcher_id=p.player_id) }}">
+          Download Report ↓
+        </a>
+      </div>
+    {% endfor %}
   {% else %}
-    <p>No pitchers found for this game.</p>
+    <p class="empty">No pitchers found for this game.</p>
   {% endif %}
 </div>
 {% endif %}

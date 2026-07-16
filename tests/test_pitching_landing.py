@@ -73,3 +73,12 @@ def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
     # a working link to the existing PDF route for each pitcher
     assert "/reports/pitcher/166/1.pdf" in body
     assert "/reports/pitcher/166/2.pdf" in body
+
+
+def test_landing_renders_hero_banner(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching")
+    body = resp.get_data(as_text=True)
+    assert "/static/reports/lmu-bsb.png" in body   # branded hero image
