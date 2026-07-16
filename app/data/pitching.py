@@ -533,3 +533,100 @@ def fig_heatmaps_by_pitch_type(df: pd.DataFrame) -> list:
         if len(sub) >= 3:
             items.append((pt, _heatmap(sub, pt)))
     return items
+
+
+# ============================ TABLE ASSEMBLERS ============================
+
+def _r1(x) -> float | None:
+    """Round to 1 dp, or None if NaN/empty."""
+    return None if x is None or pd.isna(x) else round(float(x), 1)
+
+
+def _metric_rows(df: pd.DataFrame, specs: list[tuple]) -> list[dict]:
+    rhh = df[df["batter_side"] == "Right"]
+    lhh = df[df["batter_side"] == "Left"]
+    rows = []
+    for label, key, fn in specs:
+        pct, cnt = fn(df)
+        rows.append({
+            "metric": label, "key": key,
+            "value_pct": pct, "value_count": cnt,
+            "vrhh": fn(rhh)[0], "vlhh": fn(lhh)[0],
+        })
+    return rows
+
+
+def process_metrics(df: pd.DataFrame) -> list[dict]:
+    return _metric_rows(df, [
+        ("Strike%", "strike_pct", strike_pct),
+        ("FPS%", "fps_pct", fps_pct),
+        ("E&A%", "ea_pct", ea_pct),
+        ("Pre2K%", "pre2k_pct", pre2k_pct),
+        ("2K Kill%", "twok_kill_pct", twok_kill_pct),
+    ])
+
+
+def outcome_metrics(df: pd.DataFrame) -> list[dict]:
+    return _metric_rows(df, [
+        ("K%", "k_pct", k_pct),
+        ("BB%", "bb_pct", bb_pct),
+        ("Barrel%", "barrel_pct", barrel_pct),
+    ])
+
+
+def pitch_usage_table(df: pd.DataFrame) -> list[dict]:
+    if df.empty:
+        return []
+    d = df.assign(_pt=pitch_type(df))
+    n = len(d)
+    n_r = len(d[d["batter_side"] == "Right"]) or 1
+    n_l = len(d[d["batter_side"] == "Left"]) or 1
+    n_2k = len(d[d["strikes"] == 2]) or 1
+    rows = []
+    for pt, sub in d.groupby("_pt"):
+        rows.append({
+            "pitch": pt,
+            "strike_pct": _pct(int(sub["pitch_call"].isin(_STRIKE_CALLS).sum()), len(sub)),
+            "usage_pct": _pct(len(sub), n),
+            # PROVISIONAL: share of the pitcher's 2-strike-count pitches that
+            # were this pitch type.
+            "twok_usage_pct": _pct(len(sub[sub["strikes"] == 2]), n_2k),
+            "vrhh": _pct(len(sub[sub["batter_side"] == "Right"]), n_r),
+            "vlhh": _pct(len(sub[sub["batter_side"] == "Left"]), n_l),
+            "_count": len(sub),
+        })
+    rows.sort(key=lambda r: r["_count"], reverse=True)
+    for r in rows:
+        del r["_count"]
+    return rows
+
+
+def movement_summary(df: pd.DataFrame) -> list[dict]:
+    if df.empty:
+        return []
+    d = df.assign(_pt=pitch_type(df))
+    rows = []
+    for pt, sub in d.groupby("_pt"):
+        rhh = sub[sub["batter_side"] == "Right"]
+        lhh = sub[sub["batter_side"] == "Left"]
+        # PROVISIONAL "Spread": std dev of total break magnitude (movement
+        # consistency), in inches.
+        mag = np.sqrt(sub["induced_vert_break"] ** 2 + sub["horz_break"] ** 2)
+        spread = float(mag.std(ddof=0)) if len(sub) > 1 else 0.0
+        rows.append({
+            "pitch": pt,
+            "velo_avg": _r1(sub["rel_speed"].mean()),
+            "velo_max": _r1(sub["rel_speed"].max()),
+            "ivb_avg": _r1(sub["induced_vert_break"].mean()),
+            "ivb_rhh": _r1(rhh["induced_vert_break"].mean()) if len(rhh) else None,
+            "ivb_lhh": _r1(lhh["induced_vert_break"].mean()) if len(lhh) else None,
+            "hb_avg": _r1(sub["horz_break"].mean()),
+            "hb_rhh": _r1(rhh["horz_break"].mean()) if len(rhh) else None,
+            "hb_lhh": _r1(lhh["horz_break"].mean()) if len(lhh) else None,
+            "spread": _r1(spread),
+            "_count": len(sub),
+        })
+    rows.sort(key=lambda r: r["_count"], reverse=True)
+    for r in rows:
+        del r["_count"]
+    return rows

@@ -59,3 +59,42 @@ def test_provisional_metrics_in_range_and_empty_safe():
         assert 0 <= pct <= 100 and cnt >= 0
         epct, ecnt = fn(df.iloc[0:0])
         assert epct == 0.0 and ecnt == 0
+
+
+def test_process_and_outcome_metric_rows():
+    df = _df()
+    proc = P.process_metrics(df)
+    assert [r["key"] for r in proc] == [
+        "strike_pct", "fps_pct", "ea_pct", "pre2k_pct", "twok_kill_pct"]
+    for r in proc:
+        assert set(r) >= {"metric", "key", "value_pct", "value_count", "vrhh", "vlhh"}
+        assert 0 <= r["value_pct"] <= 100
+    out = P.outcome_metrics(df)
+    assert [r["key"] for r in out] == ["k_pct", "bb_pct", "barrel_pct"]
+
+
+def test_pitch_usage_table_usage_sums_to_100():
+    rows = P.pitch_usage_table(_df())
+    assert len(rows) >= 1
+    assert abs(sum(r["usage_pct"] for r in rows) - 100.0) < 0.5
+    assert rows == sorted(rows, key=lambda r: r["usage_pct"], reverse=True)
+    for r in rows:
+        assert set(r) >= {"pitch", "strike_pct", "usage_pct", "twok_usage_pct",
+                          "vrhh", "vlhh"}
+
+
+def test_movement_summary_shape():
+    rows = P.movement_summary(_df())
+    assert len(rows) >= 1
+    for r in rows:
+        assert set(r) >= {"pitch", "velo_avg", "velo_max", "ivb_avg", "ivb_rhh",
+                          "ivb_lhh", "hb_avg", "hb_rhh", "hb_lhh", "spread"}
+        assert r["velo_max"] is None or r["velo_avg"] is None or \
+            r["velo_max"] >= r["velo_avg"]
+
+
+def test_table_assemblers_empty_safe():
+    empty = _df().iloc[0:0]
+    assert P.process_metrics(empty) and P.outcome_metrics(empty)  # rows still present
+    assert P.pitch_usage_table(empty) == []
+    assert P.movement_summary(empty) == []
