@@ -164,21 +164,48 @@ def recent_games(limit: int = 25) -> pd.DataFrame:
     )
 
 
-def pitchers_for_game(game_id: int) -> pd.DataFrame:
-    """Pitchers who appeared in a game (both teams), name-sorted.
+def pitchers_for_game(game_id: int, sort: str = "pitch") -> pd.DataFrame:
+    """Pitchers who appeared in a game (both teams).
 
-    Reads vw_game_pitchers (game_id, player_id, display_name). display_name is
-    already "Last, First".
+    Reads vw_game_pitchers (game_id, player_id, display_name; display_name is
+    already "Last, First"). `sort` picks the row order:
+      - "pitch" (default): order of appearance in the game — starter first,
+        last reliever last — by each pitcher's first pitch. pitch_no is
+        game-global sequential, so MIN(pitch_no) is the entry order.
+      - "alpha": alphabetical by display_name.
+    Any value other than "alpha" is treated as "pitch".
     """
+    order_by = (
+        "v.display_name" if sort == "alpha" else
+        "(SELECT MIN(f.pitch_no) FROM fact_tm_game_pitch f "
+        " WHERE f.game_id = v.game_id AND f.pitcher_id = v.player_id)"
+    )
     return query_df(
-        """
-        SELECT game_id, player_id, display_name
-          FROM vw_game_pitchers
-         WHERE game_id = :gid
-         ORDER BY display_name
+        f"""
+        SELECT v.game_id, v.player_id, v.display_name
+          FROM vw_game_pitchers v
+         WHERE v.game_id = :gid
+         ORDER BY {order_by}
         """,
         {"gid": game_id},
     )
+
+
+def report_data_version(pitcher_id: int) -> str:
+    """A token that changes when a pitcher gets new data, for report caching.
+
+    The postgame report's season velo-trend spans every game, so a cached PDF
+    would go stale once the pitcher throws again. Keying the cache on the
+    pitcher's latest trend game_date means new data yields a new key (rebuild),
+    while an unchanged pitcher serves the cache. Returns "none" if the pitcher
+    has no trend rows yet.
+    """
+    df = query_df(
+        "SELECT MAX(game_date) AS v FROM vw_pitcher_velo_trend WHERE pitcher_id = :pid",
+        {"pid": pitcher_id},
+    )
+    v = df.iloc[0]["v"] if not df.empty else None
+    return "none" if v is None or pd.isna(v) else str(v)
 
 
 # ============================ TRANSFORMS ==================================

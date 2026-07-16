@@ -62,7 +62,7 @@ def test_landing_lists_games(app_ctx, monkeypatch):
 def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
     monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
     monkeypatch.setattr("app.data.pitching.pitchers_for_game",
-                        lambda gid: _PITCHERS)
+                        lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching?game_id=166")
@@ -73,6 +73,37 @@ def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
     # a working link to the existing PDF route for each pitcher
     assert "/reports/pitcher/166/1.pdf" in body
     assert "/reports/pitcher/166/2.pdf" in body
+
+
+def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+                        lambda gid, sort="pitch": _PITCHERS)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching?game_id=166")
+    body = resp.get_data(as_text=True)
+    # Both sort toggles are present, linking back to the same game.
+    assert "sort=pitch" in body and "sort=alpha" in body
+    # Default sort is pitch order -> that toggle is the active one.
+    assert 'seg-opt active' in body
+    import re
+    active = re.search(r'class="seg-opt active"[^>]*>([^<]+)<', body)
+    assert active and "Pitch order" in active.group(1)
+
+
+def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    seen = {}
+    def _fake(gid, sort="pitch"):
+        seen["sort"] = sort
+        return _PITCHERS
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game", _fake)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching?game_id=166&sort=alpha")
+    assert resp.status_code == 200
+    assert seen["sort"] == "alpha"
 
 
 def test_landing_renders_hero_banner(app_ctx, monkeypatch):

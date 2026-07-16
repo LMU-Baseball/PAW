@@ -31,6 +31,25 @@
   .pitcher-row .name { font-family: var(--font-display); font-weight: 600; font-size: 22px; }
   .empty { color: #777; font-style: italic; }
   .hint { color: #777; font-size: 14px; margin: 0 0 14px; }
+  /* Filter bar — a reusable row of controls; add more filters here over time. */
+  .filter-bar {
+    display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap;
+    background: #fff; border: 1px solid #e2e2e2; border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 12px 18px; margin-top: 20px;
+  }
+  .filter-group { display: flex; align-items: center; gap: 10px; }
+  .filter-label {
+    font-family: var(--font-display); font-weight: 600; font-size: 16px;
+    letter-spacing: .5px; text-transform: uppercase; color: #444;
+  }
+  .seg { display: inline-flex; border: 1px solid var(--crimson); border-radius: var(--radius); overflow: hidden; }
+  .seg-opt {
+    padding: 7px 14px; font-size: 14px; font-weight: 600; text-decoration: none;
+    color: var(--crimson); background: #fff; transition: background .15s, color .15s;
+  }
+  .seg-opt + .seg-opt { border-left: 1px solid var(--crimson); }
+  .seg-opt:hover { background: rgba(154,0,33,.08); }
+  .seg-opt.active { background: var(--crimson); color: #fff; }
 </style>
 
 <div class="hero">
@@ -57,8 +76,22 @@
   </form>
 </div>
 
+{% if game_id is not none and pitchers %}
+<div class="filter-bar">
+  <div class="filter-group">
+    <span class="filter-label">Sort pitchers</span>
+    <div class="seg">
+      <a class="seg-opt {% if sort == 'pitch' %}active{% endif %}"
+         href="{{ url_for('reports.pitching_landing', game_id=game_id, sort='pitch') }}">Pitch order</a>
+      <a class="seg-opt {% if sort == 'alpha' %}active{% endif %}"
+         href="{{ url_for('reports.pitching_landing', game_id=game_id, sort='alpha') }}">Alphabetical</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if game_id is not none %}
-<div class="card" style="margin-top: 20px;">
+<div class="card" style="margin-top: 14px;">
   {% if selected_game %}
     <div class="matchup">
       <h3>{{ selected_game.away_team }} @ {{ selected_game.home_team }}</h3>
@@ -72,7 +105,7 @@
   {% endif %}
 
   {% if pitchers %}
-    <p class="hint">Reports open in a new tab and take ~30 seconds to generate — the file downloads when it's ready.</p>
+    <p class="hint">Reports open in a new tab — the first build takes several seconds, then it downloads instantly next time.</p>
     {% for p in pitchers %}
       <div class="pitcher-row">
         <span class="name">{{ p.display_name }}</span>

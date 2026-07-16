@@ -15,6 +15,9 @@ def pitching_landing():
     """Pick a recent game, then download any of that game's pitcher reports."""
     games = P.recent_games(limit=25)
     game_id = request.args.get("game_id", type=int)
+    sort = request.args.get("sort", "pitch")
+    if sort not in ("pitch", "alpha"):
+        sort = "pitch"
 
     selected = None
     pitchers = None
@@ -22,7 +25,7 @@ def pitching_landing():
         match = games[games["game_id"] == game_id]
         if not match.empty:
             selected = match.iloc[0].to_dict()
-        pitchers = P.pitchers_for_game(game_id).to_dict("records")
+        pitchers = P.pitchers_for_game(game_id, sort=sort).to_dict("records")
 
     return render_template(
         "reports/pitching_landing.html",
@@ -30,6 +33,7 @@ def pitching_landing():
         game_id=game_id,
         selected_game=selected,
         pitchers=pitchers,
+        sort=sort,
     )
 
 

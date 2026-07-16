@@ -2,17 +2,24 @@
 from __future__ import annotations
 
 import base64
+import os
 import re
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.data import pitching as P
-from app.reports.charts import fig_to_data_uri
+from app.reports.charts import fig_to_data_uri, rendering_session
 from app.reports.pdf import html_to_pdf
 
 _DIR = Path(__file__).resolve().parent
 _STATIC = _DIR / "static"
+# On-disk PDF cache. A report is ~identical for a given (game_id, pitcher_id)
+# until the pitcher gets new data (which shifts the season velo-trend), so the
+# cache key includes a data-version token. Override the location with
+# PAW_REPORT_CACHE_DIR (tests point this at a tmp dir).
+_CACHE_DIR = Path(os.environ.get(
+    "PAW_REPORT_CACHE_DIR", str(_DIR.parents[1] / "instance" / "report_cache")))
 # report.css lives in app/reports/static/, but the shared static assets it
 # references (Teko-*.ttf, lmu.png) live in app/static/reports/.
 _ASSETS_DIR = _DIR.parents[0] / "static" / "reports"
@@ -63,17 +70,20 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     recent = P.recent_outings(pitcher_id, game_id, n=5)
     trend = P.velo_trend(pitcher_id)
 
-    charts = {
-        "velo_inning": fig_to_data_uri(P.fig_velo_by_inning(df)),
-        "velo_pitch": fig_to_data_uri(P.fig_velo_by_pitch(df)),
-        "movement": fig_to_data_uri(P.fig_movement(df)),
-        "location": fig_to_data_uri(P.fig_location(df)),
-        "velo_trend": fig_to_data_uri(P.fig_velo_trend(trend)),
-        "location_split": fig_to_data_uri(P.fig_location_split(df)),
-        "heatmap_overall": fig_to_data_uri(P.fig_heatmap_overall(df)),
-    }
-    heatmaps = [(label, fig_to_data_uri(fig))
-                for label, fig in P.fig_heatmaps_by_pitch_type(df)]
+    # Render every chart inside one headless-Chrome session (see charts.py) so
+    # the ~9 figures don't each cold-start Chrome (~30s -> ~5s for the batch).
+    with rendering_session():
+        charts = {
+            "velo_inning": fig_to_data_uri(P.fig_velo_by_inning(df)),
+            "velo_pitch": fig_to_data_uri(P.fig_velo_by_pitch(df)),
+            "movement": fig_to_data_uri(P.fig_movement(df)),
+            "location": fig_to_data_uri(P.fig_location(df)),
+            "velo_trend": fig_to_data_uri(P.fig_velo_trend(trend)),
+            "location_split": fig_to_data_uri(P.fig_location_split(df)),
+            "heatmap_overall": fig_to_data_uri(P.fig_heatmap_overall(df)),
+        }
+        heatmaps = [(label, fig_to_data_uri(fig))
+                    for label, fig in P.fig_heatmaps_by_pitch_type(df)]
 
     # Each side's `usage` is a DataFrame from pitch_usage(); the template
     # iterates it as records, so convert here (mirrors every other table).
@@ -101,8 +111,28 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     )
 
 
+def _cache_path(game_id: int, pitcher_id: int, version: str) -> Path:
+    safe = re.sub(r"[^0-9A-Za-z._-]", "_", version)
+    return _CACHE_DIR / f"pitcher_{pitcher_id}_game_{game_id}_{safe}.pdf"
+
+
 def build_pitcher_postgame(game_id: int, pitcher_id: int) -> bytes:
+    # Serve a cached PDF when one exists for this exact data version. The
+    # version token advances when the pitcher gets new data, so a cached report
+    # can never show a stale season velo-trend — it just rebuilds.
+    version = P.report_data_version(pitcher_id)
+    cache_file = _cache_path(game_id, pitcher_id, version)
+    if cache_file.exists():
+        return cache_file.read_bytes()
+
     html = _build_html(game_id, pitcher_id)
     # No base_url needed: fonts and the logo are inlined as data: URIs
     # (see _inline_fonts docstring), and chart images already are too.
-    return html_to_pdf(html)
+    pdf = html_to_pdf(html)
+
+    try:  # cache is best-effort; a write failure must not fail the download
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file.write_bytes(pdf)
+    except OSError:
+        pass
+    return pdf

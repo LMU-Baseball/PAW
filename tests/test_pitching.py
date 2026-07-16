@@ -154,3 +154,22 @@ def test_pitchers_for_game_lists_known_pitcher():
     assert (df["game_id"] == GAME_ID).all()
     assert {"player_id", "display_name"}.issubset(df.columns)
     assert PITCHER_ID in set(df["player_id"])
+
+
+def test_pitchers_for_game_alpha_sorts_by_name():
+    df = P.pitchers_for_game(GAME_ID, sort="alpha")
+    assert list(df["display_name"]) == sorted(df["display_name"])
+
+
+def test_pitchers_for_game_pitch_order_is_by_first_pitch():
+    """Pitch-order sort must rank pitchers by when they entered the game."""
+    from app.db import query_df
+    df = P.pitchers_for_game(GAME_ID, sort="pitch")
+    assert len(df) >= 2  # need at least two to have a meaningful order
+    firsts = query_df(
+        "SELECT pitcher_id, MIN(pitch_no) AS fp "
+        "FROM fact_tm_game_pitch WHERE game_id = :g GROUP BY pitcher_id",
+        {"g": GAME_ID},
+    ).set_index("pitcher_id")["fp"].to_dict()
+    seq = [firsts[pid] for pid in df["player_id"] if pid in firsts]
+    assert seq == sorted(seq)  # non-decreasing first-pitch order
