@@ -1,0 +1,81 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>{{ css }}</style></head>
+<body>
+<div class="pg">
+
+  <div class="hdr">
+    <img class="hdr-lmu" src="{{ assets.lmu_png }}" alt="LMU">
+    <div class="hdr-id">
+      <div class="hdr-name">{{ pitcher }} ({{ hand }})</div>
+      <div class="hdr-game">
+        {{ context.game_date }} &nbsp;|&nbsp; vs {{ context.away_team if context.lmu_is_home else context.home_team }}
+        {% if context.game_type %} &nbsp;|&nbsp; {{ context.game_type }}{% endif %}
+      </div>
+    </div>
+    <div class="hdr-line">
+      <span><b>{{ line.bf }}</b> ({{ line.bf_r }}/{{ line.bf_l }})<i>BF (R/L)</i></span>
+      <span><b>{{ line.outs }}</b><i>OUTS</i></span>
+      <span><b>{{ line.h }}</b><i>H</i></span>
+      <span><b>{{ line.r }}</b><i>R</i></span>
+      <span><b>{{ line.bb }}</b><i>BB</i></span>
+      <span><b>{{ line.so }}</b><i>SO</i></span>
+      <span><b>{{ line.pitches }}</b><i>PITCHES</i></span>
+    </div>
+    <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
+  </div>
+
+  <div class="grid2">
+    {% macro metric_table(title, rows) %}
+    <div class="panel">
+      <div class="panel-t">{{ title }}</div>
+      <table>
+        <tr><th>Metric</th><th>Value</th><th>Goal</th><th>vRHH</th><th>vLHH</th></tr>
+        {% for r in rows %}
+        <tr>
+          <td class="l">{{ r.metric }}</td>
+          <td><span class="chip {{ 'good' if r.beats else ('bad' if r.beats is false else '') }}">{{ r.value_pct }}% ({{ r.value_count }})</span></td>
+          <td>{{ (r.goal|round(0)|int ~ '%') if r.goal is not none else '—' }}</td>
+          <td>{{ r.vrhh }}%</td><td>{{ r.vlhh }}%</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endmacro %}
+    {{ metric_table("Process Metrics", process) }}
+    {{ metric_table("Outcome Metrics", outcome) }}
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="panel-t">Pitch Usage</div>
+      <table>
+        <tr><th class="l">Pitch Type</th><th>Strike%</th><th>Usage</th><th>2K Usage</th><th>vRHH</th><th>vLHH</th></tr>
+        {% for r in usage %}
+        <tr><td class="l">{{ r.pitch }}</td><td>{{ r.strike_pct }}%</td><td>{{ r.usage_pct }}%</td>
+            <td>{{ r.twok_usage_pct }}%</td><td>{{ r.vrhh }}%</td><td>{{ r.vlhh }}%</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-t">Movement Summary</div>
+      <table>
+        <tr><th class="l">Pitch</th><th>Velo</th><th>Vert Break</th><th>Horiz Break</th><th>Spread</th></tr>
+        {% for r in movement %}
+        <tr><td class="l">{{ r.pitch }}</td>
+            <td>{{ r.velo_avg if r.velo_avg is not none else '—' }} ({{ r.velo_max if r.velo_max is not none else '—' }})</td>
+            <td>{{ r.ivb_avg if r.ivb_avg is not none else '—' }} ({{ r.ivb_rhh if r.ivb_rhh is not none else '—' }}/{{ r.ivb_lhh if r.ivb_lhh is not none else '—' }})</td>
+            <td>{{ r.hb_avg if r.hb_avg is not none else '—' }} ({{ r.hb_rhh if r.hb_rhh is not none else '—' }}/{{ r.hb_lhh if r.hb_lhh is not none else '—' }})</td>
+            <td>{{ r.spread if r.spread is not none else '—' }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  <div class="grid3">
+    <div class="panel plot"><img src="{{ charts.zone_rhh }}" alt="vRHH Zone"></div>
+    <div class="panel plot"><img src="{{ charts.movement }}" alt="Movement Map"></div>
+    <div class="panel plot"><img src="{{ charts.zone_lhh }}" alt="vLHH Zone"></div>
+  </div>
+
+</div>
+</body></html>
