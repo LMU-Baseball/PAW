@@ -19,7 +19,7 @@ from app.data.pitching import pitch_type
 
 # Strike zone (approx, feet)
 _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)
-_PALETTE = ["#9A0021", "#2864a8", "#2e8b57", "#e08a1e", "#6a4c93",
+_PALETTE = ["#AB0C2F", "#2864a8", "#2e8b57", "#e08a1e", "#6a4c93",
             "#00897b", "#c2185b", "#555555"]
 
 # Stable color per pitch-type NAME so the same pitch renders identically across
@@ -29,7 +29,7 @@ _PALETTE = ["#9A0021", "#2864a8", "#2e8b57", "#e08a1e", "#6a4c93",
 # is a warm orange (was too close to crimson before); Sinker moved to brown so it
 # doesn't collide with ChangeUp.
 _PITCH_COLOR = {
-    "Fastball": "#9A0021", "Four-Seam": "#9A0021", "FourSeamFastBall": "#9A0021",
+    "Fastball": "#AB0C2F", "Four-Seam": "#AB0C2F", "FourSeamFastBall": "#AB0C2F",
     "Sinker": "#7a5230", "TwoSeamFastBall": "#7a5230",
     "Cutter": "#6a4c93",
     "Slider": "#2864a8", "Sweeper": "#00897b",
@@ -94,7 +94,7 @@ def zone_chart_uri(df, batter_side: str, title: str) -> str:
     ax.set_aspect("equal")
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title(title, fontsize=11, color="#9A0021", fontweight="bold")
+    ax.set_title(title, fontsize=11, color="#AB0C2F", fontweight="bold")
     return _fig_to_uri(fig)
 
 
@@ -150,5 +150,5 @@ def movement_map_uri(df, title: str = "Movement Map") -> str:
     ax.set_xlabel("HB (in)", fontsize=8)
     ax.set_ylabel("IVB (in)", fontsize=8)
     ax.tick_params(labelsize=7)
-    ax.set_title(title, fontsize=11, color="#9A0021", fontweight="bold")
+    ax.set_title(title, fontsize=11, color="#AB0C2F", fontweight="bold")
     return _fig_to_uri(fig)

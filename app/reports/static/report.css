@@ -5,7 +5,7 @@
 body { font-family: 'Teko', Arial, sans-serif; color: #111; margin: 0; }
 .pg { width: 100%; }
 
-.hdr { display: flex; align-items: center; gap: 14px; background: #9A0021;
+.hdr { display: flex; align-items: center; gap: 14px; background: #AB0C2F;
        color: #fff; border-radius: 8px; padding: 10px 16px; }
 .hdr-lmu { height: 54px; }
 .hdr-lion { height: 54px; margin-left: 8px; }
@@ -23,7 +23,7 @@ body { font-family: 'Teko', Arial, sans-serif; color: #111; margin: 0; }
 .grid3 > .panel { flex: 1; }
 
 .panel { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-.panel-t { background: #f2f2f2; color: #9A0021; font-weight: 700; font-size: 16px;
+.panel-t { background: #f2f2f2; color: #AB0C2F; font-weight: 700; font-size: 16px;
            padding: 5px 10px; border-bottom: 1px solid #ddd; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid #eee; padding: 4px 8px; text-align: center; }
@@ -34,10 +34,10 @@ td.l, th.l { text-align: left; }
         background: #eef2f7; font-weight: 700; }
 /* 4-tier chip coloring in the school colors (crimson + royal blue), not green.
    Blue = met goal, red = missed; the darker/solid fill = by a wide margin. */
-.chip.good        { background: #d6e4f5; color: #1e4d8c; }  /* barely met goal   */
-.chip.good-strong { background: #1e4d8c; color: #fff;    }  /* exceeded goal      */
+.chip.good        { background: #d6e4f5; color: #005e84; }  /* barely met goal   */
+.chip.good-strong { background: #005e84; color: #fff;    }  /* exceeded goal      */
 .chip.bad         { background: #fbe3e3; color: #a3271f; }  /* barely missed goal */
-.chip.bad-strong  { background: #9A0021; color: #fff;    }  /* badly missed goal  */
+.chip.bad-strong  { background: #AB0C2F; color: #fff;    }  /* badly missed goal  */
 /* Pitch-type names carry the chart color (tables double as the chart legend). */
 td.pt { font-weight: 700; }
 .plot { display: flex; align-items: center; justify-content: center; padding: 4px; }
