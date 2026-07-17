@@ -16,6 +16,31 @@ def build_hitting_dash(server) -> Dash:
         title="Hitting — The PAW",
     )
 
+    # Dash renders its own HTML shell (it does not extend base.html), so mirror
+    # the site's lion favicon + full-page light-crimson palms background here.
+    dash_app.index_string = """<!DOCTYPE html>
+<html>
+<head>
+{%metas%}
+<title>{%title%}</title>
+<link rel="icon" type="image/png" href="/static/reports/lion.png">
+{%css%}
+<style>
+  body {
+    margin: 0; min-height: 100vh;
+    background-color: #f5dfe3;
+    background-image: url('/static/brand/palms-crimson.png');
+    background-repeat: no-repeat; background-position: center bottom;
+    background-size: cover; background-attachment: fixed;
+  }
+</style>
+</head>
+<body>
+{%app_entry%}
+<footer>{%config%}{%scripts%}{%renderer%}</footer>
+</body>
+</html>"""
+
     def serve_layout():
         # Rendered per request, so current_user reflects the logged-in user.
         if not current_user.is_authenticated:

@@ -22,13 +22,8 @@
   }
   .home-hero .welcome strong { color: #fff; }
 
-  .modules-section { position: relative; margin-top: 26px; padding-bottom: 40px; }
-  .palms {
-    position: absolute; left: 0; right: 0; bottom: 0; width: 100%;
-    opacity: .12; pointer-events: none; z-index: 0;
-  }
+  .modules-section { margin-top: 26px; }
   .modules {
-    position: relative; z-index: 1;
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
   }
   @media (max-width: 720px) { .modules { grid-template-columns: 1fr; } }
@@ -64,7 +59,6 @@
 </section>
 
 <div class="modules-section">
-  <img class="palms" src="{{ url_for('static', filename='brand/palms.png') }}" alt="" aria-hidden="true">
   <div class="modules">
     <a class="module" href="/dash/hitting/">
       <h3>Hitting</h3>

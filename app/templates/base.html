@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}The PAW — LMU Baseball{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='reports/lion.png') }}">
   <style>
     @font-face {
       font-family: "Teko"; font-weight: 400; font-display: swap;
@@ -28,13 +29,25 @@
     :root {
       --crimson: #AB0C2F; --crimson-dark: #8a0a26;
       --blue: #0076A5; --blue-dark: #005e84;
-      --bg: #f5f5f5; --ink: #1a1a1a;
+      --bg: #f5dfe3; --ink: #1a1a1a;
       --radius: 8px; --shadow: 0 2px 8px rgba(0,0,0,.08);
       --font-display: "Teko", system-ui, sans-serif;
       --font-marquee: "Alfa Slab One", Georgia, serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; color: var(--ink); background: var(--bg); }
+    /* Full-page light-crimson field with a subtle palm-silhouette motif. The
+       background-color always fills the page (no white gaps); the fixed palms
+       image stays anchored to the viewport bottom on every page that extends
+       this shell. */
+    body {
+      margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; color: var(--ink);
+      background-color: var(--bg);
+      background-image: url("{{ url_for('static', filename='brand/palms-crimson.png') }}");
+      background-repeat: no-repeat;
+      background-position: center bottom;
+      background-size: cover;
+      background-attachment: fixed;
+    }
     header.bar {
       background: var(--crimson); color: #fff; padding: 0 20px; height: 64px;
       display: flex; align-items: center; justify-content: space-between;
