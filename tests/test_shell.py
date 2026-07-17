@@ -38,3 +38,16 @@ def test_shell_defines_design_tokens():
     body = resp.get_data(as_text=True)
     assert "--crimson" in body
     assert "--font-display" in body
+
+
+def test_shell_loads_alfa_slab_locally_not_cdn():
+    body = _app().test_client().get("/login").get_data(as_text=True)
+    assert "/static/brand/AlfaSlabOne-Regular.ttf" in body
+    assert "fonts.googleapis.com" not in body
+    assert "fonts.gstatic.com" not in body
+
+
+def test_shell_uses_official_lmu_colors():
+    body = _app().test_client().get("/login").get_data(as_text=True)
+    assert "#AB0C2F" in body   # official LMU Crimson
+    assert "#0076A5" in body   # official LMU Blue
