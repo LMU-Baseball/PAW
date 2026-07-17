@@ -98,7 +98,8 @@ def test_login_required_redirects(client):
 def test_login_success(client):
     resp = _login(client, "coach@lmu.edu", "pw-coach")
     assert resp.status_code == 200
-    assert b"Welcome, Coach K" in resp.data
+    # Home hero greets the user; the name is wrapped in markup, so match the name.
+    assert b"Coach K" in resp.data
 
 
 def test_login_bad_password(client):
@@ -115,7 +116,7 @@ def test_logout(client):
 
 def test_email_case_insensitive(client):
     resp = _login(client, "COACH@LMU.EDU", "pw-coach")
-    assert b"Welcome, Coach K" in resp.data
+    assert b"Coach K" in resp.data
 
 
 def test_open_redirect_blocked(client):
