@@ -1,4 +1,7 @@
 """Tests for the pitching-report landing page (game picker -> pitcher links)."""
+import io
+import zipfile
+
 import pandas as pd
 import pytest
 
@@ -104,6 +107,67 @@ def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
     resp = client.get("/reports/pitching?game_id=166&sort=alpha")
     assert resp.status_code == 200
     assert seen["sort"] == "alpha"
+
+
+def test_landing_shows_download_all_button(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+                        lambda gid, sort="pitch": _PITCHERS)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching?game_id=166")
+    body = resp.get_data(as_text=True)
+    assert "/reports/pitching/166/all.zip" in body   # bundle route
+    assert "Download All (2)" in body                # counts the pitchers shown
+
+
+def test_download_all_zip_bundles_reports(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+                        lambda gid, sort="pitch": _PITCHERS)
+    monkeypatch.setattr("app.reports.routes.build_pitcher_postgame",
+                        lambda gid, pid: f"PDF-{gid}-{pid}".encode())
+    monkeypatch.setattr(
+        "app.data.pitching.game_context",
+        lambda gid: {"game_date": "2026-05-10", "home_team": "LMU",
+                     "away_team": "SMC", "lmu_is_home": True})
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching/166/all.zip?sort=alpha")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    assert "vs_SMC" in resp.headers["Content-Disposition"]
+    zf = zipfile.ZipFile(io.BytesIO(resp.get_data()))
+    names = zf.namelist()
+    assert len(names) == 2
+    assert any("Laine" in n for n in names)
+    assert zf.read(names[0]).startswith(b"PDF-166-")
+
+
+def test_download_all_respects_per_pitcher_access(app_ctx, monkeypatch):
+    """A user only gets reports they're allowed to view (player self-only)."""
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+                        lambda gid, sort="pitch": _PITCHERS)
+    monkeypatch.setattr("app.reports.routes.build_pitcher_postgame",
+                        lambda gid, pid: f"PDF-{pid}".encode())
+    monkeypatch.setattr("app.reports.routes.can_view_pitcher_report",
+                        lambda user, pid: pid == 1)  # only Laine viewable
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching/166/all.zip")
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.get_data()))
+    assert len(zf.namelist()) == 1
+
+
+def test_download_all_404_when_nothing_viewable(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+                        lambda gid, sort="pitch": _PITCHERS)
+    monkeypatch.setattr("app.reports.routes.can_view_pitcher_report",
+                        lambda user, pid: False)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/pitching/166/all.zip")
+    assert resp.status_code == 404
 
 
 def test_landing_renders_hero_banner(app_ctx, monkeypatch):

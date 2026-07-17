@@ -1,5 +1,5 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><style>{{ css }}</style></head>
+<html><head><meta charset="utf-8"><style>{{ css|safe }}</style></head>
 <body>
 <div class="pg">
 
@@ -9,11 +9,9 @@
       <div class="hdr-name">{{ pitcher }} ({{ hand }})</div>
       <div class="hdr-game">
         {{ context.game_date }} &nbsp;|&nbsp; vs {{ context.away_team if context.lmu_is_home else context.home_team }}
-        {% if context.game_type %} &nbsp;|&nbsp; {{ context.game_type }}{% endif %}
       </div>
     </div>
     <div class="hdr-line">
-      <span><b>{{ line.bf }}</b> ({{ line.bf_r }}/{{ line.bf_l }})<i>BF (R/L)</i></span>
       <span><b>{{ line.outs }}</b><i>OUTS</i></span>
       <span><b>{{ line.h }}</b><i>H</i></span>
       <span><b>{{ line.r }}</b><i>R</i></span>
@@ -24,23 +22,23 @@
     <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
   </div>
 
-  <div class="grid2">
-    {% macro metric_table(title, rows) %}
+  {% macro metric_table(title, rows) %}
     <div class="panel">
       <div class="panel-t">{{ title }}</div>
       <table>
-        <tr><th>Metric</th><th>Value</th><th>Goal</th><th>vRHH</th><th>vLHH</th></tr>
+        <tr><th class="l">Metric</th><th>Value</th><th>Goal</th><th>vRHH</th><th>vLHH</th></tr>
         {% for r in rows %}
         <tr>
           <td class="l">{{ r.metric }}</td>
-          <td><span class="chip {{ 'good' if r.beats else ('bad' if r.beats is false else '') }}">{{ r.value_pct }}% ({{ r.value_count }})</span></td>
+          <td><span class="chip {{ r.chip }}">{{ r.value_pct }}% ({{ r.value_count }})</span></td>
           <td>{{ (r.goal|round(0)|int ~ '%') if r.goal is not none else '—' }}</td>
           <td>{{ r.vrhh }}%</td><td>{{ r.vlhh }}%</td>
         </tr>
         {% endfor %}
       </table>
     </div>
-    {% endmacro %}
+  {% endmacro %}
+  <div class="grid2">
     {{ metric_table("Process Metrics", process) }}
     {{ metric_table("Outcome Metrics", outcome) }}
   </div>
@@ -51,7 +49,7 @@
       <table>
         <tr><th class="l">Pitch Type</th><th>Strike%</th><th>Usage</th><th>2K Usage</th><th>vRHH</th><th>vLHH</th></tr>
         {% for r in usage %}
-        <tr><td class="l">{{ r.pitch }}</td><td>{{ r.strike_pct }}%</td><td>{{ r.usage_pct }}%</td>
+        <tr><td class="l pt" style="color: {{ pitch_colors.get(r.pitch, '#111') }};">{{ r.pitch }}</td><td>{{ r.strike_pct }}%</td><td>{{ r.usage_pct }}%</td>
             <td>{{ r.twok_usage_pct }}%</td><td>{{ r.vrhh }}%</td><td>{{ r.vlhh }}%</td></tr>
         {% endfor %}
       </table>
@@ -61,7 +59,7 @@
       <table>
         <tr><th class="l">Pitch</th><th>Velo</th><th>Vert Break</th><th>Horiz Break</th><th>Spread</th></tr>
         {% for r in movement %}
-        <tr><td class="l">{{ r.pitch }}</td>
+        <tr><td class="l pt" style="color: {{ pitch_colors.get(r.pitch, '#111') }};">{{ r.pitch }}</td>
             <td>{{ r.velo_avg if r.velo_avg is not none else '—' }} ({{ r.velo_max if r.velo_max is not none else '—' }})</td>
             <td>{{ r.ivb_avg if r.ivb_avg is not none else '—' }} ({{ r.ivb_rhh if r.ivb_rhh is not none else '—' }}/{{ r.ivb_lhh if r.ivb_lhh is not none else '—' }})</td>
             <td>{{ r.hb_avg if r.hb_avg is not none else '—' }} ({{ r.hb_rhh if r.hb_rhh is not none else '—' }}/{{ r.hb_lhh if r.hb_lhh is not none else '—' }})</td>

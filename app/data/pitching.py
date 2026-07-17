@@ -13,6 +13,11 @@ import plotly.graph_objects as go
 from app.db import query_df
 
 LMU_TEAM_ID = 78  # tm_team.team_name='LMU'; stable id (no collisions among teams)
+# Trackman's PitcherTeam/BatterTeam code for LMU in fact_tm_game_pitch. The fact
+# table stores the raw Trackman team abbreviation (e.g. 'SAN_TOR' for USD), not a
+# team_id, so LMU pitchers are identified by this string. Verified live: LMU is
+# the only 'LOY_LIO' in the warehouse (same code the hitting queries use).
+LMU_PITCHER_TEAM = "LOY_LIO"
 PITCH_TYPE_COL = "tagged_pitch_type"
 
 
@@ -165,7 +170,10 @@ def recent_games(limit: int = 25) -> pd.DataFrame:
 
 
 def pitchers_for_game(game_id: int, sort: str = "pitch") -> pd.DataFrame:
-    """Pitchers who appeared in a game (both teams).
+    """LMU pitchers who appeared in a game.
+
+    These reports are for LMU pitchers only, so opponents are filtered out via
+    fact_tm_game_pitch.pitcher_team = LMU_PITCHER_TEAM ('LOY_LIO').
 
     Reads vw_game_pitchers (game_id, player_id, display_name; display_name is
     already "Last, First"). `sort` picks the row order:
@@ -185,9 +193,14 @@ def pitchers_for_game(game_id: int, sort: str = "pitch") -> pd.DataFrame:
         SELECT v.game_id, v.player_id, v.display_name
           FROM vw_game_pitchers v
          WHERE v.game_id = :gid
+           AND EXISTS (
+                 SELECT 1 FROM fact_tm_game_pitch f
+                  WHERE f.game_id = v.game_id
+                    AND f.pitcher_id = v.player_id
+                    AND f.pitcher_team = :lmu)
          ORDER BY {order_by}
         """,
-        {"gid": game_id},
+        {"gid": game_id, "lmu": LMU_PITCHER_TEAM},
     )
 
 

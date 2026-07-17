@@ -87,6 +87,12 @@
          href="{{ url_for('reports.pitching_landing', game_id=game_id, sort='alpha') }}">Alphabetical</a>
     </div>
   </div>
+  <div class="filter-group" style="margin-left: auto;">
+    <a class="btn" target="_blank" rel="noopener"
+       href="{{ url_for('reports.pitching_all_zip', game_id=game_id, sort=sort) }}">
+      Download All ({{ pitchers|length }}) ↓
+    </a>
+  </div>
 </div>
 {% endif %}
 
@@ -105,7 +111,7 @@
   {% endif %}
 
   {% if pitchers %}
-    <p class="hint">Reports open in a new tab — the first build takes several seconds, then it downloads instantly next time.</p>
+    <p class="hint">Reports open in a new tab — the first build takes several seconds, then it downloads instantly next time. <strong>Download All</strong> bundles every pitcher below into one ZIP (give it a few seconds the first time).</p>
     {% for p in pitchers %}
       <div class="pitcher-row">
         <span class="name">{{ p.display_name }}</span>

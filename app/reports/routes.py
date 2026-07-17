@@ -1,4 +1,8 @@
 """Report download routes."""
+import io
+import re
+import zipfile
+
 from flask import Blueprint, Response, abort, render_template, request
 from flask_login import current_user, login_required
 
@@ -7,6 +11,11 @@ from app.data import pitching as P
 from app.reports.pitcher_postgame import ReportDataError, build_pitcher_postgame
 
 report_bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+
+def _safe(text: str) -> str:
+    """Filesystem-safe slug for a filename fragment."""
+    return re.sub(r"[^0-9A-Za-z._-]+", "_", str(text)).strip("_") or "report"
 
 
 @report_bp.route("/pitching")
@@ -50,4 +59,59 @@ def pitcher_pdf(game_id: int, pitcher_id: int):
         pdf, mimetype="application/pdf",
         headers={"Content-Disposition":
                  f'attachment; filename="pitcher_{pitcher_id}_game_{game_id}.pdf"'},
+    )
+
+
+@report_bp.route("/pitching/<int:game_id>/all.zip")
+@login_required
+def pitching_all_zip(game_id: int):
+    """Download every viewable LMU pitcher report for a game as one ZIP.
+
+    Uses the same LMU-only picker list and the same per-pitcher access gate as
+    the individual downloads, so a coach gets the whole game and a player gets
+    only their own outing. Reports build one at a time (cached after the first
+    build), so the first "Download All" for a game can take several seconds.
+    """
+    sort = request.args.get("sort", "pitch")
+    if sort not in ("pitch", "alpha"):
+        sort = "pitch"
+
+    pitchers = P.pitchers_for_game(game_id, sort=sort).to_dict("records")
+    viewable = [p for p in pitchers
+                if can_view_pitcher_report(current_user, p["player_id"])]
+    if not viewable:
+        abort(404)
+
+    buf = io.BytesIO()
+    used_names: set[str] = set()
+    written = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in viewable:
+            try:
+                pdf = build_pitcher_postgame(game_id, p["player_id"])
+            except ReportDataError:
+                continue  # skip non-LMU / no-data pitchers rather than failing all
+            name = f"{_safe(p['display_name'])}.pdf"
+            if name in used_names:  # dedupe identical display names
+                name = f"{_safe(p['display_name'])}_{p['player_id']}.pdf"
+            used_names.add(name)
+            zf.writestr(name, pdf)
+            written += 1
+
+    if written == 0:
+        abort(404)
+
+    # Friendly zip name: LMU_pitching_<date>_vs_<opp>.zip when context is available.
+    zip_name = f"LMU_pitching_reports_game_{game_id}.zip"
+    try:
+        ctx = P.game_context(game_id)
+        opp = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
+        zip_name = f"LMU_pitching_{_safe(ctx['game_date'])}_vs_{_safe(opp)}.zip"
+    except Exception:  # noqa: BLE001 -- name is cosmetic; never fail the download
+        pass
+
+    buf.seek(0)
+    return Response(
+        buf.getvalue(), mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
     )

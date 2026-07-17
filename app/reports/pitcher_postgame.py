@@ -63,6 +63,14 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     if df.empty:
         raise ReportDataError(f"No pitches for game_id={game_id}, pitcher_id={pitcher_id}")
 
+    # Postgame reports are for LMU pitchers only. Opponents are already hidden
+    # from the picker; this guards the direct-URL path too.
+    teams = set(df["pitcher_team"].dropna())
+    if teams and P.LMU_PITCHER_TEAM not in teams:
+        raise ReportDataError(
+            f"pitcher_id={pitcher_id} in game_id={game_id} is not an LMU pitcher "
+            f"(team {teams}); reports are LMU-only")
+
     context = P.game_context(game_id)
     # Handedness from the pitcher's throwing side; fall back to RHP.
     hand = "RHP"
@@ -75,6 +83,13 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
         "movement": plots.movement_map_uri(df, "Movement Map"),
         "zone_lhh": plots.zone_chart_uri(df, "Left", "vLHH Zone"),
     }
+
+    usage = P.pitch_usage_table(df)
+    movement = P.movement_summary(df)
+    # Color key for the tables. The charts dropped their legends (they hid data),
+    # so the colored pitch-type names in the tables ARE the legend.
+    pitch_colors = {r["pitch"]: plots.color_for(r["pitch"])
+                    for r in (*usage, *movement)}
 
     css = _inline_fonts((_STATIC / "report.css").read_text(encoding="utf-8"))
     assets = {
@@ -89,8 +104,9 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
         line=P.header_stat_line(df),
         process=apply_goals(P.process_metrics(df)),
         outcome=apply_goals(P.outcome_metrics(df)),
-        usage=P.pitch_usage_table(df),
-        movement=P.movement_summary(df),
+        usage=usage,
+        movement=movement,
+        pitch_colors=pitch_colors,
         charts=charts,
         css=css,
         assets=assets,

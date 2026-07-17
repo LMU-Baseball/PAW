@@ -24,12 +24,16 @@ _PALETTE = ["#9A0021", "#2864a8", "#2e8b57", "#e08a1e", "#6a4c93",
 
 # Stable color per pitch-type NAME so the same pitch renders identically across
 # all three charts on a report, regardless of which types appear in each subset.
+# Colors chosen for maximum separation among the common set (the charts have no
+# legend now, so color is the only key). Fastball stays brand crimson; ChangeUp
+# is a warm orange (was too close to crimson before); Sinker moved to brown so it
+# doesn't collide with ChangeUp.
 _PITCH_COLOR = {
     "Fastball": "#9A0021", "Four-Seam": "#9A0021", "FourSeamFastBall": "#9A0021",
-    "Sinker": "#e08a1e", "TwoSeamFastBall": "#e08a1e",
+    "Sinker": "#7a5230", "TwoSeamFastBall": "#7a5230",
     "Cutter": "#6a4c93",
     "Slider": "#2864a8", "Sweeper": "#00897b",
-    "Curveball": "#2e8b57", "ChangeUp": "#c2185b", "Changeup": "#c2185b",
+    "Curveball": "#2e8b57", "ChangeUp": "#e08a1e", "Changeup": "#e08a1e",
     "Splitter": "#555555",
 }
 
@@ -39,6 +43,16 @@ def _color_for(pt: str) -> str:
         return _PITCH_COLOR[pt]
     # deterministic (crc32 is stable across runs, unlike hash()) fallback
     return _PALETTE[zlib.crc32(str(pt).encode()) % len(_PALETTE)]
+
+
+def color_for(pt: str) -> str:
+    """Public accessor for a pitch type's stable chart color.
+
+    The report table (Pitch Usage / Movement Summary) colors each pitch-type
+    name with this so the tables double as the charts' legend — the charts
+    themselves no longer draw legends (they hid data points).
+    """
+    return _color_for(pt)
 
 
 def _fig_to_uri(fig) -> str:
@@ -71,9 +85,10 @@ def zone_chart_uri(df, batter_side: str, title: str) -> str:
         d["_pt"] = pitch_type(d)
         for pt, sub in d.groupby("_pt"):
             ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"],
-                       s=28, color=_color_for(pt), edgecolor="white", linewidth=0.4,
-                       label=pt, zorder=3)
-        ax.legend(fontsize=6, loc="upper right", framealpha=0.7)
+                       s=46, color=_color_for(pt), edgecolor="white", linewidth=0.5,
+                       alpha=0.9, zorder=3)
+        # No legend — the colored pitch names in the Pitch Usage table are the key
+        # (a legend here overlapped and hid data points).
     ax.set_xlim(-2.5, 2.5)
     ax.set_ylim(0, 5)
     ax.set_aspect("equal")
@@ -95,7 +110,7 @@ def _add_ellipse(ax, xs, ys, color) -> None:
     angle = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
     w, h = 2 * np.sqrt(np.maximum(vals, 0))  # 1 sigma
     e = Ellipse((np.mean(xs), np.mean(ys)), width=w, height=h, angle=angle,
-                facecolor=color, alpha=0.15, edgecolor=color, lw=1)
+                facecolor=color, alpha=0.18, edgecolor=color, lw=1.4, zorder=2)
     ax.add_patch(e)
 
 
@@ -108,14 +123,29 @@ def movement_map_uri(df, title: str = "Movement Map") -> str:
         d["_pt"] = pitch_type(d)
         for pt, sub in d.groupby("_pt"):
             color = _color_for(pt)
-            ax.scatter(sub["horz_break"], sub["induced_vert_break"],
-                       s=24, color=color, edgecolor="white", linewidth=0.3,
-                       label=pt, zorder=3)
-            _add_ellipse(ax, sub["horz_break"].to_numpy(),
-                         sub["induced_vert_break"].to_numpy(), color)
-        ax.legend(fontsize=6, loc="upper right", framealpha=0.7)
-    ax.set_xlim(-25, 25)
-    ax.set_ylim(-25, 25)
+            xs = sub["horz_break"].to_numpy()
+            ys = sub["induced_vert_break"].to_numpy()
+            # Larger, semi-transparent circles so the movement clusters are the
+            # focal point (and dense overlaps stay legible).
+            ax.scatter(xs, ys, s=70, color=color, edgecolor="white",
+                       linewidth=0.6, alpha=0.8, zorder=3)
+            _add_ellipse(ax, xs, ys, color)
+            # Hollow cluster-mean marker (mirrors the original report).
+            ax.scatter(xs.mean(), ys.mean(), s=90, facecolor="white",
+                       edgecolor=color, linewidth=1.6, zorder=4)
+        # No legend — the colored pitch names in the tables are the key.
+        # Frame the data (with padding) instead of a fixed +/-25 box, so the
+        # circles fill the panel; always keep the 0,0 axes in view.
+        pad = 5.0
+        xlo = min(d["horz_break"].min(), 0) - pad
+        xhi = max(d["horz_break"].max(), 0) + pad
+        ylo = min(d["induced_vert_break"].min(), 0) - pad
+        yhi = max(d["induced_vert_break"].max(), 0) + pad
+        ax.set_xlim(xlo, xhi)
+        ax.set_ylim(ylo, yhi)
+    else:
+        ax.set_xlim(-25, 25)
+        ax.set_ylim(-25, 25)
     ax.set_aspect("equal")
     ax.set_xlabel("HB (in)", fontsize=8)
     ax.set_ylabel("IVB (in)", fontsize=8)
