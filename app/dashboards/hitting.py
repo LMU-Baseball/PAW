@@ -28,8 +28,8 @@ def build_hitting_dash(server) -> Dash:
 <style>
   body {
     margin: 0; min-height: 100vh;
-    background-color: #f5dfe3;
-    background-image: url('/static/brand/palms-crimson.png');
+    background-color: #f5f5f5;
+    background-image: url('/static/brand/palms-grey.png');
     background-repeat: no-repeat; background-position: center bottom;
     background-size: cover; background-attachment: fixed;
   }
