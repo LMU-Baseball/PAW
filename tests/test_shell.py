@@ -47,7 +47,7 @@ def test_shell_loads_alfa_slab_locally_not_cdn():
     assert "fonts.gstatic.com" not in body
 
 
-def test_shell_uses_official_lmu_colors():
+def test_shell_uses_brand_colors():
     body = _app().test_client().get("/login").get_data(as_text=True)
-    assert "#AB0C2F" in body   # official LMU Crimson
+    assert "#9A0021" in body   # crimson (darker; coaches preferred it over #AB0C2F)
     assert "#0076A5" in body   # official LMU Blue
