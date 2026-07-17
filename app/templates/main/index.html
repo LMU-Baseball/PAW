@@ -1,19 +1,84 @@
 {% extends "base.html" %}
+{% block title %}The PAW — LMU Baseball{% endblock %}
 {% block content %}
-<div class="card">
-  <h2 style="margin-top: 0;">Welcome, {{ user.name }}</h2>
-  {% if user.is_coach %}
-    <p>You are signed in as a <strong>coach</strong> — you can view every LMU player
-       and add game notes.</p>
-  {% else %}
-    <p>You are signed in as a <strong>player</strong> — you can view your own
-       postgame data.</p>
-  {% endif %}
-  <h3>Dashboards</h3>
-  <ul>
-    <li><a href="/dash/hitting/">Hitting</a></li>
-    <li><a href="{{ url_for('reports.pitching_landing') }}">Pitching Reports</a></li>
-    <li>Catching <em>(coming soon)</em></li>
-  </ul>
+<style>
+  .home-hero {
+    position: relative; overflow: hidden; text-align: center;
+    background: var(--crimson); color: #fff;
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 34px 30px;
+  }
+  .home-hero .lions { height: 58px; width: auto; margin-bottom: 8px; }
+  .home-hero .marquee {
+    font-family: var(--font-marquee); font-size: 66px; line-height: .95;
+    margin: 4px 0 2px; letter-spacing: 1px;
+  }
+  .home-hero .tagline {
+    font-family: var(--font-display); font-size: 20px; letter-spacing: 1px;
+    text-transform: uppercase; color: rgba(255,255,255,.85); margin: 0;
+  }
+  .home-hero .welcome {
+    margin: 14px auto 0; max-width: 640px; font-size: 15px; color: rgba(255,255,255,.92);
+  }
+  .home-hero .welcome strong { color: #fff; }
+
+  .modules-section { position: relative; margin-top: 26px; padding-bottom: 40px; }
+  .palms {
+    position: absolute; left: 0; right: 0; bottom: 0; width: 100%;
+    opacity: .12; pointer-events: none; z-index: 0;
+  }
+  .modules {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  }
+  @media (max-width: 720px) { .modules { grid-template-columns: 1fr; } }
+  .module {
+    display: block; text-decoration: none; color: var(--ink);
+    background: #fff; border: 1px solid #e2e2e2; border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 20px; border-top: 4px solid var(--crimson);
+    transition: box-shadow .15s, transform .05s;
+  }
+  a.module:hover { box-shadow: 0 6px 18px rgba(0,0,0,.12); transform: translateY(-2px); }
+  .module h3 { margin: 0 0 6px; color: var(--crimson); font-size: 24px; }
+  .module p { margin: 0; font-size: 14px; color: #555; }
+  .module.disabled { border-top-color: #bbb; opacity: .7; }
+  .module.disabled h3 { color: #888; }
+  .module .soon {
+    display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--blue-dark);
+  }
+</style>
+
+<section class="home-hero">
+  <img class="lions" src="{{ url_for('static', filename='brand/lions-arch.png') }}" alt="LMU Lions">
+  <div class="marquee">THE PAW</div>
+  <p class="tagline">LMU Baseball Analytics</p>
+  <p class="welcome">
+    Welcome, <strong>{{ user.name }}</strong> —
+    {% if user.is_coach %}
+      signed in as <strong>coach</strong>: view every LMU player &amp; add game notes.
+    {% else %}
+      signed in as <strong>player</strong>: your own postgame data.
+    {% endif %}
+  </p>
+</section>
+
+<div class="modules-section">
+  <img class="palms" src="{{ url_for('static', filename='brand/palms.png') }}" alt="" aria-hidden="true">
+  <div class="modules">
+    <a class="module" href="/dash/hitting/">
+      <h3>Hitting</h3>
+      <p>Swing decisions, batted ball, plate discipline.</p>
+    </a>
+    <a class="module" href="{{ url_for('reports.pitching_landing') }}">
+      <h3>Pitching Reports</h3>
+      <p>Postgame pitcher reports (PDF).</p>
+    </a>
+    <div class="module disabled">
+      <h3>Catching</h3>
+      <p>Blocking, framing, throws.</p>
+      <span class="soon">Coming soon</span>
+    </div>
+  </div>
 </div>
 {% endblock %}
