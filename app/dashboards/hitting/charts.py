@@ -151,6 +151,9 @@ def all_pas_figure(df: pd.DataFrame) -> go.Figure:
                 showlegend=False,
             ), row=row, col=col)
         _style_axes(fig, row=row, col=col)
-    fig.update_layout(height=300 * nrows, margin=dict(l=10, r=10, t=40, b=10),
+    # Fixed ~360px per column so a lone PA keeps the zone's proportions instead of
+    # stretching to full container width; multi-PA layout is unchanged.
+    fig.update_layout(height=300 * nrows, width=360 * ncols,
+                      margin=dict(l=10, r=10, t=40, b=10),
                       paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
     return fig

@@ -146,6 +146,16 @@ def test_all_pas_figure_empty_df_is_safe():
     assert isinstance(fig, go.Figure)
 
 
+def test_all_pas_figure_single_pa_not_stretched():
+    from app.dashboards.hitting import charts
+    # One PA -> one column -> fixed ~360px width (not full-container stretch).
+    one_pa = _fake_pitches()[_fake_pitches()["Inning"] == 1]
+    fig = charts.all_pas_figure(one_pa)
+    assert fig.layout.width == 360
+    # two PAs -> two columns -> 720
+    assert charts.all_pas_figure(_fake_pitches()).layout.width == 720
+
+
 def test_pa_choices_number_sequentially_by_game_order():
     from app.dashboards.hitting.tabs import plate_appearances as pa
     # A hitter whose first PA was the 3rd batter of inning 1, second PA in inning 3.
