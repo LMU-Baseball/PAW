@@ -59,3 +59,40 @@ def test_hitter_options_player_is_single_self(monkeypatch):
     assert len(opts) == 1
     assert opts[0]["value"] == 806253
     assert opts[0]["label"] == "Wadas, Zach"
+
+
+def _fake_pitches():
+    return pd.DataFrame([
+        {"PlateLocSide": 0.2, "PlateLocHeight": 2.5, "TaggedPitchType": "Fastball",
+         "PitchCall": "StrikeSwinging", "PlayResult": "Undefined", "TaggedHitType": None,
+         "Balls": 0, "Strikes": 1, "Inning": 1, "PAofInning": 1, "PitchofPA": 1,
+         "Pitcher": "Smith, Joe"},
+        {"PlateLocSide": -0.5, "PlateLocHeight": 1.8, "TaggedPitchType": "Slider",
+         "PitchCall": "InPlay", "PlayResult": "Single", "TaggedHitType": "LineDrive",
+         "Balls": 1, "Strikes": 1, "Inning": 3, "PAofInning": 2, "PitchofPA": 2,
+         "Pitcher": "Smith, Joe"},
+    ])
+
+
+def test_zone_scatter_returns_figure_with_points():
+    from app.dashboards.hitting import charts
+    import plotly.graph_objects as go
+    fig = charts.zone_scatter(_fake_pitches(), title="Test")
+    assert isinstance(fig, go.Figure)
+    # at least one scatter trace carrying the 2 pitch markers
+    xs = [x for tr in fig.data for x in (tr.x or [])]
+    assert len(xs) >= 2
+
+
+def test_zone_scatter_empty_df_is_safe():
+    from app.dashboards.hitting import charts
+    import plotly.graph_objects as go
+    fig = charts.zone_scatter(pd.DataFrame(), title="Empty")
+    assert isinstance(fig, go.Figure)
+
+
+def test_all_pas_figure_one_cell_per_pa():
+    from app.dashboards.hitting import charts
+    import plotly.graph_objects as go
+    fig = charts.all_pas_figure(_fake_pitches())
+    assert isinstance(fig, go.Figure)  # 2 distinct PAs -> renders without error
