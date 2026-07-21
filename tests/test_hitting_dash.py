@@ -173,3 +173,17 @@ def test_plate_appearances_empty_is_safe():
     assert pa.pa_choices(pd.DataFrame()) == []
     assert isinstance(pa.render_breakdown(pd.DataFrame(), None), html.Div)
     assert isinstance(pa.render_all_pas(pd.DataFrame()), dcc.Graph)
+
+
+def test_zone_location_renders_and_filters(game_df):
+    from app.dashboards.hitting.tabs import zone_location as zl
+    from dash import html
+    assert {o["value"] for o in zl.ZONE_FILTER_OPTIONS} >= {"All Swings", "Heart"}
+    assert isinstance(zl.render(game_df, "All Swings"), html.Div)
+    assert isinstance(zl.render(game_df, "Heart"), html.Div)
+
+
+def test_zone_location_empty_is_safe():
+    from app.dashboards.hitting.tabs import zone_location as zl
+    from dash import html
+    assert isinstance(zl.render(pd.DataFrame(), "All Swings"), html.Div)
