@@ -3,7 +3,28 @@ import pandas as pd
 import pytest
 
 from app import create_app
+from app.data import hitting_wh
+from app.db import query_df
 from config import Config
+
+
+@pytest.fixture(scope="module")
+def real_batter():
+    cand = query_df(
+        """
+        SELECT batter_tm_id FROM fact_tm_game_pitch
+         WHERE batter_team = 'LOY_LIO' AND batter_tm_id IS NOT NULL
+         GROUP BY batter_tm_id ORDER BY COUNT(*) DESC LIMIT 1
+        """
+    )
+    return int(cand.loc[0, "batter_tm_id"])
+
+
+@pytest.fixture(scope="module")
+def game_df(real_batter):
+    games = hitting_wh.wh_games_for_batter(real_batter)
+    gid = int(games.iloc[0]["game_id"])
+    return hitting_wh.wh_game_pitches(gid, real_batter)
 
 
 @pytest.fixture
@@ -125,3 +146,12 @@ def test_stat_table_empty_df_is_safe():
     from app.dashboards.hitting import tables
     tbl = tables.stat_table(pd.DataFrame())
     assert tbl.data == []
+
+
+def test_game_level_renders_for_real_and_empty(game_df):
+    from app.dashboards.hitting.tabs import game_level
+    from dash import html
+    out = game_level.render(game_df, note="Great AB battle.")
+    assert isinstance(out, html.Div)
+    # empty df must not crash
+    assert isinstance(game_level.render(pd.DataFrame(), note=""), html.Div)
