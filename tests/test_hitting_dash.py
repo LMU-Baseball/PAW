@@ -108,3 +108,20 @@ def test_all_pas_figure_empty_df_is_safe():
     import plotly.graph_objects as go
     fig = charts.all_pas_figure(pd.DataFrame())
     assert isinstance(fig, go.Figure)
+
+
+def test_stat_table_builds_and_formats_pct():
+    from app.dashboards.hitting import tables
+    from dash import dash_table
+    df = pd.DataFrame([{"Zone": "Heart", "Total": 10, "Swing %": 40.0}])
+    tbl = tables.stat_table(df, id="t")
+    assert isinstance(tbl, dash_table.DataTable)
+    # percent column rendered with a trailing %
+    assert tbl.data[0]["Swing %"] == "40.0%"
+    assert tbl.data[0]["Total"] == 10
+
+
+def test_stat_table_empty_df_is_safe():
+    from app.dashboards.hitting import tables
+    tbl = tables.stat_table(pd.DataFrame())
+    assert tbl.data == []
