@@ -60,32 +60,71 @@ def _finish(df: pd.DataFrame) -> pd.DataFrame:
     return _add_pitch_category(df)
 
 
+def _in_clause(ids) -> tuple[str, dict]:
+    """Build a parameterized `IN (...)` fragment + params dict for a list of ids."""
+    ph = ", ".join(f":id{i}" for i in range(len(ids)))
+    return ph, {f"id{i}": int(v) for i, v in enumerate(ids)}
+
+
+def _sibling_ids(batter_tm_id) -> list[int]:
+    """All LMU batter_tm_ids sharing this id's batter_name.
+
+    The warehouse assigns some players TWO Trackman ids across the season (an
+    early-season and a late-season id scheme). They share the same batter_name,
+    so we merge them by name to give one hitter one dropdown entry + all games.
+    """
+    name = query_df(
+        """
+        SELECT batter_name FROM fact_tm_game_pitch
+         WHERE batter_tm_id = :b AND batter_team = :team LIMIT 1
+        """,
+        {"b": int(batter_tm_id), "team": LMU_BATTER_TEAM},
+    )
+    if name.empty:
+        return [int(batter_tm_id)]
+    ids = query_df(
+        """
+        SELECT DISTINCT batter_tm_id FROM fact_tm_game_pitch
+         WHERE batter_name = :n AND batter_team = :team AND batter_tm_id IS NOT NULL
+        """,
+        {"n": str(name.iloc[0]["batter_name"]), "team": LMU_BATTER_TEAM},
+    )
+    out = [int(x) for x in ids["batter_tm_id"]]
+    return out or [int(batter_tm_id)]
+
+
 def wh_lmu_hitters() -> pd.DataFrame:
+    """One row per LMU hitter (name deduped; canonical id = most-tracked id)."""
     return query_df(
         """
-        SELECT DISTINCT batter_name AS Batter, batter_tm_id AS BatterId
-          FROM fact_tm_game_pitch
-         WHERE batter_team = :team AND batter_tm_id IS NOT NULL
-         ORDER BY batter_name
+        SELECT Batter, BatterId FROM (
+          SELECT batter_name AS Batter, batter_tm_id AS BatterId,
+                 ROW_NUMBER() OVER (PARTITION BY batter_name
+                                    ORDER BY COUNT(*) DESC, batter_tm_id) AS rn
+            FROM fact_tm_game_pitch
+           WHERE batter_team = :team AND batter_tm_id IS NOT NULL
+           GROUP BY batter_name, batter_tm_id
+        ) t WHERE rn = 1 ORDER BY Batter
         """,
         {"team": LMU_BATTER_TEAM},
     )
 
 
 def wh_games_for_batter(batter_tm_id) -> pd.DataFrame:
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
     df = query_df(
-        """
+        f"""
         SELECT g.game_id, g.game_date, g.home_team_id,
                CASE WHEN g.home_team_id = :lmu THEN 'vs' ELSE '@' END AS loc,
                t.team_name AS opp
           FROM (SELECT DISTINCT game_id FROM fact_tm_game_pitch
-                 WHERE batter_tm_id = :b) bg
+                 WHERE batter_tm_id IN ({ph})) bg
           JOIN dim_tm_game g ON g.game_id = bg.game_id
           JOIN tm_team t ON t.team_id = CASE WHEN g.home_team_id = :lmu
                                              THEN g.away_team_id ELSE g.home_team_id END
          ORDER BY g.game_date DESC
         """,
-        {"b": int(batter_tm_id), "lmu": LMU_TEAM_ID},
+        {"lmu": LMU_TEAM_ID, **idp},
     )
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
@@ -95,27 +134,29 @@ def wh_games_for_batter(batter_tm_id) -> pd.DataFrame:
 
 
 def wh_game_pitches(game_id, batter_tm_id) -> pd.DataFrame:
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
     df = query_df(
         f"""
         SELECT {_PITCH_SELECT}
           FROM fact_tm_game_pitch
-         WHERE game_id = :g AND batter_tm_id = :b
+         WHERE game_id = :g AND batter_tm_id IN ({ph})
          ORDER BY pitch_no
         """,
-        {"g": int(game_id), "b": int(batter_tm_id)},
+        {"g": int(game_id), **idp},
     )
     return _finish(df)
 
 
 def wh_season_pitches(batter_tm_id) -> pd.DataFrame:
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
     df = query_df(
         f"""
         SELECT {_PITCH_SELECT}
           FROM fact_tm_game_pitch
-         WHERE batter_tm_id = :b
+         WHERE batter_tm_id IN ({ph})
          ORDER BY game_id, pitch_no
         """,
-        {"b": int(batter_tm_id)},
+        idp,
     )
     return _finish(df)
 
@@ -127,6 +168,71 @@ def wh_season_qab_rate(batter_tm_id) -> float | None:
     q = qab_frame(df)
     total = len(q)
     return round(q["QAB"].sum() / total, 3) if total else None
+
+
+_HITS = {"Single", "Double", "Triple", "HomeRun"}
+_TOTAL_BASES = {"Single": 1, "Double": 2, "Triple": 3, "HomeRun": 4}
+_AB_OUTS = {"Out", "Error", "FieldersChoice", "Strikeout"}  # non-hit at-bats
+
+
+def _fmt_avg(v) -> str:
+    """Baseball three-decimal string, leading zero dropped for < 1 (e.g. .326)."""
+    if v is None:
+        return "—"
+    s = f"{v:.3f}"
+    return s[1:] if 0 <= v < 1 else s
+
+
+def wh_slash_line(batter_tm_id) -> dict:
+    """Season BA/SLG/OBP computed from warehouse game plate appearances.
+
+    PROVISIONAL definitions (one place to change; confirm with coaches):
+      * one row per PA = last pitch of the PA (via qab_frame).
+      * Walk = KorBB=='Walk'; HBP = last PitchCall=='HitByPitch';
+        Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
+      * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
+      * AB = a completed PA that is not a walk/HBP/sacrifice.
+      * BA = H/AB ; SLG = TotalBases/AB ; OBP = (H+BB+HBP)/(AB+BB+HBP+SF).
+    Returns display strings ("—" when undefined).
+    """
+    blank = {"BA": "—", "SLG": "—", "OBP": "—"}
+    df = wh_season_pitches(batter_tm_id)
+    if df.empty:
+        return blank
+    pas = qab_frame(df)
+    if pas.empty:
+        return blank
+
+    ab = h = tb = bb = hbp = sf = 0
+    for _, r in pas.iterrows():
+        korbb = r.get("KorBB")
+        pr = r.get("PlayResult")
+        pc = r.get("PitchCall")
+        is_walk = korbb == "Walk"
+        is_hbp = pc == "HitByPitch"
+        is_sac = isinstance(pr, str) and pr.startswith("Sac")
+        if is_walk:
+            bb += 1
+            continue
+        if is_hbp:
+            hbp += 1
+            continue
+        if is_sac:
+            sf += 1
+            continue
+        if pr in _HITS:
+            ab += 1
+            h += 1
+            tb += _TOTAL_BASES[pr]
+        elif pr in _AB_OUTS or korbb == "Strikeout":
+            ab += 1
+        # else: undefined/incomplete PA — not counted
+
+    ba = h / ab if ab else None
+    slg = tb / ab if ab else None
+    ob_denom = ab + bb + hbp + sf
+    obp = (h + bb + hbp) / ob_denom if ob_denom else None
+    return {"BA": _fmt_avg(ba), "SLG": _fmt_avg(slg), "OBP": _fmt_avg(obp)}
 
 
 def _roster_lookup(name_last_first: str) -> tuple[str, str]:

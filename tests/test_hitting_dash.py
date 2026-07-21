@@ -114,6 +114,19 @@ def test_zone_scatter_empty_df_is_safe():
     assert isinstance(fig, go.Figure)
 
 
+def test_zone_scatter_white_bg_and_trimmed_hover():
+    from app.dashboards.hitting import charts
+    fig = charts.zone_scatter(_fake_pitches(), title="Test")
+    # white background so the strike zone reads over the palms motif
+    assert fig.layout.paper_bgcolor == "#ffffff"
+    assert fig.layout.plot_bgcolor == "#ffffff"
+    # hover shows pitch type + result only (no Count / Pitcher)
+    tmpl = " ".join(tr.hovertemplate or "" for tr in fig.data if tr.hovertemplate)
+    assert tmpl                      # markers carry a hovertemplate
+    assert "Count" not in tmpl and "Pitcher" not in tmpl
+    assert "Fastball" in tmpl or "Slider" in tmpl   # the pitch type is shown
+
+
 def test_all_pas_figure_one_cell_per_pa():
     from app.dashboards.hitting import charts
     import plotly.graph_objects as go
@@ -131,6 +144,16 @@ def test_all_pas_figure_empty_df_is_safe():
     import plotly.graph_objects as go
     fig = charts.all_pas_figure(pd.DataFrame())
     assert isinstance(fig, go.Figure)
+
+
+def test_pa_choices_number_sequentially_by_game_order():
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    # A hitter whose first PA was the 3rd batter of inning 1, second PA in inning 3.
+    df = _fake_pitches()  # PAs: (Inn 1, PAofInning 1) and (Inn 3, PAofInning 2)
+    labels = [c["label"] for c in pa.pa_choices(df)]
+    # sequential game PA number, NOT PAofInning
+    assert labels[0].startswith("PA 1 ·")
+    assert labels[1].startswith("PA 2 ·")
 
 
 def test_stat_table_builds_and_formats_pct():
@@ -235,6 +258,8 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
                                    "class_year": "Jr.", "position": "OF",
                                    "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_wh.wh_season_qab_rate", lambda b: 0.42)
+    monkeypatch.setattr("app.data.hitting_wh.wh_slash_line",
+                        lambda b: {"BA": ".321", "SLG": ".500", "OBP": ".410"})
     with server.app_context():
         coach = User(email="c2@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -247,6 +272,12 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     # smoke: it built a component tree, not the login placeholder
     assert out is not None
     assert "Please log in" not in str(out)
+    # header present (logo wordmark + logout), and no bottom back-home link
+    tree = str(out)
+    assert "The Paw" in tree and "/logout" in tree
+    assert "Back to home" not in tree
+    # computed slash line reached the sidebar tiles
+    assert ".321" in tree
 
 
 def test_register_callbacks_adds_callbacks(server):

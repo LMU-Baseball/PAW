@@ -10,6 +10,18 @@ INDEX_STRING = """<!DOCTYPE html>
 <link rel="icon" type="image/png" href="/static/reports/lion.png">
 {%css%}
 <style>
+  @font-face {
+    font-family: "Teko"; font-weight: 400; font-display: swap;
+    src: url("/static/reports/Teko-Regular.ttf") format("truetype");
+  }
+  @font-face {
+    font-family: "Teko"; font-weight: 600; font-display: swap;
+    src: url("/static/reports/Teko-SemiBold.ttf") format("truetype");
+  }
+  @font-face {
+    font-family: "Teko"; font-weight: 700; font-display: swap;
+    src: url("/static/reports/Teko-Bold.ttf") format("truetype");
+  }
   body {
     margin: 0; min-height: 100vh;
     background-color: #f5f5f5;

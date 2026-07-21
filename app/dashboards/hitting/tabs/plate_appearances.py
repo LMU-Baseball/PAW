@@ -14,8 +14,9 @@ def pa_choices(game_df: pd.DataFrame) -> list[dict]:
     if game_df is None or game_df.empty:
         return []
     keys = sorted(game_df.groupby(["Inning", "PAofInning"]).groups.keys())
-    return [{"label": f"Inn {int(i)} · PA {int(p)}", "value": f"{int(i)}-{int(p)}"}
-            for (i, p) in keys]
+    # Label by the hitter's sequential game PA (1,2,3…), not PAofInning.
+    return [{"label": f"PA {seq} · Inn {int(i)}", "value": f"{int(i)}-{int(p)}"}
+            for seq, (i, p) in enumerate(keys, 1)]
 
 
 def _pa_slice(game_df, pa_value):

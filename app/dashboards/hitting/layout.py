@@ -8,7 +8,32 @@ from app.data import hitting_wh
 from app.dashboards.hitting import selectors
 
 _CRIMSON = "#9A0021"
+_BANNER = "rgba(154,0,33,0.82)"
 _PHOTO_PLACEHOLDER = "/static/reports/lion.png"  # until the roster-photo scrape lands
+
+
+def header() -> html.Div:
+    """Site header (matches base.html): logo -> home, wordmark, user + logout."""
+    brand = html.A([
+        html.Img(src="/static/reports/lmu.png",
+                 style={"height": "40px", "width": "auto", "display": "block"}),
+        html.Span("The Paw", style={
+            "fontFamily": "Teko, sans-serif", "fontWeight": "700", "fontSize": "30px",
+            "lineHeight": "1", "letterSpacing": "1px", "textTransform": "uppercase",
+            "color": "#fff"}),
+    ], href="/", style={"display": "flex", "alignItems": "center", "gap": "12px",
+                        "textDecoration": "none"})
+    right = html.Span()
+    if current_user.is_authenticated:
+        right = html.Span([
+            f"{current_user.name} · {current_user.role} · ",
+            html.A("Log out", href="/logout",
+                   style={"color": "#fff", "textDecoration": "underline"}),
+        ], style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
+    return html.Div([brand, right], style={
+        "background": _BANNER, "color": "#fff", "padding": "0 20px", "height": "64px",
+        "display": "flex", "alignItems": "center", "justifyContent": "space-between",
+        "boxShadow": "0 2px 8px rgba(0,0,0,.15)"})
 
 
 def _tile(label, value):
@@ -26,21 +51,23 @@ def sidebar(batter_id) -> html.Div:
     prof = hitting_wh.wh_player_profile(int(batter_id))
     qab = hitting_wh.wh_season_qab_rate(int(batter_id))
     qab_txt = f"{round(qab * 100, 1)}%" if qab is not None else "—"
+    slash = hitting_wh.wh_slash_line(int(batter_id))
     photo = prof["photo"] or _PHOTO_PLACEHOLDER
+    jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"],
                                    f"Bats {prof['bats']}" if prof["bats"] else "") if x])
     return html.Div([
         html.Img(src=photo, style={"width": "100%", "borderRadius": "8px",
                                    "border": "4px solid white",
                                    "background": "rgba(255,255,255,0.6)"}),
-        html.Div(prof["name"] or "—",
+        html.Div(f"{jersey}{prof['name'] or '—'}",
                  style={"fontSize": "26px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div(meta, style={"fontSize": "16px", "color": "#555"}),
-        html.Div([_tile("QAB%", qab_txt), _tile("BA", "—"),
-                  _tile("SLG", "—"), _tile("OBP", "—")],
+        html.Div([_tile("QAB%", qab_txt), _tile("BA", slash["BA"]),
+                  _tile("SLG", slash["SLG"]), _tile("OBP", slash["OBP"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Photo/jersey + BA/SLG/OBP pending a roster/stats source.",
+        html.Div("Slash line = warehouse game data (provisional). Photo pending roster scrape.",
                  style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
@@ -94,6 +121,7 @@ def serve_layout() -> html.Div:
         dcc.Store(id="selection", data={"batter_id": default_batter,
                                         "game_id": default_game}),
         dcc.Store(id="game-data"),
+        header(),
         html.Div([
             html.Div(id="sidebar", children=sidebar(default_batter),
                      style={"width": "240px", "flexShrink": "0"}),
@@ -102,6 +130,4 @@ def serve_layout() -> html.Div:
                      style={"flexGrow": "1"}),
         ], style={"display": "flex", "gap": "16px", "padding": "16px",
                   "alignItems": "flex-start"}),
-        html.Div(html.A("← Back to home", href="/"),
-                 style={"padding": "0 16px 16px"}),
     ])

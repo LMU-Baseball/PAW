@@ -95,3 +95,25 @@ def test_wh_player_profile_and_scoreboard(top_batter, top_game):
 def test_wh_season_qab_rate(top_batter):
     r = wh.wh_season_qab_rate(top_batter)
     assert r is None or 0.0 <= r <= 1.0
+
+
+def test_wh_lmu_hitters_names_deduped():
+    # Players with two Trackman ids must appear only ONCE (merged by name).
+    df = wh.wh_lmu_hitters()
+    assert df["Batter"].is_unique
+
+
+def test_wh_slash_line_shape_and_values(top_batter):
+    sl = wh.wh_slash_line(top_batter)
+    assert set(sl) == {"BA", "SLG", "OBP"}
+    # a real hitter has a computable line; each is "—" or a numeric-looking string
+    for k, v in sl.items():
+        assert isinstance(v, str)
+        if v != "—":
+            float(v)  # parses as a number (e.g. ".326" or "1.021")
+    # top batter has plate appearances -> BA should be computed, not "—"
+    assert sl["BA"] != "—"
+
+
+def test_wh_slash_line_no_data_is_dashes():
+    assert wh.wh_slash_line(-1) == {"BA": "—", "SLG": "—", "OBP": "—"}
