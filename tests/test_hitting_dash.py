@@ -96,3 +96,15 @@ def test_all_pas_figure_one_cell_per_pa():
     import plotly.graph_objects as go
     fig = charts.all_pas_figure(_fake_pitches())
     assert isinstance(fig, go.Figure)  # 2 distinct PAs -> renders without error
+    # one subplot-title annotation per PA (make_subplots creates one each)
+    assert len(fig.layout.annotations) == 2
+    # at least 2 scatter traces carrying pitch markers (one group per PA)
+    scatter_traces = [tr for tr in fig.data if isinstance(tr, go.Scatter)]
+    assert len(scatter_traces) >= 2
+
+
+def test_all_pas_figure_empty_df_is_safe():
+    from app.dashboards.hitting import charts
+    import plotly.graph_objects as go
+    fig = charts.all_pas_figure(pd.DataFrame())
+    assert isinstance(fig, go.Figure)

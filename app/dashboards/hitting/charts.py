@@ -49,7 +49,9 @@ def _to_xy(df: pd.DataFrame) -> pd.DataFrame:
 def _result_text(r) -> str:
     if r["PlayResult"] in (None, "Undefined"):
         return str(r["PitchCall"])
-    return f"{r.get('TaggedHitType') or ''} - {r['PlayResult']}".strip(" -")
+    hit = r.get("TaggedHitType")
+    hit = "" if pd.isna(hit) else str(hit)
+    return f"{hit} - {r['PlayResult']}".strip(" -")
 
 
 def _add_zone_shapes(fig, *, row=None, col=None):
@@ -107,18 +109,24 @@ def zone_scatter(df: pd.DataFrame, title: str = "") -> go.Figure:
     return fig
 
 
+def _empty_pas_figure() -> go.Figure:
+    fig = go.Figure()
+    _add_zone_shapes(fig)
+    _style_axes(fig)
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10),
+                      paper_bgcolor="rgba(0,0,0,0)")
+    return fig
+
+
 def all_pas_figure(df: pd.DataFrame) -> go.Figure:
     """One strike-zone subplot per plate appearance (grouped Inning, PAofInning)."""
     if df is None or df.empty:
-        fig = go.Figure()
-        _add_zone_shapes(fig)
-        _style_axes(fig)
-        fig.update_layout(margin=dict(l=10, r=10, t=30, b=10),
-                          paper_bgcolor="rgba(0,0,0,0)")
-        return fig
+        return _empty_pas_figure()
 
     pa_keys = list(df.groupby(["Inning", "PAofInning"]).groups.keys())
     n = len(pa_keys)
+    if n == 0:
+        return _empty_pas_figure()
     ncols = min(3, n)
     nrows = math.ceil(n / ncols)
     titles = [f"Inn {int(i)} · PA {int(p)}" for (i, p) in pa_keys]
@@ -132,7 +140,7 @@ def all_pas_figure(df: pd.DataFrame) -> go.Figure:
         for ptype, gg in g.groupby("TaggedPitchType"):
             fig.add_trace(go.Scatter(
                 x=gg["_x"], y=gg["_y"], mode="markers+text",
-                text=[str(int(v)) for v in gg["PitchofPA"]],
+                text=["" if pd.isna(v) else str(int(v)) for v in gg["PitchofPA"]],
                 textposition="top center", textfont=dict(size=9),
                 marker=dict(size=11, color=color_for(ptype),
                             line=dict(color="white", width=1)),
