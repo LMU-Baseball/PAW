@@ -187,3 +187,30 @@ def test_zone_location_empty_is_safe():
     from app.dashboards.hitting.tabs import zone_location as zl
     from dash import html
     assert isinstance(zl.render(pd.DataFrame(), "All Swings"), html.Div)
+
+
+def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    monkeypatch.setattr("app.data.hitting_wh.wh_lmu_hitters",
+                        lambda: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
+    monkeypatch.setattr("app.data.hitting_wh.wh_games_for_batter",
+                        lambda b: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
+    monkeypatch.setattr("app.data.hitting_wh.wh_player_profile",
+                        lambda b: {"name": "Doe, John", "bats": "Right",
+                                   "class_year": "Jr.", "position": "OF",
+                                   "photo": "", "jersey": ""})
+    monkeypatch.setattr("app.data.hitting_wh.wh_season_qab_rate", lambda b: 0.42)
+    with server.app_context():
+        coach = User(email="c2@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/hitting/"):
+            login_user(coach)
+            from app.dashboards.hitting import layout
+            out = layout.serve_layout()
+    # smoke: it built a component tree, not the login placeholder
+    assert out is not None
+    assert "Please log in" not in str(out)
