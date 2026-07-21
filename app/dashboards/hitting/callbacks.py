@@ -1,6 +1,8 @@
 """Dash callbacks: selection -> data stores -> reactive sidebar/scoreboard/tabs."""
 from __future__ import annotations
 
+import io
+
 import pandas as pd
 from dash import Input, Output, State, dcc, html
 from flask_login import current_user
@@ -14,6 +16,13 @@ def _load_game_df(store) -> pd.DataFrame:
     if not store or store.get("game_id") is None or store.get("batter_id") is None:
         return pd.DataFrame()
     return hitting_wh.wh_game_pitches(int(store["game_id"]), int(store["batter_id"]))
+
+
+def _read_game_df(data_json):
+    """Deserialize a game-data store payload back to a DataFrame (empty if None)."""
+    if not data_json:
+        return pd.DataFrame()
+    return pd.read_json(io.StringIO(data_json), orient="split")
 
 
 def register_callbacks(dash_app) -> None:
@@ -56,7 +65,7 @@ def register_callbacks(dash_app) -> None:
         State("selection", "data"),
     )
     def _render_tab(tab, data_json, sel):
-        df = pd.read_json(data_json, orient="split") if data_json else pd.DataFrame()
+        df = _read_game_df(data_json)
         if tab == "game":
             # Coach notes are legacy-keyed (NOTES.GAME_ID) and don't match warehouse
             # game_ids yet; wiring notes to warehouse games is a deferred follow-up.
@@ -86,7 +95,7 @@ def register_callbacks(dash_app) -> None:
         Input("pa-dd", "value"), State("game-data", "data"),
     )
     def _pa_breakdown(pa_value, data_json):
-        df = pd.read_json(data_json, orient="split") if data_json else pd.DataFrame()
+        df = _read_game_df(data_json)
         return pa.render_breakdown(df, pa_value)
 
     # Zone dropdown -> filtered zone body.
@@ -95,5 +104,5 @@ def register_callbacks(dash_app) -> None:
         Input("zone-dd", "value"), State("game-data", "data"),
     )
     def _zone_body(zone_choice, data_json):
-        df = pd.read_json(data_json, orient="split") if data_json else pd.DataFrame()
+        df = _read_game_df(data_json)
         return zl.render(df, zone_choice or "All Swings")

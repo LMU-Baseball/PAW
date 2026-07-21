@@ -1,4 +1,6 @@
 """Tests for the Dash hitting dashboard (shell, selectors, tabs)."""
+import warnings
+
 import pandas as pd
 import pytest
 
@@ -226,3 +228,24 @@ def test_register_callbacks_adds_callbacks(server):
     before = len(app.callback_map)
     callbacks.register_callbacks(app)
     assert len(app.callback_map) > before
+
+
+def test_read_game_df_roundtrip_no_futurewarning():
+    from app.dashboards.hitting import callbacks
+
+    df = pd.DataFrame([
+        {"PitchCall": "StrikeSwinging", "Balls": 0, "Strikes": 1},
+        {"PitchCall": "InPlay", "Balls": 1, "Strikes": 1},
+    ])
+    data_json = df.to_json(orient="split")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        out = callbacks._read_game_df(data_json)
+
+    assert list(out.columns) == list(df.columns)
+    assert len(out) == len(df)
+
+    empty = callbacks._read_game_df(None)
+    assert isinstance(empty, pd.DataFrame)
+    assert empty.empty
