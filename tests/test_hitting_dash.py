@@ -155,3 +155,21 @@ def test_game_level_renders_for_real_and_empty(game_df):
     assert isinstance(out, html.Div)
     # empty df must not crash
     assert isinstance(game_level.render(pd.DataFrame(), note=""), html.Div)
+
+
+def test_plate_appearances_choices_and_render(game_df):
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    from dash import html, dcc
+    choices = pa.pa_choices(game_df)
+    assert len(choices) >= 1
+    out = pa.render_breakdown(game_df, choices[0]["value"])
+    assert isinstance(out, html.Div)
+    assert isinstance(pa.render_all_pas(game_df), dcc.Graph)
+
+
+def test_plate_appearances_empty_is_safe():
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    from dash import html, dcc
+    assert pa.pa_choices(pd.DataFrame()) == []
+    assert isinstance(pa.render_breakdown(pd.DataFrame(), None), html.Div)
+    assert isinstance(pa.render_all_pas(pd.DataFrame()), dcc.Graph)
