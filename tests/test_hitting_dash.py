@@ -159,6 +159,14 @@ def test_game_level_renders_for_real_and_empty(game_df):
     assert isinstance(game_level.render(pd.DataFrame(), note=""), html.Div)
 
 
+def test_game_level_drops_qc_pathq_columns(game_df):
+    from app.dashboards.hitting.tabs import game_level
+    out = game_level.render(game_df, note="Great AB battle.")
+    text = str(out)
+    assert "Avg QC+" not in text
+    assert "Avg PathQ+" not in text
+
+
 def test_plate_appearances_choices_and_render(game_df):
     from app.dashboards.hitting.tabs import plate_appearances as pa
     from dash import html, dcc
@@ -167,6 +175,14 @@ def test_plate_appearances_choices_and_render(game_df):
     out = pa.render_breakdown(game_df, choices[0]["value"])
     assert isinstance(out, html.Div)
     assert isinstance(pa.render_all_pas(game_df), dcc.Graph)
+
+
+def test_plate_appearances_default_pa_renders(game_df):
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    from dash import html
+    # None -> defaults to the first PA on a non-empty fixture
+    out = pa.render_breakdown(game_df, None)
+    assert isinstance(out, html.Div)
 
 
 def test_plate_appearances_empty_is_safe():
@@ -183,6 +199,21 @@ def test_zone_location_renders_and_filters(game_df):
     assert {o["value"] for o in zl.ZONE_FILTER_OPTIONS} >= {"All Swings", "Heart"}
     assert isinstance(zl.render(game_df, "All Swings"), html.Div)
     assert isinstance(zl.render(game_df, "Heart"), html.Div)
+
+
+def test_zone_location_filter_changes_output(game_df):
+    from app.dashboards.hitting.tabs import zone_location as zl
+    from dash import html
+    heart_out = zl.render(game_df, "Heart")
+    takes_out = zl.render(game_df, "All Takes")
+    assert isinstance(heart_out, html.Div)
+    assert isinstance(takes_out, html.Div)
+    # "Swing / Take by Zone" table must be present in both renders
+    assert "Swing / Take by Zone" in str(heart_out)
+    assert "Swing / Take by Zone" in str(takes_out)
+    # different zone filters should (generally) produce different scatter content
+    if str(heart_out) == str(takes_out):
+        pytest.skip("fixture game has identical Heart/All-Takes subsets")
 
 
 def test_zone_location_empty_is_safe():

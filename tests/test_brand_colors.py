@@ -14,6 +14,12 @@ _FILES = [
     "app/templates/reports/pitching_landing.html",
     "app/templates/base.html",
     "app/templates/main/index.html",
+    "app/dashboards/hitting/index.py",
+    "app/dashboards/hitting/tables.py",
+    "app/dashboards/hitting/layout.py",
+    "app/dashboards/hitting/callbacks.py",
+    "app/dashboards/hitting/tabs/game_level.py",
+    "app/dashboards/hitting/tabs/zone_location.py",
 ]
 
 

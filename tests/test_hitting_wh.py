@@ -61,8 +61,16 @@ def test_wh_game_pitches_has_aliased_and_computed_cols(top_game, top_batter):
               "PitchNo", "Balls", "Strikes", "RunsScored", "BatterSide", "Pitcher",
               "GameID", "Zone", "QC", "PathQ", "Angle", "PitchCat"):
         assert c in df.columns
-    assert set(df["Zone"]).issubset({"Heart", "Shadow", "Chase", "Waste"})
+    assert set(df["Zone"]).issubset({"Heart", "Shadow", "Chase", "Waste", ""})
     assert df["QC"].isna().all()
+
+
+def test_attack_zone_missing_coords_excluded():
+    from app.data import hitting
+    assert wh.attack_zone(None, 2.5) == ""
+    assert wh.attack_zone(2.0, None) == ""
+    assert wh.attack_zone(float("nan"), float("nan")) == ""
+    assert "" not in hitting.ZONE_LEVELS
 
 
 def test_wh_game_pitches_feeds_reused_transforms(top_game, top_batter):

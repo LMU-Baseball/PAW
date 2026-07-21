@@ -31,9 +31,13 @@ _PITCH_SELECT = """
 
 
 def attack_zone(side_ft, height_ft) -> str:
-    """Heart/Shadow/Chase/Waste from plate coords (inches; zone-box boundaries)."""
+    """Heart/Shadow/Chase/Waste from plate coords (inches; zone-box boundaries).
+
+    Missing coords (None/NaN) return "" so untracked pitches are excluded from
+    zone-based tables rather than being miscounted as genuine "Waste" pitches.
+    """
     if side_ft is None or height_ft is None or pd.isna(side_ft) or pd.isna(height_ft):
-        return "Waste"
+        return ""
     x = abs(float(side_ft) * 12)
     y = abs(float(height_ft) * 12 - 30)
     if x <= 7.25 and y <= 8.75:
