@@ -13,6 +13,7 @@ import pandas as pd
 
 from app.db import query_df
 from app.data.hitting import _add_pitch_category, qab_frame
+from app.data.roster_media import player_media
 
 LMU_TEAM_ID = 78
 LMU_BATTER_TEAM = "LOY_LIO"
@@ -270,8 +271,9 @@ def wh_player_profile(batter_tm_id) -> dict:
     name = "" if pd.isna(df.iloc[0]["batter_name"]) else str(df.iloc[0]["batter_name"])
     bats = "" if pd.isna(df.iloc[0]["batter_side"]) else str(df.iloc[0]["batter_side"])
     cy, pos = _roster_lookup(name)
+    media = player_media(int(batter_tm_id))  # scraped headshot + jersey (blanks if none)
     return {"name": name, "bats": bats, "class_year": cy, "position": pos,
-            "photo": "", "jersey": ""}
+            "photo": media["photo_url"], "jersey": media["jersey"]}
 
 
 def wh_scoreboard(game_id) -> dict:

@@ -86,7 +86,9 @@ def test_wh_player_profile_and_scoreboard(top_batter, top_game):
     prof = wh.wh_player_profile(top_batter)
     assert set(prof) == {"name", "bats", "class_year", "position", "photo", "jersey"}
     assert prof["name"]                # non-empty for a real batter
-    assert prof["photo"] == "" and prof["jersey"] == ""
+    # photo/jersey come from the scraped roster_media.json (may or may not have run);
+    # either way they must be strings, not None.
+    assert isinstance(prof["photo"], str) and isinstance(prof["jersey"], str)
     sb = wh.wh_scoreboard(top_game)
     assert set(sb) == {"date", "loc", "opp", "game_type"}
     assert sb["loc"] in ("vs", "@")

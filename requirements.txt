@@ -17,6 +17,9 @@ PyMySQL>=1.1
 # Config / env
 python-dotenv>=1.0
 
+# Roster media scrape (scripts/scrape_roster_media.py)
+beautifulsoup4>=4.12
+
 # Reports (HTML -> PDF)
 playwright>=1.44     # headless Chromium for PDF rendering
 kaleido>=0.2         # Plotly static image export
