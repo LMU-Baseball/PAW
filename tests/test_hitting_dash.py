@@ -214,3 +214,15 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     # smoke: it built a component tree, not the login placeholder
     assert out is not None
     assert "Please log in" not in str(out)
+
+
+def test_register_callbacks_adds_callbacks(server):
+    from dash import Dash
+    from app.dashboards.hitting import layout, callbacks, index
+    app = Dash(__name__, server=server, url_base_pathname="/dash/htest/",
+               suppress_callback_exceptions=True)
+    app.index_string = index.INDEX_STRING
+    app.layout = layout.serve_layout
+    before = len(app.callback_map)
+    callbacks.register_callbacks(app)
+    assert len(app.callback_map) > before

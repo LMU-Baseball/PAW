@@ -26,4 +26,8 @@ def build_hitting_dash(server) -> Dash:
     )
     dash_app.index_string = INDEX_STRING
     dash_app.layout = layout.serve_layout
+
+    from app.dashboards.hitting import callbacks
+    callbacks.register_callbacks(dash_app)
+
     return dash_app
