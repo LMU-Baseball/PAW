@@ -38,9 +38,9 @@ def test_home_shows_hero_and_module_cards(app_ctx):
     assert "THE PAW" in body                              # marquee
     assert "/static/brand/lions-arch.png" in body         # hero wordmark
     assert "/static/brand/palms-grey.png" in body         # palms motif (global bg)
-    assert "/dash/hitting/" in body                       # Hitting module
-    assert "/reports/pitching" in body                    # Pitching module
-    assert "Coming soon" in body                          # Catching disabled
+    assert 'href="/hitting"' in body                      # Hitting hub
+    assert 'href="/pitching"' in body                     # Pitching hub
+    assert 'href="/catching"' in body                     # Catching hub
     assert "coach" in body                                # role copy
 
 
