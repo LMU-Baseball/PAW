@@ -204,6 +204,123 @@ def pitchers_for_game(game_id: int, sort: str = "pitch") -> pd.DataFrame:
     )
 
 
+def wh_lmu_pitchers() -> pd.DataFrame:
+    """One row per LMU pitcher for the dashboard dropdown.
+
+    Some pitchers have multiple pitcher_ids (split Trackman id schemes, same
+    name); collapse to the most-tracked id per name, like the hitting module.
+    Names come from tm_player as "Last, First".
+    """
+    return query_df(
+        """
+        SELECT PitcherId, Pitcher FROM (
+          SELECT p.player_id AS PitcherId,
+                 CONCAT(p.last_name, ', ', p.first_name) AS Pitcher,
+                 COUNT(*) AS n,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY p.last_name, p.first_name
+                   ORDER BY COUNT(*) DESC) AS rn
+            FROM fact_tm_game_pitch f
+            JOIN tm_player p ON p.player_id = f.pitcher_id
+           WHERE f.pitcher_team = :lmu AND f.pitcher_id IS NOT NULL
+           GROUP BY p.player_id, p.last_name, p.first_name
+        ) t
+        WHERE rn = 1
+        ORDER BY Pitcher
+        """,
+        {"lmu": LMU_PITCHER_TEAM},
+    )
+
+
+def _sibling_pitcher_ids(pitcher_id: int) -> list[int]:
+    """All LMU pitcher_ids sharing this pitcher's name (split-id union)."""
+    df = query_df(
+        """
+        SELECT DISTINCT f2.pitcher_id
+          FROM fact_tm_game_pitch f
+          JOIN tm_player p  ON p.player_id = f.pitcher_id
+          JOIN tm_player p2 ON p2.last_name = p.last_name
+                           AND p2.first_name = p.first_name
+          JOIN fact_tm_game_pitch f2 ON f2.pitcher_id = p2.player_id
+         WHERE f.pitcher_id = :pid AND f2.pitcher_team = :lmu
+        """,
+        {"pid": pitcher_id, "lmu": LMU_PITCHER_TEAM},
+    )
+    ids = [int(x) for x in df["pitcher_id"].tolist()]
+    return ids or [int(pitcher_id)]
+
+
+def games_for_pitcher(pitcher_id: int) -> pd.DataFrame:
+    """A pitcher's outings, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'."""
+    ids = _sibling_pitcher_ids(pitcher_id)
+    marks = ", ".join(f":id{i}" for i in range(len(ids)))
+    params = {f"id{i}": v for i, v in enumerate(ids)}
+    params["lmu"] = LMU_TEAM_ID
+    df = query_df(
+        f"""
+        SELECT DISTINCT g.game_id, g.game_date,
+               ht.team_name AS home_team, at.team_name AS away_team,
+               g.home_team_id
+          FROM fact_tm_game_pitch f
+          JOIN dim_tm_game g ON g.game_id = f.game_id
+          LEFT JOIN tm_team ht ON ht.team_id = g.home_team_id
+          LEFT JOIN tm_team at ON at.team_id = g.away_team_id
+         WHERE f.pitcher_id IN ({marks})
+         ORDER BY g.game_date DESC, g.game_id DESC
+        """,
+        params,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["game_id", "GameLabel"])
+    lmu_home = df["home_team_id"] == LMU_TEAM_ID
+    opp = df["away_team"].where(lmu_home, df["home_team"])
+    loc = pd.Series("vs", index=df.index).where(lmu_home, "@")
+    df["GameLabel"] = (df["game_date"].astype(str) + " " + loc + " " + opp.fillna("?"))
+    return df[["game_id", "GameLabel"]].reset_index(drop=True)
+
+
+def pitcher_profile(pitcher_id: int) -> dict:
+    """Name + throws (from the warehouse) + jersey/photo (best-effort roster media)."""
+    from app.data import roster_media
+    name = pitcher_name(pitcher_id)  # "First Last"
+    thr = query_df(
+        """
+        SELECT pitcher_throws FROM fact_tm_game_pitch
+         WHERE pitcher_id = :pid AND pitcher_throws IS NOT NULL LIMIT 1
+        """,
+        {"pid": pitcher_id},
+    )
+    throws = "" if thr.empty else str(thr.iloc[0]["pitcher_throws"])
+    tm_id = pitcher_tm_id_for(pitcher_id)
+    media = roster_media.player_media(tm_id) if tm_id is not None else {"jersey": "", "photo_url": ""}
+    return {"name": name, "class_year": "", "position": "",
+            "throws": throws, "jersey": media.get("jersey", ""),
+            "photo": media.get("photo_url", "")}
+
+
+def season_summary(pitcher_id: int) -> dict:
+    """Coarse season tiles: appearances (distinct games) + total pitches + K + BB."""
+    ids = _sibling_pitcher_ids(pitcher_id)
+    marks = ", ".join(f":id{i}" for i in range(len(ids)))
+    params = {f"id{i}": v for i, v in enumerate(ids)}
+    df = query_df(
+        f"""
+        SELECT COUNT(DISTINCT game_id) AS apps, COUNT(*) AS pitches,
+               SUM(korbb = 'Strikeout') AS k, SUM(korbb = 'Walk') AS bb
+          FROM fact_tm_game_pitch
+         WHERE pitcher_id IN ({marks})
+        """,
+        params,
+    )
+    if df.empty:
+        return {"appearances": "—", "pitches": "—", "k": "—", "bb": "—"}
+    r = df.iloc[0]
+    def _s(v):
+        return "—" if v is None or pd.isna(v) else str(int(v))
+    return {"appearances": _s(r["apps"]), "pitches": _s(r["pitches"]),
+            "k": _s(r["k"]), "bb": _s(r["bb"])}
+
+
 def report_data_version(pitcher_id: int) -> str:
     """A token that changes when a pitcher gets new data, for report caching.
 

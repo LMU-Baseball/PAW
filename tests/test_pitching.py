@@ -173,3 +173,43 @@ def test_pitchers_for_game_pitch_order_is_by_first_pitch():
     ).set_index("pitcher_id")["fp"].to_dict()
     seq = [firsts[pid] for pid in df["player_id"] if pid in firsts]
     assert seq == sorted(seq)  # non-decreasing first-pitch order
+
+
+# ============ Dashboard data-layer additions (Task 3) ========================
+
+def _a_real_lmu_pitcher_id():
+    from app.data import pitching as P
+    from app.db import query_df
+    df = query_df(
+        """
+        SELECT pitcher_id FROM fact_tm_game_pitch
+         WHERE pitcher_team = 'LOY_LIO' AND pitcher_id IS NOT NULL
+         GROUP BY pitcher_id ORDER BY COUNT(*) DESC LIMIT 1
+        """
+    )
+    return int(df.loc[0, "pitcher_id"])
+
+
+def test_wh_lmu_pitchers_has_rows_and_columns():
+    from app.data import pitching as P
+    df = P.wh_lmu_pitchers()
+    assert not df.empty
+    assert {"PitcherId", "Pitcher"} <= set(df.columns)
+    assert df["PitcherId"].is_unique
+
+
+def test_games_for_pitcher_newest_first():
+    from app.data import pitching as P
+    pid = _a_real_lmu_pitcher_id()
+    g = P.games_for_pitcher(pid)
+    assert not g.empty
+    assert {"game_id", "GameLabel"} <= set(g.columns)
+
+
+def test_pitcher_profile_and_season_summary_keys():
+    from app.data import pitching as P
+    pid = _a_real_lmu_pitcher_id()
+    prof = P.pitcher_profile(pid)
+    assert set(prof) >= {"name", "class_year", "position", "throws", "jersey", "photo"}
+    summ = P.season_summary(pid)
+    assert set(summ) >= {"appearances", "pitches", "k", "bb"}
