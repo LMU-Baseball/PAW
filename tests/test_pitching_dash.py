@@ -66,3 +66,8 @@ def test_pitch_breakdown_render(outing_df):
     from app.dashboards.pitching.tabs import pitch_breakdown
     comp = pitch_breakdown.render(outing_df)
     assert comp is not None  # renders without raising on real data
+
+
+def test_location_movement_render(outing_df):
+    from app.dashboards.pitching.tabs import location_movement
+    assert location_movement.render(outing_df) is not None
