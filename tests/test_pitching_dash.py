@@ -52,3 +52,17 @@ def test_build_pitching_dash_mounts(server):
     # The dashboard registers at /dash/pitching/ during create_app.
     rules = {r.rule for r in server.url_map.iter_rules()}
     assert any(r.startswith("/dash/pitching/") for r in rules)
+
+
+@pytest.fixture(scope="module")
+def outing_df(real_pitcher):
+    from app.data import pitching as P
+    g = P.games_for_pitcher(real_pitcher)
+    gid = int(g.iloc[0]["game_id"])
+    return P.game_pitches(gid, real_pitcher)
+
+
+def test_pitch_breakdown_render(outing_df):
+    from app.dashboards.pitching.tabs import pitch_breakdown
+    comp = pitch_breakdown.render(outing_df)
+    assert comp is not None  # renders without raising on real data

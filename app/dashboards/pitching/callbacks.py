@@ -9,6 +9,7 @@ from flask_login import current_user
 
 from app.data import pitching as P
 from app.dashboards.pitching import layout, selectors
+from app.dashboards.pitching.tabs import pitch_breakdown
 
 
 def _read_game_df(data_json):
@@ -59,5 +60,7 @@ def register_callbacks(dash_app) -> None:
         if df.empty:
             return html.Div("No pitch data for this selection.",
                             style={"padding": "12px", "color": "#555"})
+        if tab == "breakdown":
+            return pitch_breakdown.render(df)
         # Tabs wired in Tasks 5-8.
         return html.Div(f"[{tab}] {len(df)} pitches", style={"padding": "12px"})
