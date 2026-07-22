@@ -51,3 +51,18 @@ def test_shell_uses_brand_colors():
     body = _app().test_client().get("/login").get_data(as_text=True)
     assert "#9A0021" in body   # crimson (darker; coaches preferred it over #AB0C2F)
     assert "#0076A5" in body   # official LMU Blue
+
+
+def test_shell_index_string_has_brand():
+    from app.dashboards import shell
+    s = shell.index_string()
+    assert "#f5f5f5" in s
+    assert "palms-grey.png" in s
+    assert "/static/reports/lion.png" in s
+    assert "Teko-Regular.ttf" in s
+
+
+def test_shell_constants():
+    from app.dashboards import shell
+    assert shell.CRIMSON == "#9A0021"
+    assert shell.BANNER == "rgba(154,0,33,0.82)"

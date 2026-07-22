@@ -6,34 +6,7 @@ from flask_login import current_user
 
 from app.data import hitting_wh
 from app.dashboards.hitting import selectors
-
-_CRIMSON = "#9A0021"
-_BANNER = "rgba(154,0,33,0.82)"
-_PHOTO_PLACEHOLDER = "/static/reports/lion.png"  # until the roster-photo scrape lands
-
-
-def header() -> html.Div:
-    """Site header (matches base.html): logo -> home, wordmark, user + logout."""
-    brand = html.A([
-        html.Img(src="/static/reports/lmu.png",
-                 style={"height": "40px", "width": "auto", "display": "block"}),
-        html.Span("The Paw", style={
-            "fontFamily": "Teko, sans-serif", "fontWeight": "700", "fontSize": "30px",
-            "lineHeight": "1", "letterSpacing": "1px", "textTransform": "uppercase",
-            "color": "#fff"}),
-    ], href="/", style={"display": "flex", "alignItems": "center", "gap": "12px",
-                        "textDecoration": "none"})
-    right = html.Span()
-    if current_user.is_authenticated:
-        right = html.Span([
-            f"{current_user.name} · {current_user.role} · ",
-            html.A("Log out", href="/logout",
-                   style={"color": "#fff", "textDecoration": "underline"}),
-        ], style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
-    return html.Div([brand, right], style={
-        "background": _BANNER, "color": "#fff", "padding": "0 20px", "height": "64px",
-        "display": "flex", "alignItems": "center", "justifyContent": "space-between",
-        "boxShadow": "0 2px 8px rgba(0,0,0,.15)"})
+from app.dashboards.shell import CRIMSON as _CRIMSON, PHOTO_PLACEHOLDER as _PHOTO_PLACEHOLDER, header
 
 
 def _tile(label, value):
