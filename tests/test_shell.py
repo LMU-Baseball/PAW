@@ -4,7 +4,11 @@ These assert that branded markup and local assets are present and that no
 Google Fonts CDN is referenced. Visual polish is verified live, not here.
 The shell renders on the login page (extends base.html), so no auth needed.
 """
+import pytest
+
 from app import create_app
+from app.extensions import db
+from app.auth.models import User
 from config import Config
 
 
@@ -15,6 +19,28 @@ def _app():
         SECRET_KEY = "test-secret"
         SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     return create_app(TestConfig)
+
+
+@pytest.fixture
+def logged_in_client(tmp_path):
+    """A Flask test client logged in as a coach (pattern from tests/test_home.py)."""
+    class TestConfig(Config):
+        TESTING = True
+        WTF_CSRF_ENABLED = False
+        SECRET_KEY = "test-secret"
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_path / 't.db'}"
+
+    app = create_app(TestConfig)
+    with app.app_context():
+        u = User(email="c@lmu.edu", name="Coach C", role="coach")
+        u.set_password("x")
+        db.session.add(u)
+        db.session.commit()
+
+    client = app.test_client()
+    client.post("/login", data={"email": "c@lmu.edu", "password": "x"},
+                follow_redirects=True)
+    return client
 
 
 def test_shell_loads_teko_locally_not_cdn():
@@ -66,3 +92,28 @@ def test_shell_constants():
     from app.dashboards import shell
     assert shell.CRIMSON == "#9A0021"
     assert shell.BANNER == "rgba(154,0,33,0.82)"
+
+
+def test_section_hubs_render_and_link(logged_in_client):
+    # Home cards now point at the hubs.
+    home = logged_in_client.get("/")
+    assert home.status_code == 200
+    assert b'href="/pitching"' in home.data
+    assert b'href="/hitting"' in home.data
+
+    # Pitching hub lists its two actions.
+    ph = logged_in_client.get("/pitching")
+    assert ph.status_code == 200
+    assert b"/dash/pitching/" in ph.data           # Stats Dashboard
+    assert b"/reports/pitching" in ph.data          # Postgame Reports
+
+    # Hitting hub: Stats Dashboard live, HitTrax practice "Coming soon".
+    hh = logged_in_client.get("/hitting")
+    assert hh.status_code == 200
+    assert b"/dash/hitting/" in hh.data
+    assert b"Coming soon" in hh.data
+
+    # Catching hub is a placeholder.
+    ch = logged_in_client.get("/catching")
+    assert ch.status_code == 200
+    assert b"Coming soon" in ch.data

@@ -1,0 +1,35 @@
+{% macro card_grid(cards) %}
+<style>
+  .modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .modules { grid-template-columns: 1fr; } }
+  .module {
+    display: block; text-decoration: none; color: var(--ink);
+    background: #fff; border: 1px solid #e2e2e2; border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 20px; border-top: 4px solid var(--crimson);
+    transition: box-shadow .15s, transform .05s;
+  }
+  a.module:hover { box-shadow: 0 6px 18px rgba(0,0,0,.12); transform: translateY(-2px); }
+  .module h3 { margin: 0 0 6px; color: var(--crimson); font-size: 24px; }
+  .module p { margin: 0; font-size: 14px; color: #555; }
+  .module.disabled { border-top-color: #bbb; opacity: .7; }
+  .module.disabled h3 { color: #888; }
+  .module .soon {
+    display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px; color: var(--blue-dark);
+  }
+</style>
+<div class="modules">
+  {% for c in cards %}
+    {% if c.href %}
+      <a class="module" href="{{ c.href }}">
+        <h3>{{ c.title }}</h3><p>{{ c.desc }}</p>
+      </a>
+    {% else %}
+      <div class="module disabled">
+        <h3>{{ c.title }}</h3><p>{{ c.desc }}</p>
+        <span class="soon">Coming soon</span>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endmacro %}
