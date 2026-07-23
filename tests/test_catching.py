@@ -170,3 +170,41 @@ def test_apply_framing_filters():
     assert len(C.apply_framing_filters(df, pitch_speed="Fastball")) == 1
     # rows 0,2,3 are side=0 -> x=0 -> Heart; row 1 is side=2.0 -> x=24in -> Waste
     assert len(C.apply_framing_filters(df, zone="Heart")) == 3
+
+
+def _framing_table_rows():
+    import pandas as pd
+    # Build explicit CallType/Zone mixes. height=2.5 -> y=0 (in vert range);
+    # x sets the zone: 0in Heart, 24in Waste, 11in Shadow.
+    def row(side, call):
+        return {"plate_loc_side": side, "plate_loc_height": 2.5,
+                "pitch_call": call, "batter_side": "Right",
+                "pitcher_throws": "Right", "tagged_pitch_type": "Fastball"}
+    return pd.DataFrame([
+        row(0.0, "StrikeCalled"),   # Heart, in-zone strike -> Correct
+        row(0.0, "BallCalled"),     # Heart, in-zone ball  -> Lost (heart)
+        row(2.0, "StrikeCalled"),   # Waste(24in), out strike -> Stolen (waste)
+        row(0.9167, "StrikeCalled"),  # ~11in Shadow, out-of-box strike -> Stolen (shadow)
+    ])
+
+
+def test_framing_table_math():
+    from app.data import catching as C
+    df = C.add_framing_cols(_framing_table_rows())
+    t = C.framing_table(df)
+    # stolen = 2 (waste + shadow), lost = 1 (heart) -> net = 1
+    assert t["net_strikes"] == 1
+    # Steal% (legacy quirk) = lost / total_takes * 100 = 1/4*100 = 25.0
+    assert t["steal_pct"] == 25.0
+    assert t["shadow_net"] == 1
+    assert t["heart_net"] == -1
+    # Heart zone = rows 0 (Correct) and 1 (Lost) -> 1 lost / 2 heart takes = 50.0
+    # (matches legacy src/app.R: denom is ALL heart-zone takes, not just lost+stolen)
+    assert t["heart_loss_pct"] == 50.0
+
+
+def test_framing_table_empty():
+    import pandas as pd
+    from app.data import catching as C
+    t = C.framing_table(pd.DataFrame())
+    assert t["net_strikes"] == 0 and t["steal_pct"] is None

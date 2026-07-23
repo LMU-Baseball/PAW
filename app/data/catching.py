@@ -443,6 +443,75 @@ def throw_attempts(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _pct(num, den):
+    return None if not den else round(100.0 * num / den, 1)
+
+
+def framing_table(df: pd.DataFrame) -> dict:
+    """Legacy stolen/lost framing summary (PROVISIONAL; formulas verbatim from
+    src/app.R, incl. the 'Steal%' = lost/total quirk — coach-confirmable)."""
+    empty = {"net_strikes": 0, "steal_pct": None, "shadow_net": 0,
+             "shadow_steal_pct": None, "heart_net": 0, "heart_loss_pct": None,
+             "waste_net": 0, "waste_steal_pct": None}
+    if df.empty:
+        return empty
+    f = add_framing_cols(df) if "CallType" not in df.columns else df
+    ct, zone = f["CallType"], f["Zone"]
+    stolen = ct == "Stolen Strike"
+    lost = ct == "Lost Strike"
+    total = len(f)
+    shadow = zone == "Shadow"
+    heart = zone == "Heart"
+    waste = zone.isin(["Waste", "Chase"])
+    return {
+        "net_strikes": int(stolen.sum() - lost.sum()),
+        "steal_pct": _pct(lost.sum(), total),
+        "shadow_net": int((stolen & shadow).sum() - (lost & shadow).sum()),
+        "shadow_steal_pct": _pct((stolen & shadow).sum(), shadow.sum()),
+        "heart_net": int((stolen & heart).sum() - (lost & heart).sum()),
+        "heart_loss_pct": _pct((lost & heart).sum(), heart.sum()),
+        "waste_net": int((stolen & waste).sum() - (lost & waste).sum()),
+        "waste_steal_pct": _pct((lost & waste).sum(), waste.sum()),
+    }
+
+
+def framing_season_tiles(catcher_id: int) -> dict:
+    """Season sidebar tiles: games, pitches, net strikes, steal% (SQL aggregate,
+    sibling-id union). InZone box mirrors _in_zone in SQL."""
+    ids = _sibling_catcher_ids(catcher_id)
+    marks, params = _in_clause(ids)
+    df = query_df(
+        f"""
+        SELECT COUNT(DISTINCT game_id) AS games,
+               COUNT(*) AS pitches,
+               SUM(pitch_call='StrikeCalled'
+                   AND NOT (ABS(plate_loc_side*12) <= 10
+                            AND ABS(plate_loc_height*12 - 30) <= 13)) AS stolen,
+               SUM(pitch_call='BallCalled'
+                   AND (ABS(plate_loc_side*12) <= 10
+                        AND ABS(plate_loc_height*12 - 30) <= 13)) AS lost,
+               SUM(pitch_call IN ('StrikeCalled','BallCalled','BallinDirt',
+                                  'BallIntentional','AutomaticBall')) AS takes
+          FROM fact_tm_game_pitch
+         WHERE catcher_id IN ({marks})
+        """,
+        params,
+    )
+    if df.empty:
+        return {"games": "—", "pitches": "—", "net_strikes": "—", "steal_pct": "—"}
+    r = df.iloc[0]
+    stolen = int(r["stolen"] or 0)
+    lost = int(r["lost"] or 0)
+    takes = int(r["takes"] or 0)
+    steal = _pct(lost, takes)
+    return {
+        "games": str(int(r["games"] or 0)),
+        "pitches": str(int(r["pitches"] or 0)),
+        "net_strikes": str(stolen - lost),
+        "steal_pct": "—" if steal is None else f"{steal}%",
+    }
+
+
 def throws_summary(df: pd.DataFrame) -> dict:
     """Avg/min pop time + avg exchange + avg throw speed. PROVISIONAL v1."""
     t = throw_attempts(df)
