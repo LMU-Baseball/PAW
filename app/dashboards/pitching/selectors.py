@@ -23,10 +23,10 @@ def _pitcher_id_for_tm(tm_id: int):
     df = query_df(
         """
         SELECT pitcher_id FROM fact_tm_game_pitch
-         WHERE pitcher_tm_id = :tm AND pitcher_team = 'LOY_LIO'
+         WHERE pitcher_tm_id = :tm AND pitcher_team = :lmu
          GROUP BY pitcher_id ORDER BY COUNT(*) DESC LIMIT 1
         """,
-        {"tm": tm_id},
+        {"tm": tm_id, "lmu": P.LMU_PITCHER_TEAM},
     )
     return None if df.empty else int(df.loc[0, "pitcher_id"])
 

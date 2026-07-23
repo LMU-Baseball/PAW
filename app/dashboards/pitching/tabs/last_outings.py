@@ -1,7 +1,6 @@
 """Last Outings tab: averages across the last N appearances + a trend table."""
 from __future__ import annotations
 
-import pandas as pd
 from dash import html
 
 from app.data import pitching as P

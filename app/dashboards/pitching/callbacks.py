@@ -47,7 +47,7 @@ def register_callbacks(dash_app) -> None:
     def _on_load_data(sel):
         if not sel or sel.get("game_id") is None or sel.get("pitcher_id") is None:
             return None
-        df = P.game_pitches(int(sel["game_id"]), int(sel["pitcher_id"]))
+        df = P.game_pitches_for(int(sel["game_id"]), int(sel["pitcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(

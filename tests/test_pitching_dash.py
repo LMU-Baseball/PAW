@@ -1,9 +1,7 @@
 """Tests for the Dash pitching dashboard (shell, selectors, build)."""
-import pandas as pd
 import pytest
 
 from app import create_app
-from app.data import pitching as P
 from app.db import query_df
 from config import Config
 
@@ -34,6 +32,13 @@ def test_resolve_pitcher_player_is_self_only():
     # A player ignores the requested id and gets their own.
     assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=None) is None
     assert selectors.resolve_pitcher(999, is_coach=True, own_trackman_id=None) == 999
+
+
+def test_resolve_pitcher_player_discards_requested_id(monkeypatch):
+    from app.dashboards.pitching import selectors
+    monkeypatch.setattr(selectors, "_pitcher_id_for_tm", lambda tm: 4242)
+    got = selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=555)
+    assert got == 4242  # own id, NOT the requested 999
 
 
 def test_pitcher_options_coach_nonempty():

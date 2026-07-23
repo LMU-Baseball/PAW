@@ -5,10 +5,8 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import pitching as P
-from app.dashboards.shell import CRIMSON, PHOTO_PLACEHOLDER, header, section
+from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
 from app.dashboards.pitching import selectors
-
-_BANNER = "rgba(154,0,33,0.82)"
 
 
 def _tile(label, value):
@@ -85,7 +83,7 @@ def serve_layout() -> html.Div:
         ]),
         html.Div(id="scoreboard"),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": _BANNER})
+              "padding": "12px 16px", "backgroundColor": BANNER})
 
     tabs = dcc.Tabs(id="tabs", value="breakdown", children=[
         dcc.Tab(label="Pitch Breakdown", value="breakdown"),

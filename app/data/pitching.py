@@ -41,6 +41,19 @@ def game_pitches(game_id: int, pitcher_id: int) -> pd.DataFrame:
     )
 
 
+def game_pitches_for(game_id: int, pitcher_id: int) -> pd.DataFrame:
+    """A pitcher's pitches in a game, unioning split Trackman ids (dashboard use)."""
+    ids = _sibling_pitcher_ids(pitcher_id)
+    marks = ", ".join(f":id{i}" for i in range(len(ids)))
+    params = {f"id{i}": v for i, v in enumerate(ids)}
+    params["gid"] = game_id
+    return query_df(
+        f"SELECT * FROM fact_tm_game_pitch "
+        f"WHERE game_id = :gid AND pitcher_id IN ({marks}) ORDER BY pitch_no",
+        params,
+    )
+
+
 def game_context(game_id: int) -> dict:
     # NOTE: tm_team has no `name` column — the actual columns are
     # team_id/school_name/team_name/nickname (verified against the live
@@ -89,7 +102,12 @@ def game_context(game_id: int) -> dict:
 
 
 def recent_outings(pitcher_id: int, game_id: int, n: int = 5) -> pd.DataFrame:
-    """This outing + prior ones, newest first, up to n rows."""
+    """This outing + prior ones, newest first, up to n rows.
+
+    NOTE: keys on a single pitcher_id and does not yet union split Trackman
+    ids (see _sibling_pitcher_ids); Last Outings has the same latent gap as
+    game_pitches. Acceptable for now -- no current LMU pitcher has split ids.
+    """
     df = query_df(
         """
         SELECT game_id, game_date, season_label, game_type,
@@ -219,7 +237,7 @@ def wh_lmu_pitchers() -> pd.DataFrame:
                  COUNT(*) AS n,
                  ROW_NUMBER() OVER (
                    PARTITION BY p.last_name, p.first_name
-                   ORDER BY COUNT(*) DESC) AS rn
+                   ORDER BY COUNT(*) DESC, p.player_id) AS rn
             FROM fact_tm_game_pitch f
             JOIN tm_player p ON p.player_id = f.pitcher_id
            WHERE f.pitcher_team = :lmu AND f.pitcher_id IS NOT NULL

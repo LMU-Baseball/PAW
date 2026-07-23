@@ -6,7 +6,12 @@ from flask_login import current_user
 
 from app.data import hitting_wh
 from app.dashboards.hitting import selectors
-from app.dashboards.shell import CRIMSON as _CRIMSON, PHOTO_PLACEHOLDER as _PHOTO_PLACEHOLDER, header
+from app.dashboards.shell import (
+    BANNER as _BANNER,
+    CRIMSON as _CRIMSON,
+    PHOTO_PLACEHOLDER as _PHOTO_PLACEHOLDER,
+    header,
+)
 
 
 def _tile(label, value):
@@ -82,7 +87,7 @@ def serve_layout() -> html.Div:
         ]),
         html.Div(id="scoreboard"),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": "rgba(154,0,33,0.82)"})
+              "padding": "12px 16px", "backgroundColor": _BANNER})
 
     tabs = dcc.Tabs(id="tabs", value="game", children=[
         dcc.Tab(label="Game Level", value="game"),
