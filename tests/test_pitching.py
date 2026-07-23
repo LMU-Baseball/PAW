@@ -242,3 +242,22 @@ def test_fig_velo_by_pitch_uses_1_based_sequence(outing_like_df):
     fig = P.fig_velo_by_pitch(outing_like_df)
     xs = [x for tr in fig.data for x in (tr.x if tr.x is not None else [])]
     assert xs and min(xs) == 1  # per-outing sequence starts at 1, not game pitch_no
+
+
+# ============ Last Outings: preset count + avg/max velo trend (Task 6) =======
+
+@pytest.fixture(scope="module")
+def real_pitcher_id_and_game():
+    from app.data import pitching as P
+    pid = _a_real_lmu_pitcher_id()
+    gid = int(P.games_for_pitcher(pid).iloc[0]["game_id"])
+    return pid, gid
+
+
+def test_fig_outings_velo_trend_two_lines(real_pitcher_id_and_game):
+    from app.data import pitching as P
+    pid, gid = real_pitcher_id_and_game
+    recent = P.recent_outings(pid, gid, 5)
+    fig = P.fig_outings_velo_trend(recent)
+    names = {tr.name for tr in fig.data}
+    assert {"Avg Velo", "Max Velo"} <= names

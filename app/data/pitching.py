@@ -722,6 +722,21 @@ def fig_heatmaps_by_pitch_type(df: pd.DataFrame) -> list:
     return items
 
 
+def fig_outings_velo_trend(recent_df: pd.DataFrame) -> go.Figure:
+    """Avg + Max velo across the selected outings (chronological)."""
+    fig = go.Figure()
+    if not recent_df.empty:
+        d = recent_df.sort_values("game_date")
+        fig.add_trace(go.Scatter(x=d["game_date"], y=d["appearance_avg_velo"].round(1),
+                                 mode="markers+lines", name="Avg Velo",
+                                 line=dict(color="#0076A5")))
+        fig.add_trace(go.Scatter(x=d["game_date"], y=d["appearance_max_velo"].round(1),
+                                 mode="markers+lines", name="Max Velo",
+                                 line=dict(color="#9A0021")))
+    fig.update_xaxes(title="Outing Date"); fig.update_yaxes(title="Velo (mph)")
+    return _base_layout(fig, "Velocity Trend (Selected Outings)")
+
+
 # ============================ TABLE ASSEMBLERS ============================
 
 def _r1(x) -> float | None:

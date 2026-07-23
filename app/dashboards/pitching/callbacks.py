@@ -71,6 +71,14 @@ def register_callbacks(dash_app) -> None:
             return rhh_lhh.render(df)
         return html.Div()
 
+    @dash_app.callback(
+        Output("lo-body", "children"),
+        Input("lo-count-dd", "value"), State("selection", "data"),
+    )
+    def _lo_body(n, sel):
+        sel = sel or {}
+        return last_outings.body(sel.get("pitcher_id"), sel.get("game_id"), n or 5)
+
     # Chip click -> toggle the pitch type in the active-set store.
     @dash_app.callback(
         Output("lm-active", "data"),
