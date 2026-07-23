@@ -93,8 +93,11 @@ def build_media(players, roster_cards):
     """Map raw_tm_id -> roster card, confident matches only, dominant identity wins.
 
     players: list of (raw_tm_id, warehouse_name, n_tracked).
-    Sorting by n_tracked ascending means the heaviest identity is written LAST and
-    wins the id key (a 1-pitch stray under someone else's id loses)."""
+    Each raw id is first collapsed to its single DOMINANT identity (most-tracked
+    name); only that winner is matched. This guarantees an id key can never keep a
+    lighter stray's face when the real (heaviest) player differs -- including when
+    the dominant identity itself has no confident roster card (the id stays
+    unmatched rather than inheriting a colliding stray's photo)."""
     by_norm = {_norm_name(p["name"]): p for p in roster_cards}
     li_index: dict[tuple[str, str], list[dict]] = {}
     for p in roster_cards:
@@ -109,8 +112,14 @@ def build_media(players, roster_cards):
             p = cand[0] if len(cand) == 1 else None  # unambiguous only
         return p
 
+    # Collapse colliding identities to the dominant (most-tracked) name per raw id.
+    dominant: dict[int, tuple[str, int]] = {}
+    for tm_id, name, n in players:
+        if tm_id not in dominant or n > dominant[tm_id][1]:
+            dominant[tm_id] = (name, n)
+
     media, matched_names, unmatched = {}, set(), []
-    for tm_id, name, _n in sorted(players, key=lambda t: t[2]):  # light first
+    for tm_id, (name, _n) in dominant.items():
         p = match(name)
         if p:
             media[str(tm_id)] = {"jersey": p["jersey"], "photo_url": p["photo_url"],

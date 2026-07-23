@@ -101,3 +101,14 @@ def test_build_media_prefers_dominant_identity():
     assert media["832473"]["name"] == "Zach Bender"   # dominant identity won
     assert media["832473"]["jersey"] == "42"
     assert media["832474"]["name"] == "Noah Malone"
+
+
+def test_build_media_unmatched_dominant_does_not_inherit_stray_face():
+    # An id whose DOMINANT identity has no roster card must stay unmatched, even
+    # when a lighter colliding identity on the same id does match a card.
+    from scripts import scrape_roster_media as s
+    cards = [{"name": "Noah Malone", "jersey": "4", "photo_url": "malone.jpg"}]
+    players = [(900001, "Malone, Noah", 1),          # light, matches a card
+               (900001, "Nomatch, Ghost", 500)]      # dominant, no card
+    media, _, _ = s.build_media(players, cards)
+    assert "900001" not in media  # did NOT inherit Malone's face
