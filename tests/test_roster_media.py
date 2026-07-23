@@ -75,3 +75,29 @@ def test_wh_player_profile_merges_media(monkeypatch):
     assert prof["photo"] == "https://x/w.jpg"
     assert prof["jersey"] == "34"
     assert prof["name"] == "Wadas, Zach"
+
+
+# --------------------------- roster scrape: players + collisions ----------
+
+def test_lmu_players_includes_pitchers():
+    from scripts import scrape_roster_media as s
+    players = s.lmu_players()
+    assert players and len(players[0]) == 3  # (id, name, n_pitches)
+    names = {n for _, n, _ in players}
+    # A known LMU pitcher name is present in the union (not hitters-only).
+    assert any("Bender" in n for n in names)
+
+
+def test_build_media_prefers_dominant_identity():
+    from scripts import scrape_roster_media as s
+    cards = [
+        {"name": "Zach Bender", "jersey": "42", "photo_url": "bender.jpg"},
+        {"name": "Noah Malone", "jersey": "4", "photo_url": "malone.jpg"},
+    ]
+    # Same raw id 832473 claimed by a 1-pitch Malone stray AND the full Bender pitcher.
+    players = [(832473, "Malone, Noah", 1), (832473, "Bender, Zachary", 500),
+               (832474, "Malone, Noah", 300)]
+    media, _, _ = s.build_media(players, cards)
+    assert media["832473"]["name"] == "Zach Bender"   # dominant identity won
+    assert media["832473"]["jersey"] == "42"
+    assert media["832474"]["name"] == "Noah Malone"
