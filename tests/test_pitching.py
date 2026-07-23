@@ -44,6 +44,13 @@ def test_pitch_type_prefers_tagged():
     assert list(pt) == ["Slider", "Curveball", "Undefined"]
 
 
+def test_pretty_result_maps_calls():
+    assert P.pretty_result("StrikeSwinging") == "Swinging Strike"
+    assert P.pretty_result("BallCalled") == "Ball"
+    assert P.pretty_result("InPlay") == "In Play"
+    assert P.pretty_result("Nonsense") == "Nonsense"  # unknown passes through
+
+
 def test_pitcher_tm_id_resolves():
     assert P.pitcher_tm_id_for(PITCHER_ID) is not None
 

@@ -590,6 +590,19 @@ def pitch_color(pt: str) -> str:
     return PITCH_COLORS.get(pt) or _PT_FALLBACK[zlib.crc32(str(pt).encode()) % len(_PT_FALLBACK)]
 
 
+_RESULT_LABELS = {
+    "StrikeCalled": "Called Strike", "StrikeSwinging": "Swinging Strike",
+    "BallCalled": "Ball", "BallinDirt": "Ball (Dirt)",
+    "BallIntentional": "Intentional Ball", "AutomaticBall": "Automatic Ball",
+    "FoulBallNotFieldable": "Foul", "FoulBallFieldable": "Foul",
+    "InPlay": "In Play", "HitByPitch": "HBP",
+}
+
+
+def pretty_result(call: str) -> str:
+    return _RESULT_LABELS.get(call, call)
+
+
 _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)  # approx strike zone (ft)
 
 
@@ -630,7 +643,8 @@ def fig_movement(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     for pt, sub in d.groupby("_pt"):
         fig.add_trace(go.Scatter(x=sub["horz_break"], y=sub["induced_vert_break"],
-                                 mode="markers", name=pt))
+                                 mode="markers", name=pt,
+                                 marker=dict(color=pitch_color(pt), size=9)))
     fig.update_xaxes(title="Horizontal Break (in)", zeroline=True)
     fig.update_yaxes(title="Induced Vert Break (in)", zeroline=True)
     return _base_layout(fig, "Pitch Movement")
@@ -643,10 +657,13 @@ def _add_zone(fig: go.Figure) -> None:
 def fig_location(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
     d["_pt"] = pitch_type(d)
+    d["_res"] = d["pitch_call"].map(pretty_result)
     fig = go.Figure()
     for pt, sub in d.groupby("_pt"):
-        fig.add_trace(go.Scatter(x=sub["plate_loc_side"], y=sub["plate_loc_height"],
-                                 mode="markers", name=pt))
+        fig.add_trace(go.Scatter(
+            x=sub["plate_loc_side"], y=sub["plate_loc_height"], mode="markers", name=pt,
+            marker=dict(color=pitch_color(pt), size=9), customdata=sub[["_res"]],
+            hovertemplate=f"{pt}<br>Result: %{{customdata[0]}}<extra></extra>"))
     _add_zone(fig)
     fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
     fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")

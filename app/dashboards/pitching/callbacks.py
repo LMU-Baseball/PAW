@@ -4,7 +4,7 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-from dash import Input, Output, State, html
+from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import pitching as P
@@ -70,3 +70,49 @@ def register_callbacks(dash_app) -> None:
         if tab == "splits":
             return rhh_lhh.render(df)
         return html.Div()
+
+    # Chip click -> toggle the pitch type in the active-set store.
+    @dash_app.callback(
+        Output("lm-active", "data"),
+        Input({"type": "lm-chip", "index": ALL}, "n_clicks"),
+        State("lm-active", "data"),
+        prevent_initial_call=True,
+    )
+    def _lm_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        pt = tid["index"]
+        active = list(active or [])
+        return [p for p in active if p != pt] if pt in active else active + [pt]
+
+    # Active-set (or new data) -> re-render movement + location + table, filtered.
+    @dash_app.callback(
+        Output("lm-body", "children"),
+        Input("lm-active", "data"), State("game-data", "data"),
+    )
+    def _lm_body(active, data_json):
+        df = _read_game_df(data_json)
+        if not df.empty and active is not None:
+            df = df[P.pitch_type(df).isin(active)]
+        return location_movement.body(df)
+
+    # Give the active chips a visual "off" state: dim deselected chips.
+    @dash_app.callback(
+        Output({"type": "lm-chip", "index": ALL}, "style"),
+        Input("lm-active", "data"),
+        State({"type": "lm-chip", "index": ALL}, "id"),
+    )
+    def _lm_chip_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            pt = i["index"]; col = P.pitch_color(pt); on = pt in active
+            out.append({"border": f"2px solid {col}",
+                        "background": col if on else "#fff",
+                        "color": "#fff" if on else col,
+                        "borderRadius": "14px", "padding": "3px 12px",
+                        "margin": "0 6px 6px 0", "cursor": "pointer",
+                        "opacity": "1" if on else ".55",
+                        "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
+        return out
