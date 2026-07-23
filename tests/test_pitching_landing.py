@@ -28,6 +28,14 @@ def app_ctx(tmp_path):
     return app
 
 
+@pytest.fixture
+def logged_in_client(app_ctx):
+    """A test client logged in as the coach."""
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    return client
+
+
 def _login(client, email):
     return client.post("/login", data={"email": email, "password": "x"},
                        follow_redirects=True)
@@ -177,3 +185,9 @@ def test_landing_renders_hero_banner(app_ctx, monkeypatch):
     resp = client.get("/reports/pitching")
     body = resp.get_data(as_text=True)
     assert "/static/reports/lmu-bsb.png" in body   # branded hero image
+
+
+def test_pitching_landing_has_back_link(logged_in_client):
+    r = logged_in_client.get("/reports/pitching")
+    assert r.status_code == 200
+    assert b'href="/pitching"' in r.data  # back to the Pitching hub
