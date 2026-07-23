@@ -9,7 +9,7 @@ from flask_login import current_user
 
 from app.data import pitching as P
 from app.dashboards.pitching import layout, selectors
-from app.dashboards.pitching.tabs import location_movement, pitch_breakdown, rhh_lhh
+from app.dashboards.pitching.tabs import last_outings, location_movement, pitch_breakdown, rhh_lhh
 
 
 def _read_game_df(data_json):
@@ -56,6 +56,9 @@ def register_callbacks(dash_app) -> None:
         State("selection", "data"),
     )
     def _render_tab(tab, data_json, sel):
+        if tab == "outings":
+            sel = sel or {}
+            return last_outings.render(sel.get("pitcher_id"), sel.get("game_id"), 5)
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",
@@ -66,5 +69,4 @@ def register_callbacks(dash_app) -> None:
             return location_movement.render(df)
         if tab == "splits":
             return rhh_lhh.render(df)
-        # Tabs wired in Tasks 5-8.
-        return html.Div(f"[{tab}] {len(df)} pitches", style={"padding": "12px"})
+        return html.Div()

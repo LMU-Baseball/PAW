@@ -76,3 +76,10 @@ def test_location_movement_render(outing_df):
 def test_rhh_lhh_render(outing_df):
     from app.dashboards.pitching.tabs import rhh_lhh
     assert rhh_lhh.render(outing_df) is not None
+
+
+def test_last_outings_render(real_pitcher):
+    from app.data import pitching as P
+    from app.dashboards.pitching.tabs import last_outings
+    gid = int(P.games_for_pitcher(real_pitcher).iloc[0]["game_id"])
+    assert last_outings.render(real_pitcher, gid, 5) is not None
