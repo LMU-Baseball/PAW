@@ -15,6 +15,8 @@ def register_dashboards(server):
     build_hitting_dash(server)
     from app.dashboards.pitching import build_pitching_dash
     build_pitching_dash(server)
+    from app.dashboards.hitting_practice import build_hitting_practice_dash
+    build_hitting_practice_dash(server)
 
 
 def _protect_dash_routes(server):

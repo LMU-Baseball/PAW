@@ -107,11 +107,12 @@ def test_section_hubs_render_and_link(logged_in_client):
     assert b"/dash/pitching/" in ph.data           # Stats Dashboard
     assert b"/reports/pitching" in ph.data          # Postgame Reports
 
-    # Hitting hub: Stats Dashboard live, HitTrax practice "Coming soon".
+    # Hitting hub: Stats Dashboard + Practice (HitTrax) both live.
     hh = logged_in_client.get("/hitting")
     assert hh.status_code == 200
     assert b"/dash/hitting/" in hh.data
-    assert b"Coming soon" in hh.data
+    assert b"/dash/hitting-practice/" in hh.data
+    assert b"Coming soon" not in hh.data
 
     # Catching hub is a placeholder.
     ch = logged_in_client.get("/catching")
