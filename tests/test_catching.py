@@ -208,3 +208,30 @@ def test_framing_table_empty():
     from app.data import catching as C
     t = C.framing_table(pd.DataFrame())
     assert t["net_strikes"] == 0 and t["steal_pct"] is None
+
+
+def test_caught_stealing_summary():
+    import pandas as pd
+    from app.data import catching as C
+    df = pd.DataFrame([
+        {"play_result": "StolenBase", "pop_time": 2.0, "exchange_time": 0.7,
+         "throw_speed": 78.0, "inning": 1, "pitcher_name": "A, B"},
+        {"play_result": "CaughtStealing", "pop_time": 1.9, "exchange_time": 0.66,
+         "throw_speed": 80.0, "inning": 3, "pitcher_name": "A, B"},
+        {"play_result": "Single", "pop_time": None, "exchange_time": None,
+         "throw_speed": None, "inning": 4, "pitcher_name": "A, B"},
+    ])
+    ev = C.caught_stealing_events(df)
+    assert len(ev) == 2
+    assert list(ev["Caught"]) == [False, True]
+    s = C.caught_stealing_summary(df)
+    assert s["attempts"] == 2 and s["caught"] == 1
+    assert s["cs_pct"] == 50.0
+    assert s["avg_pop"] == 1.95
+
+
+def test_caught_stealing_empty():
+    import pandas as pd
+    from app.data import catching as C
+    s = C.caught_stealing_summary(pd.DataFrame())
+    assert s["attempts"] == 0 and s["cs_pct"] is None

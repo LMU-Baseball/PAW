@@ -537,3 +537,39 @@ def throws_summary(df: pd.DataFrame) -> dict:
         "avg_exchange": _avg("exchange_time"),
         "avg_throw_speed": _avg("throw_speed"),
     }
+
+
+CS_RESULTS = {"StolenBase", "CaughtStealing"}
+
+
+def caught_stealing_events(df: pd.DataFrame) -> pd.DataFrame:
+    """Stolen-base attempts charged on this catcher's pitches. PROVISIONAL v1."""
+    if df.empty or "play_result" not in df.columns:
+        return df.iloc[0:0].copy() if not df.empty else df.copy()
+    out = df[df["play_result"].isin(CS_RESULTS)].copy()
+    if out.empty:
+        return out
+    out["Caught"] = out["play_result"] == "CaughtStealing"
+    pop = _col(out, "pop_time", "PopTime")
+    exch = _col(out, "exchange_time", "ExchangeTime")
+    thr = _col(out, "throw_speed", "ThrowSpeed")
+    out["pop_time"] = out[pop] if pop else np.nan
+    out["exchange_time"] = out[exch] if exch else np.nan
+    out["throw_speed"] = out[thr] if thr else np.nan
+    return out
+
+
+def caught_stealing_summary(df: pd.DataFrame) -> dict:
+    """Attempts / caught / CS% / avg pop time on caught-stealing events."""
+    ev = caught_stealing_events(df)
+    n = len(ev)
+    if n == 0:
+        return {"attempts": 0, "caught": 0, "cs_pct": None, "avg_pop": None}
+    caught = int(ev["Caught"].sum())
+    pops = ev["pop_time"].dropna()
+    return {
+        "attempts": n,
+        "caught": caught,
+        "cs_pct": round(100.0 * caught / n, 1),
+        "avg_pop": None if pops.empty else round(float(pops.mean()), 2),
+    }
