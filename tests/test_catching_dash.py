@@ -83,3 +83,53 @@ def test_framing_scatter_returns_figure():
     from app.dashboards.catching import charts
     fig = charts.framing_scatter(_sample_df())
     assert fig is not None
+
+
+@pytest.fixture(scope="module")
+def real_catcher():
+    """Live-DB fixture (unguarded when DB is up; skips if unreachable/empty)."""
+    from sqlalchemy.exc import OperationalError
+    from app.db import query_df
+    try:
+        df = query_df(
+            """
+            SELECT catcher_id FROM fact_tm_game_pitch
+             WHERE pitcher_team = 'LOY_LIO' AND catcher_id IS NOT NULL
+             GROUP BY catcher_id ORDER BY COUNT(*) DESC LIMIT 1
+            """
+        )
+    except OperationalError as e:
+        pytest.skip(f"Analytics DB unreachable: {e}")
+    if df.empty:
+        pytest.skip("No LMU catcher rows in warehouse")
+    return int(df.loc[0, "catcher_id"])
+
+
+def test_catcher_options_coach_live(real_catcher):
+    from app.dashboards.catching import selectors
+    opts = selectors.catcher_options(is_coach=True, own_trackman_id=None)
+    assert opts and {"label", "value"} <= set(opts[0])
+    assert real_catcher in {o["value"] for o in opts}
+
+
+def test_game_options_for_real_catcher(real_catcher):
+    from app.dashboards.catching import selectors
+    opts = selectors.game_options(real_catcher)
+    assert opts and {"label", "value"} <= set(opts[0])
+
+
+def test_tabs_render_on_live_game(real_catcher):
+    from app.data import catching as C
+    from app.dashboards.catching.tabs import blocking, framing, throws
+    games = C.games_for_catcher(real_catcher)
+    gid = int(games.iloc[0]["game_id"])
+    df = C.game_pitches_for(gid, real_catcher)
+    assert framing.render(df) is not None
+    assert blocking.render(df) is not None
+    assert throws.render(df) is not None
+
+
+def test_season_summary_shape(real_catcher):
+    from app.data import catching as C
+    s = C.season_summary(real_catcher)
+    assert {"games", "pitches", "cs_pct", "block_pct"} <= set(s)

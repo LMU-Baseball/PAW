@@ -8,36 +8,41 @@ def _pitches():
     return pd.DataFrame([
         # Heart take — called strike
         {"pitch_call": "StrikeCalled", "play_result": "Undefined",
-         "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "plate_loc_side": 0.0, "plate_loc_height": 2.5, "batter_side": "Right",
          "inning": 1, "balls": 0, "strikes": 0, "pitcher_name": "A, B",
          "pop_time": None, "exchange_time": None, "throw_speed": None},
         # Shadow take — ball
         {"pitch_call": "BallCalled", "play_result": "Undefined",
-         "plate_loc_side": 1.0, "plate_loc_height": 2.5,
+         "plate_loc_side": 1.0, "plate_loc_height": 2.5, "batter_side": "Left",
          "inning": 1, "balls": 0, "strikes": 1, "pitcher_name": "A, B",
+         "pop_time": None, "exchange_time": None, "throw_speed": None},
+        # Shadow take — called strike
+        {"pitch_call": "StrikeCalled", "play_result": "Undefined",
+         "plate_loc_side": 0.9, "plate_loc_height": 2.5, "batter_side": "Right",
+         "inning": 1, "balls": 1, "strikes": 1, "pitcher_name": "A, B",
          "pop_time": None, "exchange_time": None, "throw_speed": None},
         # Swing — excluded from framing
         {"pitch_call": "StrikeSwinging", "play_result": "Undefined",
-         "plate_loc_side": 0.2, "plate_loc_height": 2.4,
+         "plate_loc_side": 0.2, "plate_loc_height": 2.4, "batter_side": "Right",
          "inning": 2, "balls": 1, "strikes": 1, "pitcher_name": "A, B",
          "pop_time": None, "exchange_time": None, "throw_speed": None},
         # Dirt blocked
         {"pitch_call": "BallinDirt", "play_result": "Undefined",
-         "plate_loc_side": 0.1, "plate_loc_height": 0.8,
+         "plate_loc_side": 0.1, "plate_loc_height": 0.8, "batter_side": "Left",
          "inning": 3, "balls": 0, "strikes": 2, "pitcher_name": "A, B",
          "pop_time": None, "exchange_time": None, "throw_speed": None},
         # Passed ball
         {"pitch_call": "BallCalled", "play_result": "PassedBall",
-         "plate_loc_side": 0.0, "plate_loc_height": 0.5,
+         "plate_loc_side": 0.0, "plate_loc_height": 0.5, "batter_side": "Right",
          "inning": 4, "balls": 1, "strikes": 2, "pitcher_name": "A, B",
          "pop_time": None, "exchange_time": None, "throw_speed": None},
         # Throw attempts
         {"pitch_call": "InPlay", "play_result": "StolenBase",
-         "plate_loc_side": 0.3, "plate_loc_height": 2.2,
+         "plate_loc_side": 0.3, "plate_loc_height": 2.2, "batter_side": "Right",
          "inning": 5, "balls": 0, "strikes": 0, "pitcher_name": "A, B",
          "pop_time": 1.95, "exchange_time": 0.72, "throw_speed": 78.5},
         {"pitch_call": "InPlay", "play_result": "CaughtStealing",
-         "plate_loc_side": -0.2, "plate_loc_height": 2.1,
+         "plate_loc_side": -0.2, "plate_loc_height": 2.1, "batter_side": "Left",
          "inning": 6, "balls": 1, "strikes": 1, "pitcher_name": "A, B",
          "pop_time": 1.88, "exchange_time": 0.68, "throw_speed": 80.0},
     ])
@@ -63,6 +68,18 @@ def test_framing_overall():
     assert o["takes"] >= 2
     assert o["called_strikes"] >= 1
     assert 0.0 <= o["cs_pct"] <= 100.0
+
+
+def test_framing_shadow():
+    s = C.framing_shadow(_pitches())
+    assert s["takes"] >= 1
+    assert s["cs_pct"] is not None
+
+
+def test_framing_by_batter_side():
+    sp = C.framing_by_batter_side(_pitches())
+    assert list(sp["Split"]) == ["vs LHH", "vs RHH"]
+    assert sp["Takes"].sum() >= 2
 
 
 def test_blocking_summary():
@@ -95,6 +112,8 @@ def test_throw_attempts_empty_without_cols():
 def test_empty_df_transforms_safe():
     empty = pd.DataFrame()
     assert C.framing_overall(empty)["takes"] == 0
+    assert C.framing_shadow(empty)["takes"] == 0
     assert C.blocking_summary(empty)["dirt"] == 0
     assert C.throws_summary(empty)["attempts"] == 0
     assert C.framing_by_zone(empty).shape[0] == 4
+    assert C.framing_by_batter_side(empty).shape[0] == 2

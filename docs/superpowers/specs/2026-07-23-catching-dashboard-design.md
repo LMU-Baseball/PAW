@@ -63,19 +63,24 @@ app/data/catching.py   warehouse loaders + metric transforms
 
 ### Framing
 - Filter to **takes** (no swing): PitchCall in
-  `{StrikeCalled, BallCalled, BallinDirt, HitByPitch}` (and close variants).
+  `{StrikeCalled, BallCalled, BallinDirt, BallIntentional, AutomaticBall}`
+  (verified warehouse values; HitByPitch excluded as dead-ball / no-call).
 - Strike-zone scatter of takes, colored by call (strike vs ball).
-- Called-strike % table by attack zone (reuse `hitting_wh.attack_zone` geometry)
-  and overall. Provisional: no park/umpire adjustment.
+- Summary tiles: Takes, Called K, overall CS%, **Shadow CS%** (primary signal),
+  Shadow Takes.
+- Called-strike % table by attack zone (reuse `hitting_wh.attack_zone` geometry).
+- Called-strike % table by batter side (vs LHH / vs RHH).
+- Provisional: no park/umpire adjustment.
 
 ### Blocking
-- Candidate dirt pitches: low plate height and/or PitchCall / PlayResult
-  indicating dirt / passed ball / wild pitch (provisional classifier).
+- Candidate dirt pitches: `BallinDirt` calls, `PassedBall`/`WildPitch` results,
+  or low plate height (<1.5 ft) + ball call (provisional classifier).
 - Summary tiles: dirt pitches, blocked, passed/wild, block %.
 - Table of dirt events (inning, count, pitcher, call/result).
 
 ### Throws
-- Rows with non-null `pop_time` and/or `throw_speed` (warehouse throw attempts).
+- Rows with non-null `pop_time` and/or `throw_speed` / `exchange_time`
+  (warehouse throw attempts; column names aliased defensively).
 - Summary: attempts, avg/min pop time, avg exchange, avg throw speed.
 - Scatter / distribution of pop time; per-attempt table.
 

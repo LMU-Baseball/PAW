@@ -58,6 +58,6 @@ def render(df: pd.DataFrame) -> html.Div:
         body,
         html.Div(
             "Provisional: dirt = BallinDirt calls, PassedBall/WildPitch results, "
-            "or low (<1.5 ft) ball calls.",
+            "or low (<1.5 ft) BallCalled/BallinDirt.",
             style={"fontSize": "12px", "color": "#888", "marginTop": "8px"}),
     ])

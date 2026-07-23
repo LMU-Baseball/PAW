@@ -19,15 +19,19 @@ LMU_TEAM_ID = 78
 LMU_PITCHER_TEAM = "LOY_LIO"  # catcher is on the pitching team
 
 # Takes = no-swing pitch calls used for framing.
+# Verified warehouse pitch_call values (see pitching.py notes): StrikeCalled,
+# BallCalled, BallinDirt, BallIntentional, AutomaticBall. HitByPitch is a
+# dead-ball / no-call and is intentionally excluded from framing.
 _TAKE_CALLS = {
-    "StrikeCalled", "BallCalled", "BallinDirt", "BallInDirt",
-    "HitByPitch", "InDirt",
+    "StrikeCalled", "BallCalled", "BallinDirt",
+    "BallIntentional", "AutomaticBall",
 }
 _STRIKE_CALLS = {"StrikeCalled"}
 
 # Blocking: dirt / passed / wild classifiers (provisional).
-_DIRT_CALLS = {"BallinDirt", "BallInDirt", "InDirt", "BlockedPitch", "Blocking"}
-_PASSED_WILD = {"PassedBall", "WildPitch", "WP", "PB"}
+_DIRT_CALLS = {"BallinDirt"}
+_PASSED_WILD = {"PassedBall", "WildPitch"}
+_LOW_BALL_CALLS = {"BallCalled", "BallinDirt"}
 
 
 def _in_clause(ids) -> tuple[str, dict]:
@@ -161,38 +165,54 @@ def catcher_profile(catcher_id: int) -> dict:
 
 
 def season_summary(catcher_id: int) -> dict:
-    """Coarse season tiles: games caught, pitches, framing CS%, block %."""
+    """Coarse season tiles: games caught, pitches, framing CS%, block %.
+
+    Computed with SQL aggregates (does NOT pull every pitch into pandas).
+    """
     ids = _sibling_catcher_ids(catcher_id)
     marks, params = _in_clause(ids)
-    counts = query_df(
+    df = query_df(
         f"""
-        SELECT COUNT(DISTINCT game_id) AS games, COUNT(*) AS pitches
+        SELECT COUNT(DISTINCT game_id) AS games,
+               COUNT(*) AS pitches,
+               SUM(pitch_call = 'StrikeCalled') AS called_strikes,
+               SUM(pitch_call IN ('StrikeCalled','BallCalled','BallinDirt',
+                                  'BallIntentional','AutomaticBall')) AS takes,
+               SUM(pitch_call = 'BallinDirt') AS dirt_calls,
+               SUM(play_result IN ('PassedBall','WildPitch')) AS passed_wild
           FROM fact_tm_game_pitch
          WHERE catcher_id IN ({marks})
         """,
         params,
     )
-    pitches = game_pitches_season(catcher_id)
-    fr = framing_overall(pitches)
-    bl = blocking_summary(pitches)
 
     def _s(v):
         return "—" if v is None or (isinstance(v, float) and pd.isna(v)) else str(int(v))
 
-    if counts.empty:
+    if df.empty:
         return {"games": "—", "pitches": "—", "cs_pct": "—", "block_pct": "—"}
-    r = counts.iloc[0]
-    cs = fr.get("cs_pct")
-    bp = bl.get("block_pct")
+    r = df.iloc[0]
+    takes = int(r["takes"] or 0)
+    cs = int(r["called_strikes"] or 0)
+    dirt = int(r["dirt_calls"] or 0)
+    pw = int(r["passed_wild"] or 0)
+    # Dirt events ≈ BallinDirt calls + passed/wild results; blocked ≈ dirt calls
+    # that weren't also tagged passed/wild (provisional SQL mirror of transforms).
+    block_denom = dirt + pw
+    cs_pct = "—" if takes == 0 else f"{round(100.0 * cs / takes, 1)}%"
+    block_pct = ("—" if block_denom == 0
+                 else f"{round(100.0 * dirt / block_denom, 1)}%")
     return {
         "games": _s(r["games"]),
         "pitches": _s(r["pitches"]),
-        "cs_pct": "—" if cs is None else f"{cs:.1f}%",
-        "block_pct": "—" if bp is None else f"{bp:.1f}%",
+        "cs_pct": cs_pct,
+        "block_pct": block_pct,
     }
 
 
 def game_pitches_season(catcher_id: int) -> pd.DataFrame:
+    """All season pitches for a catcher (sibling-id union). Prefer aggregates
+    for sidebar tiles; use this only when full pitch-level season analysis is needed."""
     ids = _sibling_catcher_ids(catcher_id)
     marks, params = _in_clause(ids)
     return query_df(
@@ -261,6 +281,35 @@ def framing_overall(df: pd.DataFrame) -> dict:
     return {"takes": n, "called_strikes": cs, "cs_pct": round(100.0 * cs / n, 1)}
 
 
+def framing_shadow(df: pd.DataFrame) -> dict:
+    """Called-strike % on Shadow-zone takes only (most coach-relevant)."""
+    t = takes(df)
+    if t.empty:
+        return {"takes": 0, "called_strikes": 0, "cs_pct": None}
+    sub = t[t["Zone"] == "Shadow"]
+    n = len(sub)
+    if n == 0:
+        return {"takes": 0, "called_strikes": 0, "cs_pct": None}
+    cs = int(sub["is_strike"].sum())
+    return {"takes": n, "called_strikes": cs, "cs_pct": round(100.0 * cs / n, 1)}
+
+
+def framing_by_batter_side(df: pd.DataFrame) -> pd.DataFrame:
+    """Called-strike % on takes split by batter_side (L/R)."""
+    t = takes(df)
+    rows = []
+    for side, label in (("Left", "vs LHH"), ("Right", "vs RHH")):
+        if t.empty or "batter_side" not in t.columns:
+            sub = t.iloc[0:0]
+        else:
+            sub = t[t["batter_side"] == side]
+        n = len(sub)
+        cs = int(sub["is_strike"].sum()) if n else 0
+        pct = round(100.0 * cs / n, 1) if n else None
+        rows.append({"Split": label, "Takes": n, "CalledStrikes": cs, "CS%": pct})
+    return pd.DataFrame(rows)
+
+
 def _is_dirt_row(r) -> bool:
     call = str(r.get("pitch_call") or "")
     result = str(r.get("play_result") or "")
@@ -268,9 +317,8 @@ def _is_dirt_row(r) -> bool:
         return True
     # Low pitch heuristic (below ~1.5 ft plate height) + ball call.
     h = r.get("plate_loc_height")
-    if h is not None and not pd.isna(h) and float(h) < 1.5 and call in {
-        "BallCalled", "BallinDirt", "BallInDirt", "InDirt",
-    }:
+    if (h is not None and not pd.isna(h) and float(h) < 1.5
+            and call in _LOW_BALL_CALLS):
         return True
     return False
 
