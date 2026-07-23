@@ -22,11 +22,6 @@ def render(df: pd.DataFrame) -> html.Div:
     return html.Div([
         section("Pitch Characteristics"),
         tables.df_table(char, id_="pb-char"),
-        section("Velocity Trend"),
-        dcc.Tabs(id="pb-velo-tabs", value="inning", children=[
-            dcc.Tab(label="By Inning", value="inning",
-                    children=[dcc.Graph(figure=P.fig_velo_by_inning(df))]),
-            dcc.Tab(label="By Pitch Count", value="pc",
-                    children=[dcc.Graph(figure=P.fig_velo_by_pitch(df))]),
-        ]),
+        section("Velocity Across Outing"),
+        dcc.Graph(figure=P.fig_velo_by_pitch(df)),
     ])

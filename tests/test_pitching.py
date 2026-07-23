@@ -213,3 +213,25 @@ def test_pitcher_profile_and_season_summary_keys():
     assert set(prof) >= {"name", "class_year", "position", "throws", "jersey", "photo"}
     summ = P.season_summary(pid)
     assert set(summ) >= {"appearances", "pitches", "k", "bb"}
+
+
+# ============ Pitch Breakdown: pitch colors + per-outing velo sequence (Task 3) =
+
+@pytest.fixture(scope="module")
+def outing_like_df():
+    pid = _a_real_lmu_pitcher_id()          # helper added in Slice 1 task 3
+    gid = int(P.games_for_pitcher(pid).iloc[0]["game_id"])
+    return P.game_pitches_for(gid, pid)
+
+
+def test_pitch_color_stable_and_hex():
+    from app.data import pitching as P
+    c = P.pitch_color("Fastball")
+    assert c.startswith("#") and c == P.pitch_color("Fastball")
+
+
+def test_fig_velo_by_pitch_uses_1_based_sequence(outing_like_df):
+    from app.data import pitching as P
+    fig = P.fig_velo_by_pitch(outing_like_df)
+    xs = [x for tr in fig.data for x in (tr.x if tr.x is not None else [])]
+    assert xs and min(xs) == 1  # per-outing sequence starts at 1, not game pitch_no

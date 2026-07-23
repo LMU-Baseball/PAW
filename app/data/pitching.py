@@ -575,6 +575,21 @@ def averages_last5(recent_df: pd.DataFrame) -> pd.DataFrame:
 
 # ============================ FIGURES =====================================
 
+PITCH_COLORS = {
+    "Fastball": "#9A0021", "Sinker": "#7a5230", "Cutter": "#2e8b57",
+    "Slider": "#0076A5", "Curveball": "#e08a1e", "ChangeUp": "#6a4c93",
+    "Splitter": "#c2185b", "Sweeper": "#00897b",
+}
+_PT_FALLBACK = ["#9A0021", "#0076A5", "#2e8b57", "#e08a1e", "#6a4c93",
+                "#7a5230", "#00897b", "#c2185b"]
+
+
+def pitch_color(pt: str) -> str:
+    """Stable hex color for a pitch type (chips + charts share this)."""
+    import zlib
+    return PITCH_COLORS.get(pt) or _PT_FALLBACK[zlib.crc32(str(pt).encode()) % len(_PT_FALLBACK)]
+
+
 _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)  # approx strike zone (ft)
 
 
@@ -596,13 +611,16 @@ def fig_velo_by_inning(df: pd.DataFrame) -> go.Figure:
 
 
 def fig_velo_by_pitch(df: pd.DataFrame) -> go.Figure:
-    d = df.dropna(subset=["rel_speed"]).copy()
+    d = df.dropna(subset=["rel_speed"]).sort_values("pitch_no").copy()
+    d["_seq"] = range(1, len(d) + 1)          # pitcher's own 1..N for THIS outing
     d["_pt"] = pitch_type(d)
     fig = go.Figure()
     for pt, sub in d.groupby("_pt"):
-        fig.add_trace(go.Scatter(x=sub["pitch_no"], y=sub["rel_speed"],
-                                 mode="markers+lines", name=pt))
-    fig.update_xaxes(title="Pitch #"); fig.update_yaxes(title="Velo (mph)")
+        fig.add_trace(go.Scatter(x=sub["_seq"], y=sub["rel_speed"],
+                                 mode="markers+lines", name=pt,
+                                 marker=dict(color=pitch_color(pt)),
+                                 line=dict(color=pitch_color(pt))))
+    fig.update_xaxes(title="Pitch # (this outing)"); fig.update_yaxes(title="Velo (mph)")
     return _base_layout(fig, "Velocity Across Outing")
 
 
