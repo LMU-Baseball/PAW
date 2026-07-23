@@ -9,7 +9,7 @@ from flask_login import current_user
 
 from app.data import pitching as P
 from app.dashboards.pitching import layout, selectors
-from app.dashboards.pitching.tabs import location_movement, pitch_breakdown
+from app.dashboards.pitching.tabs import location_movement, pitch_breakdown, rhh_lhh
 
 
 def _read_game_df(data_json):
@@ -64,5 +64,7 @@ def register_callbacks(dash_app) -> None:
             return pitch_breakdown.render(df)
         if tab == "location":
             return location_movement.render(df)
+        if tab == "splits":
+            return rhh_lhh.render(df)
         # Tabs wired in Tasks 5-8.
         return html.Div(f"[{tab}] {len(df)} pitches", style={"padding": "12px"})

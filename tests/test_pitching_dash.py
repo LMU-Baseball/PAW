@@ -71,3 +71,8 @@ def test_pitch_breakdown_render(outing_df):
 def test_location_movement_render(outing_df):
     from app.dashboards.pitching.tabs import location_movement
     assert location_movement.render(outing_df) is not None
+
+
+def test_rhh_lhh_render(outing_df):
+    from app.dashboards.pitching.tabs import rhh_lhh
+    assert rhh_lhh.render(outing_df) is not None
