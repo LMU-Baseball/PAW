@@ -116,3 +116,43 @@ def register_callbacks(dash_app) -> None:
                         "opacity": "1" if on else ".55",
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
+
+    @dash_app.callback(
+        Output("splits-active", "data"),
+        Input({"type": "splits-chip", "index": ALL}, "n_clicks"),
+        State("splits-active", "data"), prevent_initial_call=True,
+    )
+    def _splits_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        pt = tid["index"]; active = list(active or [])
+        return [p for p in active if p != pt] if pt in active else active + [pt]
+
+    @dash_app.callback(
+        Output("splits-body", "children"),
+        Input("splits-active", "data"), State("game-data", "data"),
+    )
+    def _splits_body(active, data_json):
+        df = _read_game_df(data_json)
+        if not df.empty and active is not None:
+            df = df[P.pitch_type(df).isin(active)]
+        return rhh_lhh.body(df)
+
+    @dash_app.callback(
+        Output({"type": "splits-chip", "index": ALL}, "style"),
+        Input("splits-active", "data"),
+        State({"type": "splits-chip", "index": ALL}, "id"),
+    )
+    def _splits_chip_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            pt = i["index"]; col = P.pitch_color(pt); on = pt in active
+            out.append({"border": f"2px solid {col}",
+                        "background": col if on else "#fff",
+                        "color": "#fff" if on else col, "borderRadius": "14px",
+                        "padding": "3px 12px", "margin": "0 6px 6px 0",
+                        "cursor": "pointer", "opacity": "1" if on else ".55",
+                        "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
+        return out

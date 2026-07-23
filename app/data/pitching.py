@@ -672,14 +672,18 @@ def fig_location(df: pd.DataFrame) -> go.Figure:
 
 def fig_location_split(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
+    d["_pt"] = pitch_type(d)
+    d["_res"] = d["pitch_call"].map(pretty_result)
     fig = go.Figure()
-    for side, sub in d.groupby("batter_side"):
-        fig.add_trace(go.Scatter(x=sub["plate_loc_side"], y=sub["plate_loc_height"],
-                                 mode="markers", name=f"vs {side}"))
+    for pt, sub in d.groupby("_pt"):
+        fig.add_trace(go.Scatter(
+            x=sub["plate_loc_side"], y=sub["plate_loc_height"], mode="markers", name=pt,
+            marker=dict(color=pitch_color(pt), size=9), customdata=sub[["_res"]],
+            hovertemplate=f"{pt}<br>Result: %{{customdata[0]}}<extra></extra>"))
     _add_zone(fig)
     fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
     fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
-    return _base_layout(fig, "Location vs LHH/RHH")
+    return _base_layout(fig, "Location by Pitch Type")
 
 
 def fig_velo_trend(trend_df: pd.DataFrame) -> go.Figure:

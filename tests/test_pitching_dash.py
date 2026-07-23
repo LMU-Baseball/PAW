@@ -89,6 +89,11 @@ def test_rhh_lhh_render(outing_df):
     assert rhh_lhh.render(outing_df) is not None
 
 
+def test_rhh_lhh_render_has_chip_filter(outing_df):
+    from app.dashboards.pitching.tabs import rhh_lhh
+    assert rhh_lhh.render(outing_df) is not None
+
+
 def test_last_outings_render(real_pitcher):
     from app.data import pitching as P
     from app.dashboards.pitching.tabs import last_outings
