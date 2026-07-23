@@ -241,6 +241,70 @@ def _col(df: pd.DataFrame, *names: str) -> str | None:
     return None
 
 
+# Fastball/Offspeed recode of tagged_pitch_type (matches legacy src/app.R).
+PITCH_SPEED_MAP = {
+    "Fastball": "Fastball", "Sinker": "Fastball", "Cutter": "Fastball",
+    "Splitter": "Fastball", "TwoSeamFastBall": "Fastball",
+    "FourSeamFastBall": "Fastball", "OneSeamFastBall": "Fastball",
+    "Slider": "Offspeed", "ChangeUp": "Offspeed", "Changeup": "Offspeed",
+    "Curveball": "Offspeed", "Knuckleball": "Offspeed", "Undefined": "Offspeed",
+}
+
+
+def _in_zone(side_ft, height_ft) -> bool:
+    """Rulebook strike-zone box in catcher-view inches (PROVISIONAL, coach-
+    confirmable). The legacy app used a Trackman InZone DB flag the warehouse
+    lacks (zi is NULL). Box matches the solid rectangle drawn in src/app.R."""
+    if side_ft is None or height_ft is None or pd.isna(side_ft) or pd.isna(height_ft):
+        return False
+    return abs(float(side_ft) * 12) <= 10 and abs(float(height_ft) * 12 - 30) <= 13
+
+
+def add_framing_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Derive Zone / InZone / PitchSpeed / CallType / _x / _y for framing views.
+
+    CallType (PROVISIONAL v1, matches legacy stolen/lost model):
+      Stolen Strike = out-of-zone pitch called StrikeCalled
+      Lost Strike   = in-zone pitch called BallCalled
+      Correct Call  = everything else (incl. swings / in-play — no framing signal)
+    """
+    if df.empty:
+        return df.copy()
+    out = df.copy()
+    out["Zone"] = [attack_zone(s, h)
+                   for s, h in zip(out["plate_loc_side"], out["plate_loc_height"])]
+    out["InZone"] = [_in_zone(s, h)
+                     for s, h in zip(out["plate_loc_side"], out["plate_loc_height"])]
+    out["PitchSpeed"] = (out["tagged_pitch_type"].map(PITCH_SPEED_MAP)
+                         .fillna("Offspeed"))
+    call = out["pitch_call"].astype(str)
+    out["CallType"] = "Correct Call"
+    out.loc[(~out["InZone"]) & (call == "StrikeCalled"), "CallType"] = "Stolen Strike"
+    out.loc[(out["InZone"]) & (call == "BallCalled"), "CallType"] = "Lost Strike"
+    out["_x"] = out["plate_loc_side"] * -12
+    out["_y"] = out["plate_loc_height"] * 12 - 30
+    return out
+
+
+def apply_framing_filters(df: pd.DataFrame, *, bat_side="All",
+                          pitcher_throws="All", pitch_speed="All",
+                          zone="All") -> pd.DataFrame:
+    """Apply the 4 legacy framing filters. 'All' = no filter on that dimension.
+    Expects columns from add_framing_cols."""
+    if df.empty:
+        return df.copy()
+    out = df
+    if bat_side != "All":
+        out = out[out["batter_side"] == bat_side]
+    if pitcher_throws != "All":
+        out = out[out["pitcher_throws"] == pitcher_throws]
+    if pitch_speed != "All":
+        out = out[out["PitchSpeed"] == pitch_speed]
+    if zone != "All":
+        out = out[out["Zone"] == zone]
+    return out.copy()
+
+
 def takes(df: pd.DataFrame) -> pd.DataFrame:
     """Non-swing pitches used for framing analysis."""
     if df.empty or "pitch_call" not in df.columns:

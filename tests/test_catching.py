@@ -117,3 +117,56 @@ def test_empty_df_transforms_safe():
     assert C.throws_summary(empty)["attempts"] == 0
     assert C.framing_by_zone(empty).shape[0] == 4
     assert C.framing_by_batter_side(empty).shape[0] == 2
+
+
+def _framing_rows():
+    import pandas as pd
+    # side_ft, height_ft chosen so |side*12|,|height*12-30| land in/out of the box.
+    return pd.DataFrame([
+        # In zone (x=0, y=0), called ball -> Lost Strike
+        {"plate_loc_side": 0.0, "plate_loc_height": 2.5, "pitch_call": "BallCalled",
+         "batter_side": "Right", "pitcher_throws": "Left", "tagged_pitch_type": "Fastball"},
+        # Out of zone (x=24in), called strike -> Stolen Strike
+        {"plate_loc_side": 2.0, "plate_loc_height": 2.5, "pitch_call": "StrikeCalled",
+         "batter_side": "Left", "pitcher_throws": "Right", "tagged_pitch_type": "Slider"},
+        # In zone, called strike -> Correct Call
+        {"plate_loc_side": 0.0, "plate_loc_height": 2.5, "pitch_call": "StrikeCalled",
+         "batter_side": "Right", "pitcher_throws": "Right", "tagged_pitch_type": "ChangeUp"},
+        # Swing (InPlay) -> Correct Call regardless of zone
+        {"plate_loc_side": 0.0, "plate_loc_height": 2.5, "pitch_call": "InPlay",
+         "batter_side": "Left", "pitcher_throws": "Left", "tagged_pitch_type": "Curveball"},
+    ])
+
+
+def test_add_framing_cols_classifies_call_type():
+    from app.data import catching as C
+    out = C.add_framing_cols(_framing_rows())
+    assert list(out["CallType"]) == [
+        "Lost Strike", "Stolen Strike", "Correct Call", "Correct Call"]
+    assert list(out["InZone"]) == [True, False, True, True]
+    assert out.loc[0, "Zone"] == "Heart"
+    # catcher-view coords
+    assert out.loc[1, "_x"] == -24.0
+
+
+def test_add_framing_cols_pitch_speed_recode():
+    from app.data import catching as C
+    out = C.add_framing_cols(_framing_rows())
+    assert list(out["PitchSpeed"]) == [
+        "Fastball", "Offspeed", "Offspeed", "Offspeed"]
+
+
+def test_add_framing_cols_empty():
+    import pandas as pd
+    from app.data import catching as C
+    assert C.add_framing_cols(pd.DataFrame()).empty
+
+
+def test_apply_framing_filters():
+    from app.data import catching as C
+    df = C.add_framing_cols(_framing_rows())
+    assert len(C.apply_framing_filters(df)) == 4  # all "All"
+    assert len(C.apply_framing_filters(df, bat_side="Left")) == 2
+    assert len(C.apply_framing_filters(df, pitch_speed="Fastball")) == 1
+    # rows 0,2,3 are side=0 -> x=0 -> Heart; row 1 is side=2.0 -> x=24in -> Waste
+    assert len(C.apply_framing_filters(df, zone="Heart")) == 3
