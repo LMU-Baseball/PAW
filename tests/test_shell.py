@@ -113,7 +113,8 @@ def test_section_hubs_render_and_link(logged_in_client):
     assert b"/dash/hitting/" in hh.data
     assert b"Coming soon" in hh.data
 
-    # Catching hub is a placeholder.
+    # Catching hub: Stats Dashboard live.
     ch = logged_in_client.get("/catching")
     assert ch.status_code == 200
-    assert b"Coming soon" in ch.data
+    assert b"/dash/catching/" in ch.data
+    assert b"Coming soon" not in ch.data
