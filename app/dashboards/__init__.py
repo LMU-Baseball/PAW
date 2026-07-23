@@ -1,9 +1,7 @@
 """Dash dashboards mounted on the Flask server, protected by Flask-Login.
 
-For now this is a minimal placeholder that proves the Flask + Dash + auth
-integration. The real hitting UI (strike-zone scatter, spray chart, radial,
-heatmap, tables) will be built here on top of app/data/hitting.py once the
-www/ asset images are available.
+Hitting (game + HitTrax practice), pitching, and catching Dash modules are
+registered here. All /dash/* routes require login.
 """
 from flask import redirect, request, url_for
 from flask_login import current_user
@@ -15,13 +13,10 @@ def register_dashboards(server):
     build_hitting_dash(server)
     from app.dashboards.pitching import build_pitching_dash
     build_pitching_dash(server)
-<<<<<<< HEAD
     from app.dashboards.catching import build_catching_dash
     build_catching_dash(server)
-=======
     from app.dashboards.hitting_practice import build_hitting_practice_dash
     build_hitting_practice_dash(server)
->>>>>>> origin/cursor/hitting-practice-dashboard-1c83
 
 
 def _protect_dash_routes(server):
