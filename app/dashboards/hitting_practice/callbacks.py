@@ -161,13 +161,17 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("sfz-active", "data"),
         Input({"type": "sfz-chip", "index": ALL}, "n_clicks"),
-        State("sfz-active", "data"), prevent_initial_call=True,
+        State("sfz-active", "data"), State("sfz-present", "data"),
+        prevent_initial_call=True,
     )
-    def _sfz_toggle(_clicks, active):
+    def _sfz_toggle(_clicks, active, present):
         tid = ctx.triggered_id
         if not tid:
             return active
         z = tid["index"]
+        present = set(present or [])
+        if z not in present:                 # disabled/empty zone -> ignore
+            return active
         active = list(active or [])
         return [x for x in active if x != z] if z in active else active + [z]
 
@@ -185,21 +189,15 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output({"type": "sfz-chip", "index": ALL}, "style"),
         Input("sfz-active", "data"),
+        State("sfz-present", "data"),
         State({"type": "sfz-chip", "index": ALL}, "id"),
     )
-    def _sfz_styles(active, ids):
+    def _sfz_styles(active, present, ids):
+        from app.dashboards.hitting_practice.tabs.swing_frequency import chip_style
         active = set(active or [])
-        out = []
-        for i in ids:
-            on = i["index"] in active
-            out.append({"border": "2px solid #9A0021",
-                        "background": "#9A0021" if on else "#fff",
-                        "color": "#fff" if on else "#9A0021",
-                        "borderRadius": "12px", "padding": "2px 10px",
-                        "margin": "0 4px 4px 0", "cursor": "pointer",
-                        "opacity": "1" if on else ".55",
-                        "fontFamily": "Teko, sans-serif", "fontSize": "14px"})
-        return out
+        present = set(present or [])
+        return [chip_style(active=i["index"] in active, present=i["index"] in present)
+                for i in ids]
 
     @dash_app.callback(
         Output("prac-sidebar", "children"),

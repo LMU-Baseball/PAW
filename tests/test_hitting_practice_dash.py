@@ -190,6 +190,30 @@ def test_swing_frequency_ev_body_zone_filter():
     assert sf.ev_body(df, None) is not None
 
 
+def test_zone_chip_row_fixed_set_and_labels():
+    import pandas as pd
+    from dash import html
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+
+    def _buttons(node, out):
+        if isinstance(node, html.Button):
+            out.append(node)
+        for k in ([node.children] if not isinstance(getattr(node, "children", None), (list, tuple))
+                  else node.children):
+            if hasattr(k, "children") or isinstance(k, html.Button):
+                _buttons(k, out)
+        return out
+
+    # data present only for zones 1,3,5 -> those enabled, the rest greyed
+    df = pd.DataFrame([{"zone_section": z} for z in [1, 1, 3, 5]])
+    row = sf.zone_chip_row(df)
+    btns = _buttons(row, [])
+    labels = [b.children for b in btns]
+    assert labels == [f"Zone {z}" for z in range(1, 14)]  # 13 chips, Zone N, no Zone 0
+    disabled = {b.children: bool(b.disabled) for b in btns}
+    assert disabled["Zone 2"] is True and disabled["Zone 1"] is False
+
+
 def test_swing_trend_uses_real_dates_not_epoch():
     import pandas as pd
     from app.dashboards.hitting_practice import charts
