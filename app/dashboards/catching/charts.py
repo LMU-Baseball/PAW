@@ -43,6 +43,34 @@ def _base_axes(fig, row=None, col=None):
     fig.update_yaxes(range=[-25, 25], visible=False, row=row, col=col)
 
 
+def _hover_texts(sub: pd.DataFrame) -> list[str]:
+    """Per-point hover strings: Velo/BatSide/PitchSide/PitchSpeed/PitchCall
+    (legacy hover fields), built defensively so a missing column never raises."""
+    n = len(sub)
+    velo = sub["rel_speed"] if "rel_speed" in sub.columns else None
+    bat_side = sub["batter_side"] if "batter_side" in sub.columns else None
+    pitcher_throws = sub["pitcher_throws"] if "pitcher_throws" in sub.columns else None
+    pitch_speed = sub["PitchSpeed"] if "PitchSpeed" in sub.columns else None
+    pitch_call = sub["pitch_call"] if "pitch_call" in sub.columns else None
+    out = []
+    for i in range(n):
+        lines = []
+        if velo is not None:
+            v = velo.iloc[i]
+            if pd.notna(v):
+                lines.append(f"Velo: {float(v):.1f}")
+        if bat_side is not None:
+            lines.append(f"BatSide: {bat_side.iloc[i]}")
+        if pitcher_throws is not None:
+            lines.append(f"PitchSide: {pitcher_throws.iloc[i]}")
+        if pitch_speed is not None:
+            lines.append(f"PitchSpeed: {pitch_speed.iloc[i]}")
+        if pitch_call is not None:
+            lines.append(f"PitchCall: {pitch_call.iloc[i]}")
+        out.append("<br>".join(lines))
+    return out
+
+
 def _scatter_traces(fig, d, row=None, col=None, shown=None):
     if shown is None:
         shown = set()
@@ -57,7 +85,7 @@ def _scatter_traces(fig, d, row=None, col=None, shown=None):
             legendgroup=ct, showlegend=showlegend,
             marker=dict(color=CALLTYPE_COLORS[ct], size=9,
                         line=dict(width=0.5, color="#666")),
-            hovertext=sub["pitch_call"].astype(str), hoverinfo="text",
+            hovertext=_hover_texts(sub), hoverinfo="text",
         ), row=row, col=col)
 
 

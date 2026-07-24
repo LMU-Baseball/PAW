@@ -42,9 +42,12 @@ def render(df: pd.DataFrame) -> html.Div:
             "Inn": ev.get("inning"),
             "Pitcher": ev.get("pitcher_name"),
             "Result": ev["Caught"].map({True: "Caught", False: "Stolen"}),
-            "Pop (s)": ev["pop_time"].round(2),
-            "Exch (s)": ev["exchange_time"].round(2),
-            "Throw (mph)": ev["throw_speed"].round(1),
+            "Pop (s)": ev["pop_time"].map(
+                lambda v: "—" if pd.isna(v) else f"{v:.2f}"),
+            "Exch (s)": ev["exchange_time"].map(
+                lambda v: "—" if pd.isna(v) else f"{v:.2f}"),
+            "Throw (mph)": ev["throw_speed"].map(
+                lambda v: "—" if pd.isna(v) else f"{v:.1f}"),
         })
         table = tables.df_table(show, id_="cs-table")
 

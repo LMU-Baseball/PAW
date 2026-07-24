@@ -61,15 +61,21 @@ def _framing_table_rows():
     import pandas as pd
     # Build explicit CallType/Zone mixes. height=2.5 -> y=0 (in vert range);
     # x sets the zone: 0in Heart, 24in Waste, 11in Shadow.
-    def row(side, call):
-        return {"plate_loc_side": side, "plate_loc_height": 2.5,
+    def row(side, height, call):
+        return {"plate_loc_side": side, "plate_loc_height": height,
                 "pitch_call": call, "batter_side": "Right",
                 "pitcher_throws": "Right", "tagged_pitch_type": "Fastball"}
     return pd.DataFrame([
-        row(0.0, "StrikeCalled"),   # Heart, in-zone strike -> Correct
-        row(0.0, "BallCalled"),     # Heart, in-zone ball  -> Lost (heart)
-        row(2.0, "StrikeCalled"),   # Waste(24in), out strike -> Stolen (waste)
-        row(0.9167, "StrikeCalled"),  # ~11in Shadow, out-of-box strike -> Stolen (shadow)
+        row(0.0, 2.5, "StrikeCalled"),   # Heart, in-zone strike -> Correct
+        row(0.0, 2.5, "BallCalled"),     # Heart, in-zone ball  -> Lost (heart)
+        row(2.0, 2.5, "StrikeCalled"),   # Waste(24in), out strike -> Stolen (waste)
+        row(0.9167, 2.5, "StrikeCalled"),  # ~11in Shadow, out-of-box strike -> Stolen (shadow)
+        # Non-take (swing) pitch with a valid location: must be INCLUDED in the
+        # steal% denominator (Heart, Correct Call) even though it isn't a "take".
+        row(0.0, 2.5, "StrikeSwinging"),
+        # Invalid plate location (NaN): must be EXCLUDED from the denominator
+        # entirely, regardless of pitch_call, per the legacy valid-loc filter.
+        row(None, None, "BallCalled"),
     ])
 
 
@@ -79,13 +85,17 @@ def test_framing_table_math():
     t = C.framing_table(df)
     # stolen = 2 (waste + shadow), lost = 1 (heart) -> net = 1
     assert t["net_strikes"] == 1
-    # Steal% (legacy quirk) = lost / total_takes * 100 = 1/4*100 = 25.0
-    assert t["steal_pct"] == 25.0
+    # Steal% = lost / count(valid plate-loc pitches) * 100.
+    # Valid-loc rows = 5 (the NaN-loc row is excluded from the denominator,
+    # the StrikeSwinging non-take row is included): 1/5*100 = 20.0
+    assert t["steal_pct"] == 20.0
     assert t["shadow_net"] == 1
     assert t["heart_net"] == -1
-    # Heart zone = rows 0 (Correct) and 1 (Lost) -> 1 lost / 2 heart takes = 50.0
-    # (matches legacy src/app.R: denom is ALL heart-zone takes, not just lost+stolen)
-    assert t["heart_loss_pct"] == 50.0
+    # Heart zone = rows 0 (Correct), 1 (Lost), 4 (Correct, non-take swing)
+    # -> 1 lost / 3 heart valid-loc pitches = 33.3
+    # (matches legacy src/app.R: denom is ALL heart-zone valid-loc pitches,
+    # not just lost+stolen, and not restricted to "takes")
+    assert t["heart_loss_pct"] == 33.3
 
 
 def test_framing_table_empty():

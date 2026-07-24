@@ -257,6 +257,9 @@ def framing_table(df: pd.DataFrame) -> dict:
     if df.empty:
         return empty
     f = add_framing_cols(df) if "CallType" not in df.columns else df
+    f = f[f["plate_loc_side"].notna() & f["plate_loc_height"].notna()]
+    if f.empty:
+        return empty
     ct, zone = f["CallType"], f["Zone"]
     stolen = ct == "Stolen Strike"
     lost = ct == "Lost Strike"
@@ -291,8 +294,8 @@ def framing_season_tiles(catcher_id: int) -> dict:
                SUM(pitch_call='BallCalled'
                    AND (ABS(plate_loc_side*12) <= 10
                         AND ABS(plate_loc_height*12 - 30) <= 13)) AS lost,
-               SUM(pitch_call IN ('StrikeCalled','BallCalled','BallinDirt',
-                                  'BallIntentional','AutomaticBall')) AS takes
+               SUM(plate_loc_side IS NOT NULL
+                   AND plate_loc_height IS NOT NULL) AS valid_loc
           FROM fact_tm_game_pitch
          WHERE catcher_id IN ({marks})
         """,
@@ -303,8 +306,8 @@ def framing_season_tiles(catcher_id: int) -> dict:
     r = df.iloc[0]
     stolen = int(r["stolen"] or 0)
     lost = int(r["lost"] or 0)
-    takes = int(r["takes"] or 0)
-    steal = _pct(lost, takes)
+    valid_loc = int(r["valid_loc"] or 0)
+    steal = _pct(lost, valid_loc)
     return {
         "games": str(int(r["games"] or 0)),
         "pitches": str(int(r["pitches"] or 0)),
