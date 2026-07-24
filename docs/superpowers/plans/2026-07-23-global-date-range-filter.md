@@ -409,7 +409,7 @@ Replace `_on_pitcher` (the outing-options callback) with two callbacks — one r
             return [], None
         g = P.games_for_pitcher(pid, start=start, end=end)
         opts = dr.game_options(g)
-        value = int(g.iloc[0]["game_id"]) if not g.empty else dr.ALL_IN_RANGE
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
 ```
 
@@ -733,7 +733,7 @@ Add `from app.dashboards import date_range as dr`; ensure `State` imported (it i
             return [], None
         g = C.games_for_catcher(cid, start=start, end=end)
         opts = dr.game_options(g)
-        value = int(g.iloc[0]["game_id"]) if not g.empty else dr.ALL_IN_RANGE
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
 ```
 
@@ -1000,7 +1000,7 @@ Add `from app.dashboards import date_range as dr`. Replace `_on_hitter` with the
             return [], None
         g = hitting_wh.wh_games_for_batter(bid, start=start, end=end)
         opts = dr.game_options(g)
-        value = int(g.iloc[0]["game_id"]) if not g.empty else dr.ALL_IN_RANGE
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
 
     @dash_app.callback(
