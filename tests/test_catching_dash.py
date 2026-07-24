@@ -209,3 +209,18 @@ def test_static_framing_render():
     from app.dashboards.catching.tabs import static_framing
     comp = static_framing.render(_sample_df())
     assert comp is not None
+
+
+def test_caught_stealing_render_with_attempt():
+    from app.dashboards.catching.tabs import caught_stealing
+    comp = caught_stealing.render(_sample_df())  # sample has 1 CaughtStealing
+    assert comp is not None
+
+
+def test_caught_stealing_render_empty():
+    import pandas as pd
+    from app.dashboards.catching.tabs import caught_stealing
+    comp = caught_stealing.render(pd.DataFrame([
+        {"play_result": "Single", "pitch_call": "InPlay",
+         "plate_loc_side": 0.0, "plate_loc_height": 2.5}]))
+    assert comp is not None
