@@ -73,7 +73,6 @@ def serve_layout() -> html.Div:
     min_d, max_d = P.date_bounds()
     players = selectors.player_options(pitch_all, is_coach=is_coach, own_name=own_name)
     default_player = players[0]["value"] if players else "All Players"
-    sessions = [{"label": s, "value": s} for s in P.session_options(pitch_all)]
 
     filters = html.Div([
         html.Div([
@@ -100,21 +99,6 @@ def serve_layout() -> html.Div:
             dcc.Dropdown(id="prac-player", options=players, value=default_player,
                          clearable=False, disabled=not is_coach and len(players) <= 1,
                          style={"minWidth": "200px"}),
-        ]),
-        html.Div([
-            html.Label("Session", style={"color": "white", "fontWeight": "bold"}),
-            dcc.Dropdown(id="prac-session", options=sessions,
-                         value="All session types", clearable=False,
-                         style={"minWidth": "220px"}),
-        ]),
-        html.Div([
-            html.Label("Options", style={"color": "white", "fontWeight": "bold"}),
-            dcc.Checklist(
-                id="prac-exclude-test",
-                options=[{"label": " Exclude test accounts", "value": "exclude"}],
-                value=["exclude"],
-                style={"color": "white"},
-            ),
         ]),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
               "flexWrap": "wrap", "padding": "12px 16px", "backgroundColor": BANNER})

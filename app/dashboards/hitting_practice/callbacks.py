@@ -46,41 +46,34 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("prac-filters", "data"),
         Output("prac-player", "options"),
-        Output("prac-session", "options"),
         Output("prac-daterange", "start_date"),
         Output("prac-daterange", "end_date"),
         Input("prac-date-preset", "value"),
         Input("prac-player", "value"),
-        Input("prac-session", "value"),
-        Input("prac-exclude-test", "value"),
         Input("prac-daterange", "start_date"),
         Input("prac-daterange", "end_date"),
     )
-    def _on_filters(preset, player, session, exclude_vals, ds, de):
+    def _on_filters(preset, player, ds, de):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own_name = getattr(current_user, "name", None)
-        exclude_test = "exclude" in (exclude_vals or [])
+        exclude_test = True
         pitch, _, _, _ = _load_all(exclude_test)
-        # Calendar edit wins when it fired; otherwise the preset drives the window.
         if ctx.triggered_id == "prac-daterange" and ds and de:
             start = date.fromisoformat(ds[:10])
             end = date.fromisoformat(de[:10])
         else:
             start, end = P.preset_date_range(preset or "Custom")
-        # Narrow player list to selected date window for discoverability
         windowed = P.apply_filters(pitch, player=None, start=start, end=end, session=None)
         base = windowed if not windowed.empty else pitch
         popts = selectors.player_options(base, is_coach=is_coach, own_name=own_name)
-        sopts = [{"label": s, "value": s} for s in P.session_options(base)]
         player = selectors.resolve_player(player, is_coach=is_coach, own_name=own_name)
         if player not in {o["value"] for o in popts} and popts:
             player = popts[0]["value"]
         return (
             {"player": player, "preset": preset or "Custom",
-             "session": session or "All session types",
-             "exclude_test": exclude_test,
+             "session": "All session types", "exclude_test": True,
              "start": start.isoformat(), "end": end.isoformat()},
-            popts, sopts, start.isoformat(), end.isoformat(),
+            popts, start.isoformat(), end.isoformat(),
         )
 
     @dash_app.callback(

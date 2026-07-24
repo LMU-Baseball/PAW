@@ -229,3 +229,23 @@ def test_swing_trend_uses_real_dates_not_epoch():
                ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])
                for v in xs)
     assert "1774915200000" not in [str(v) for v in xs]
+
+
+def test_practice_layout_drops_session_and_exclude_controls():
+    import inspect
+    from app.dashboards.hitting_practice import layout
+    src = inspect.getsource(layout)
+    assert 'id="prac-session"' not in src
+    assert 'id="prac-exclude-test"' not in src
+    # defaults still seeded in the filters store
+    assert '"session": "All session types"' in src
+    assert '"exclude_test": True' in src
+
+
+def test_on_filters_signature_dropped_session_exclude():
+    import inspect
+    from app.dashboards.hitting_practice import callbacks
+    src = inspect.getsource(callbacks)
+    assert 'Input("prac-session"' not in src
+    assert 'Input("prac-exclude-test"' not in src
+    assert 'Output("prac-session"' not in src
