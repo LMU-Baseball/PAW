@@ -97,6 +97,7 @@ def framing_scatter(df: pd.DataFrame) -> go.Figure:
         d = d[d["plate_loc_side"].notna() & d["plate_loc_height"].notna()]
         _scatter_traces(fig, d)
     _base_axes(fig)
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
     fig.update_layout(
         title="Zone Location — Catcher View", showlegend=True,
         margin=dict(l=20, r=20, t=40, b=20), height=460,
@@ -116,8 +117,11 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         _zone_frame(fig, row=1, col=i)
         _scatter_traces(fig, d[d[by] == v], row=1, col=i, shown=shown)
         _base_axes(fig, row=1, col=i)
+        fig.update_yaxes(scaleanchor=("x" if i == 1 else f"x{i}"),
+                         scaleratio=1, row=1, col=i)
     if not vals:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
     fig.update_layout(
         title=title, height=380, margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",

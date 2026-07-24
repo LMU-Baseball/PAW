@@ -235,3 +235,17 @@ def test_catching_range_pooled_render_live(real_catcher):
     assert framing.render(pooled) is not None
     assert static_framing.render(pooled) is not None
     assert caught_stealing.render(pooled) is not None
+
+
+def test_framing_scatter_is_aspect_locked():
+    from app.dashboards.catching import charts
+    fig = charts.framing_scatter(_sample_df())
+    assert fig.layout.yaxis.scaleanchor == "x"
+    assert fig.layout.yaxis.scaleratio == 1
+
+
+def test_framing_facets_is_aspect_locked():
+    from app.dashboards.catching import charts
+    fig = charts.framing_facets(_sample_df(), by="batter_side", title="Batter Side")
+    # first facet's y-axis is locked to its x-axis
+    assert fig.layout.yaxis.scaleanchor == "x"
