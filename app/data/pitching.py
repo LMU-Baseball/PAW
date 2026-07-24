@@ -643,7 +643,9 @@ def _base_layout(fig: go.Figure, title: str) -> go.Figure:
 def fig_velo_by_inning(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["rel_speed"])
     g = d.groupby("inning")["rel_speed"].mean().reset_index()
-    fig = go.Figure(go.Bar(x=g["inning"], y=g["rel_speed"].round(1)))
+    fig = go.Figure(go.Bar(x=g["inning"], y=g["rel_speed"].round(1),
+                           hovertemplate=("Inning %{x}<br>"
+                                          "Avg Velo: %{y:.1f} mph<extra></extra>")))
     fig.update_xaxes(title="Inning"); fig.update_yaxes(title="Avg Velo (mph)")
     return _base_layout(fig, "Velocity by Inning")
 
@@ -657,7 +659,10 @@ def fig_velo_by_pitch(df: pd.DataFrame) -> go.Figure:
         fig.add_trace(go.Scatter(x=sub["_seq"], y=sub["rel_speed"],
                                  mode="markers+lines", name=pt,
                                  marker=dict(color=pitch_color(pt)),
-                                 line=dict(color=pitch_color(pt))))
+                                 line=dict(color=pitch_color(pt)),
+                                 hovertemplate=("Pitch No: %{x}<br>"
+                                                "Velo: %{y:.1f} mph<br>"
+                                                f"{pt}<extra></extra>")))
     fig.update_xaxes(title="Pitch # (this outing)"); fig.update_yaxes(title="Velo (mph)")
     return _base_layout(fig, "Velocity Across Outing")
 
@@ -669,7 +674,9 @@ def fig_movement(df: pd.DataFrame) -> go.Figure:
     for pt, sub in d.groupby("_pt"):
         fig.add_trace(go.Scatter(x=sub["horz_break"], y=sub["induced_vert_break"],
                                  mode="markers", name=pt,
-                                 marker=dict(color=pitch_color(pt), size=9)))
+                                 marker=dict(color=pitch_color(pt), size=9),
+                                 hovertemplate=(f"{pt}<br>HB: %{{x:.1f}} in<br>"
+                                                "IVB: %{y:.1f} in<extra></extra>")))
     fig.update_xaxes(title="Horizontal Break (in)", zeroline=True)
     fig.update_yaxes(title="Induced Vert Break (in)", zeroline=True)
     return _base_layout(fig, "Pitch Movement")
@@ -754,10 +761,14 @@ def fig_outings_velo_trend(recent_df: pd.DataFrame) -> go.Figure:
         d = recent_df.sort_values("game_date")
         fig.add_trace(go.Scatter(x=d["game_date"], y=d["appearance_avg_velo"].round(1),
                                  mode="markers+lines", name="Avg Velo",
-                                 line=dict(color="#0076A5")))
+                                 line=dict(color="#0076A5"),
+                                 hovertemplate=("Date: %{x}<br>"
+                                                "Avg Velo: %{y:.1f} mph<extra></extra>")))
         fig.add_trace(go.Scatter(x=d["game_date"], y=d["appearance_max_velo"].round(1),
                                  mode="markers+lines", name="Max Velo",
-                                 line=dict(color="#9A0021")))
+                                 line=dict(color="#9A0021"),
+                                 hovertemplate=("Date: %{x}<br>"
+                                                "Max Velo: %{y:.1f} mph<extra></extra>")))
     fig.update_xaxes(title="Outing Date"); fig.update_yaxes(title="Velo (mph)")
     return _base_layout(fig, "Velocity Trend (Selected Outings)")
 

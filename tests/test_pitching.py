@@ -298,3 +298,25 @@ def test_range_pitches_for_unions_range():
     # pooled equals the sum of single-game loads across the range
     single_total = sum(len(P.game_pitches_for(int(g), pid)) for g in allg["game_id"])
     assert len(pooled) == single_total
+
+
+def test_pitching_figs_have_labeled_hovers():
+    import pandas as pd
+    from app.data import pitching as P
+    df = pd.DataFrame({
+        "pitch_no": [1, 2, 3, 4],
+        "rel_speed": [90.0, 89.0, 80.0, 81.0],
+        "horz_break": [-10.0, -9.0, 12.0, 11.0],
+        "induced_vert_break": [22.0, 21.0, 4.0, 5.0],
+        "inning": [1, 1, 2, 2],
+        "auto_pitch_type": ["Fastball", "Fastball", "Sweeper", "Sweeper"],
+        "tagged_pitch_type": ["Fastball", "Fastball", "Sweeper", "Sweeper"],
+    })
+    velo = P.fig_velo_by_pitch(df)
+    assert any("Pitch No:" in (t.hovertemplate or "") for t in velo.data)
+    assert any("Velo:" in (t.hovertemplate or "") for t in velo.data)
+    mv = P.fig_movement(df)
+    assert any("HB:" in (t.hovertemplate or "") and "IVB:" in (t.hovertemplate or "")
+               for t in mv.data)
+    inn = P.fig_velo_by_inning(df)
+    assert any("Avg Velo:" in (t.hovertemplate or "") for t in inn.data)
