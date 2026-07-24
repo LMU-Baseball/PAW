@@ -78,7 +78,15 @@ def test_catcher_options_coach(monkeypatch):
 
 def test_build_catching_dash_mounts(server):
     rules = {r.rule for r in server.url_map.iter_rules()}
-    assert any(r.startswith("/dash/catching/") for r in rules)
+    assert "/dash/catching/" in rules
+
+
+def test_all_tabs_render(server):
+    from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
+    df = _sample_df()
+    assert framing.render(df) is not None
+    assert static_framing.render(df) is not None
+    assert caught_stealing.render(df) is not None
 
 
 def test_framing_tab_render():
@@ -99,18 +107,6 @@ def test_framing_body_builds():
     comp = framing.body(_sample_df(), bat_side="All", pitcher_throws="All",
                         pitch_speed="All", zone="All")
     assert comp is not None
-
-
-def test_blocking_tab_render():
-    from app.dashboards.catching.tabs import blocking
-    assert blocking.render(_sample_df()) is not None
-    assert blocking.render(pd.DataFrame()) is not None
-
-
-def test_throws_tab_render():
-    from app.dashboards.catching.tabs import throws
-    assert throws.render(_sample_df()) is not None
-    assert throws.render(pd.DataFrame()) is not None
 
 
 def test_framing_scatter_returns_figure():
@@ -186,23 +182,6 @@ def test_game_options_for_real_catcher(real_catcher):
     from app.dashboards.catching import selectors
     opts = selectors.game_options(real_catcher)
     assert opts and {"label", "value"} <= set(opts[0])
-
-
-def test_tabs_render_on_live_game(real_catcher):
-    from app.data import catching as C
-    from app.dashboards.catching.tabs import blocking, framing, throws
-    games = C.games_for_catcher(real_catcher)
-    gid = int(games.iloc[0]["game_id"])
-    df = C.game_pitches_for(gid, real_catcher)
-    assert framing.render(df) is not None
-    assert blocking.render(df) is not None
-    assert throws.render(df) is not None
-
-
-def test_season_summary_shape(real_catcher):
-    from app.data import catching as C
-    s = C.season_summary(real_catcher)
-    assert {"games", "pitches", "cs_pct", "block_pct"} <= set(s)
 
 
 def test_static_framing_render():

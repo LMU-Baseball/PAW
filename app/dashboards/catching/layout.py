@@ -21,7 +21,7 @@ def sidebar(catcher_id) -> html.Div:
     if catcher_id is None:
         return html.Div("Select a catcher.", style={"padding": "12px"})
     prof = C.catcher_profile(int(catcher_id))
-    summ = C.season_summary(int(catcher_id))
+    summ = C.framing_season_tiles(int(catcher_id))
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"]) if x])
@@ -33,10 +33,11 @@ def sidebar(catcher_id) -> html.Div:
                  style={"fontSize": "26px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div(meta, style={"fontSize": "16px", "color": "#555"}),
         html.Div([_tile("GAMES", summ["games"]), _tile("PITCHES", summ["pitches"]),
-                  _tile("CS%", summ["cs_pct"]), _tile("BLOCK%", summ["block_pct"])],
+                  _tile("NET STRIKES", summ["net_strikes"]),
+                  _tile("STEAL%", summ["steal_pct"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Season tiles = warehouse (provisional framing/block%).",
+        html.Div("Season framing tiles (provisional stolen/lost model).",
                  style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
@@ -85,9 +86,9 @@ def serve_layout() -> html.Div:
               "padding": "12px 16px", "backgroundColor": BANNER})
 
     tabs = dcc.Tabs(id="tabs", value="framing", children=[
-        dcc.Tab(label="Framing", value="framing"),
-        dcc.Tab(label="Blocking", value="blocking"),
-        dcc.Tab(label="Throws", value="throws"),
+        dcc.Tab(label="Overall Framing", value="framing"),
+        dcc.Tab(label="Static Framing", value="static"),
+        dcc.Tab(label="Caught Stealing", value="caught"),
     ])
 
     return html.Div([

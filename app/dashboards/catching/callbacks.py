@@ -4,12 +4,12 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-from dash import Input, Output, html
+from dash import Input, Output, State, html
 from flask_login import current_user
 
 from app.data import catching as C
 from app.dashboards.catching import layout, selectors
-from app.dashboards.catching.tabs import blocking, framing, throws
+from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
 
 
 def _read_game_df(data_json):
@@ -61,8 +61,21 @@ def register_callbacks(dash_app) -> None:
                             style={"padding": "12px", "color": "#555"})
         if tab == "framing":
             return framing.render(df)
-        if tab == "blocking":
-            return blocking.render(df)
-        if tab == "throws":
-            return throws.render(df)
+        if tab == "static":
+            return static_framing.render(df)
+        if tab == "caught":
+            return caught_stealing.render(df)
         return html.Div()
+
+    @dash_app.callback(
+        Output("fr-body", "children"),
+        Input("fr-bat", "value"), Input("fr-throws", "value"),
+        Input("fr-speed", "value"), Input("fr-zone", "value"),
+        State("game-data", "data"),
+    )
+    def _framing_body(bat, throws, speed, zone, data_json):
+        df = _read_game_df(data_json)
+        if df.empty:
+            return html.Div("No pitch data.")
+        return framing.body(df, bat_side=bat or "All", pitcher_throws=throws or "All",
+                            pitch_speed=speed or "All", zone=zone or "All")
