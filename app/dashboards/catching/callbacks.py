@@ -4,12 +4,12 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-from dash import Input, Output, State, html
+from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import catching as C
 from app.dashboards import date_range as dr
-from app.dashboards.catching import layout, selectors
+from app.dashboards.catching import charts, layout, selectors
 from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
 
 
@@ -104,11 +104,46 @@ def register_callbacks(dash_app) -> None:
         Output("fr-body", "children"),
         Input("fr-bat", "value"), Input("fr-throws", "value"),
         Input("fr-speed", "value"), Input("fr-zone", "value"),
+        Input("call-active", "data"),
         State("game-data", "data"),
     )
-    def _framing_body(bat, throws, speed, zone, data_json):
+    def _framing_body(bat, throws, speed, zone, active_calls, data_json):
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data.")
         return framing.body(df, bat_side=bat or "All", pitcher_throws=throws or "All",
-                            pitch_speed=speed or "All", zone=zone or "All")
+                            pitch_speed=speed or "All", zone=zone or "All",
+                            active_calls=active_calls)
+
+    @dash_app.callback(
+        Output("call-active", "data"),
+        Input({"type": "call-chip", "index": ALL}, "n_clicks"),
+        State("call-active", "data"),
+        prevent_initial_call=True,
+    )
+    def _call_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        ct = tid["index"]
+        active = list(active or [])
+        return [c for c in active if c != ct] if ct in active else active + [ct]
+
+    @dash_app.callback(
+        Output({"type": "call-chip", "index": ALL}, "style"),
+        Input("call-active", "data"),
+        State({"type": "call-chip", "index": ALL}, "id"),
+    )
+    def _call_chip_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            ct = i["index"]; col = charts.CALLTYPE_COLORS[ct]; on = ct in active
+            out.append({"border": f"2px solid {col}",
+                        "background": col if on else "#fff",
+                        "color": "#fff" if on else col,
+                        "borderRadius": "14px", "padding": "3px 12px",
+                        "margin": "0 6px 6px 0", "cursor": "pointer",
+                        "opacity": "1" if on else ".55",
+                        "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
+        return out

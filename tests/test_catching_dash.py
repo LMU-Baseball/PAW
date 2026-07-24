@@ -282,3 +282,37 @@ def _has_graph(component):
 def test_caught_stealing_tab_has_trend_graph():
     from app.dashboards.catching.tabs import caught_stealing
     assert _has_graph(caught_stealing.render(_sample_df()))
+
+
+def test_framing_render_has_call_chips():
+    from app.dashboards.catching.tabs import framing
+    comp = framing.render(_sample_df())
+    ids = _collect_ids(comp)  # helper already in this test file
+    assert "call-active" in ids
+
+
+def test_framing_body_call_filter_scatter_only():
+    from app.dashboards.catching.tabs import framing
+    from app.data import catching as C
+    df = _sample_df()
+    # Full body vs body filtered to a single call type
+    full = framing.body(df, bat_side="All", pitcher_throws="All",
+                        pitch_speed="All", zone="All")
+    filtered = framing.body(df, bat_side="All", pitcher_throws="All",
+                            pitch_speed="All", zone="All",
+                            active_calls=["Stolen Strike"])
+    # The summary table (fr-summary) is identical regardless of active_calls
+    # (table uses all calls). Locate the DataTable data in each tree.
+    def find_table(c):
+        from dash import dash_table
+        out = []
+        def walk(x):
+            if isinstance(x, dash_table.DataTable):
+                out.append(x)
+            ch = getattr(x, "children", None)
+            if ch and not isinstance(ch, str):
+                for k in (ch if isinstance(ch, (list, tuple)) else [ch]):
+                    walk(k)
+        walk(c)
+        return out
+    assert find_table(full)[0].data == find_table(filtered)[0].data
