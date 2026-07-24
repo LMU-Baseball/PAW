@@ -47,7 +47,7 @@ def sidebar(batter_id) -> html.Div:
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Slash line = warehouse game data (provisional).",
-                 style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
+                 style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
 
@@ -117,7 +117,7 @@ def serve_layout() -> html.Div:
                                         "game_id": default_game,
                                         "start": start_d, "end": end_d}),
         dcc.Store(id="game-data"),
-        header(),
+        header(back_href="/hitting", back_label="← Hitting"),
         html.Div([
             html.Div(id="sidebar", children=sidebar(default_batter),
                      style={"width": "240px", "flexShrink": "0"}),

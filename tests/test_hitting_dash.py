@@ -380,3 +380,17 @@ def test_hitting_range_pooled_render_live():
         assert game_level.render(pooled, note="") is not None
         assert pa.render_all_pas(pooled) is not None
         assert zl.render(pooled, "All Swings") is not None
+
+
+def test_hitting_layout_has_back_link_and_dark_footnote():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout)
+    # header called with the /hitting back-link
+    assert 'back_href="/hitting"' in src
+    # provisional footnote no longer uses the too-light #888
+    assert '"Slash line = warehouse game data (provisional)."' in src
+    footnote_idx = src.index('"Slash line = warehouse game data (provisional)."')
+    # the style dict immediately after the footnote uses #555, not #888
+    tail = src[footnote_idx:footnote_idx + 300]
+    assert '"#555"' in tail and '"#888"' not in tail

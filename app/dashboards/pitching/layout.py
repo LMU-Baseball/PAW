@@ -39,7 +39,7 @@ def sidebar(pitcher_id) -> html.Div:
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Season totals = warehouse (provisional).",
-                 style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
+                 style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
 
