@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import io
 from datetime import date
-from datetime import date as _date
 
 import pandas as pd
 from dash import Input, Output, ctx, html
@@ -64,8 +63,8 @@ def register_callbacks(dash_app) -> None:
         pitch, _, _, _ = _load_all(exclude_test)
         # Calendar edit wins when it fired; otherwise the preset drives the window.
         if ctx.triggered_id == "prac-daterange" and ds and de:
-            start = _date.fromisoformat(ds[:10])
-            end = _date.fromisoformat(de[:10])
+            start = date.fromisoformat(ds[:10])
+            end = date.fromisoformat(de[:10])
         else:
             start, end = P.preset_date_range(preset or "Custom")
         # Narrow player list to selected date window for discoverability

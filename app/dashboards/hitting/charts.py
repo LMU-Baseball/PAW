@@ -115,30 +115,54 @@ def _empty_pas_figure() -> go.Figure:
     return fig
 
 
+def _pa_keys(df: pd.DataFrame) -> list[tuple]:
+    """Ordered composite PA identity: (GameID, Inning, PAofInning).
+
+    A pooled multi-game df reuses Inning/PAofInning per game, so GameID must be
+    part of the key to avoid conflating PAs across games. GameID defaults to 0
+    when the column is absent so a single game's grouping/ordering is unaffected.
+    """
+    if "GameID" not in df.columns:
+        return [(0, i, p) for i, p in
+                sorted(df.groupby(["Inning", "PAofInning"]).groups.keys())]
+    return sorted(df.groupby(["GameID", "Inning", "PAofInning"]).groups.keys())
+
+
 def all_pas_figure(df: pd.DataFrame) -> go.Figure:
     """One strike-zone subplot per plate appearance, numbered in game order.
 
-    PAs are ordered chronologically (Inning, then PAofInning) and titled by the
-    hitter's sequential game PA number ("PA 1 · Inn 1") — NOT PAofInning, which is
-    the position within the inning across all batters.
+    PAs are ordered chronologically (GameID, then Inning, then PAofInning) and
+    titled by the hitter's sequential game PA number ("PA 1 · Inn 1") — NOT
+    PAofInning, which is the position within the inning across all batters. When
+    the df spans more than one game, each title is prefixed with a "G{GameID}"
+    marker so PAs from different games stay distinguishable.
     """
     if df is None or df.empty:
         return _empty_pas_figure()
 
-    pa_keys = sorted(df.groupby(["Inning", "PAofInning"]).groups.keys())
+    pa_keys = _pa_keys(df)
     n = len(pa_keys)
     if n == 0:
         return _empty_pas_figure()
+    multi_game = len({k[0] for k in pa_keys}) > 1
+    has_gameid = "GameID" in df.columns
     ncols = min(3, n)
     nrows = math.ceil(n / ncols)
-    titles = [f"PA {seq} · Inn {int(i)}" for seq, (i, p) in enumerate(pa_keys, 1)]
+    titles = []
+    for seq, (gid, i, p) in enumerate(pa_keys, 1):
+        t = f"PA {seq} · Inn {int(i)}"
+        titles.append(f"G{int(gid)} · {t}" if multi_game else t)
     fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=titles,
                         horizontal_spacing=0.03, vertical_spacing=0.08)
     for idx, key in enumerate(pa_keys):
+        gid, inn, pa = key
         row = idx // ncols + 1
         col = idx % ncols + 1
         _add_zone_shapes(fig, row=row, col=col)
-        g = _to_xy(df[(df["Inning"] == key[0]) & (df["PAofInning"] == key[1])])
+        mask = (df["Inning"] == inn) & (df["PAofInning"] == pa)
+        if has_gameid:
+            mask &= (df["GameID"] == gid)
+        g = _to_xy(df[mask])
         for ptype, gg in g.groupby("TaggedPitchType"):
             fig.add_trace(go.Scatter(
                 x=gg["_x"], y=gg["_y"], mode="markers+text",

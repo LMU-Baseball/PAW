@@ -166,6 +166,41 @@ def test_pa_choices_number_sequentially_by_game_order():
     assert labels[1].startswith("PA 2 ·")
 
 
+def _fake_pooled_pitches():
+    """Two games, each with its own (Inning 1, PAofInning 1) — same local PA
+    identity reused across games, so GameID must disambiguate them."""
+    return pd.DataFrame([
+        {"GameID": 100, "PlateLocSide": 0.2, "PlateLocHeight": 2.5,
+         "TaggedPitchType": "Fastball", "PitchCall": "StrikeSwinging",
+         "PlayResult": "Undefined", "TaggedHitType": None,
+         "Balls": 0, "Strikes": 1, "Inning": 1, "PAofInning": 1, "PitchofPA": 1,
+         "Pitcher": "Smith, Joe"},
+        {"GameID": 200, "PlateLocSide": -0.4, "PlateLocHeight": 2.1,
+         "TaggedPitchType": "Slider", "PitchCall": "InPlay",
+         "PlayResult": "Single", "TaggedHitType": "LineDrive",
+         "Balls": 1, "Strikes": 1, "Inning": 1, "PAofInning": 1, "PitchofPA": 1,
+         "Pitcher": "Doe, Jane"},
+    ])
+
+
+def test_pa_choices_keeps_pas_separate_across_games():
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    df = _fake_pooled_pitches()
+    choices = pa.pa_choices(df)
+    # both games' (Inn 1, PA 1) must survive as distinct entries, not collapse to 1
+    assert len(choices) == 2
+    assert len({c["value"] for c in choices}) == 2
+
+
+def test_render_all_pas_renders_pooled_multi_game_df():
+    from app.dashboards.hitting.tabs import plate_appearances as pa
+    from dash import dcc
+    out = pa.render_all_pas(_fake_pooled_pitches())
+    assert isinstance(out, dcc.Graph)
+    # two distinct game-PAs -> two subplot titles, one per game
+    assert len(out.figure.layout.annotations) == 2
+
+
 def test_stat_table_builds_and_formats_pct():
     from app.dashboards.hitting import tables
     from dash import dash_table

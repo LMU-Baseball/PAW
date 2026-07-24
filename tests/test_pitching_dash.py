@@ -122,3 +122,41 @@ def test_pitching_aggregate_load_live():
         assert not pooled.empty
         # sentinel is what the callback routes on
         assert ALL_IN_RANGE == "__all_in_range__"
+
+
+def test_outings_anchor_passthrough_concrete_game_id():
+    from app.dashboards.pitching.callbacks import _outings_anchor
+    assert _outings_anchor({"pitcher_id": 1, "game_id": 42,
+                            "start": "2026-01-01", "end": "2026-06-01"}) == 42
+
+
+def test_outings_anchor_sentinel_resolves_to_most_recent_in_range_game():
+    from app import create_app
+    from config import Config
+    from app.data import pitching as P
+    from app.dashboards.date_range import ALL_IN_RANGE
+    from app.dashboards.pitching.callbacks import _outings_anchor
+
+    class T(Config):
+        TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
+    app = create_app(T)
+    with app.app_context():
+        pit = P.wh_lmu_pitchers()
+        if pit.empty:
+            pytest.skip("no pitchers")
+        pid = int(pit.iloc[0]["PitcherId"])
+        g = P.games_for_pitcher(pid)
+        if g.empty:
+            pytest.skip("no games")
+        lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
+        anchor = _outings_anchor({"pitcher_id": pid, "game_id": ALL_IN_RANGE,
+                                  "start": lo, "end": hi})
+        assert isinstance(anchor, int)
+
+
+def test_outings_anchor_sentinel_missing_range_returns_none():
+    from app.dashboards.date_range import ALL_IN_RANGE
+    from app.dashboards.pitching.callbacks import _outings_anchor
+    assert _outings_anchor({"pitcher_id": 1, "game_id": ALL_IN_RANGE,
+                            "start": None, "end": None}) is None
+    assert _outings_anchor(None) is None

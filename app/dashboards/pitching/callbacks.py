@@ -19,6 +19,19 @@ def _read_game_df(data_json):
     return pd.read_json(io.StringIO(data_json), orient="split")
 
 
+def _outings_anchor(sel):
+    """Resolve the Last-Outings anchor game_id (sentinel -> most-recent in-range game)."""
+    sel = sel or {}
+    gid = sel.get("game_id")
+    if gid == dr.ALL_IN_RANGE:
+        pid = sel.get("pitcher_id")
+        if not pid or not sel.get("start") or not sel.get("end"):
+            return None
+        g = P.games_for_pitcher(int(pid), start=sel["start"], end=sel["end"])
+        return int(g.iloc[0]["game_id"]) if not g.empty else None
+    return gid
+
+
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
@@ -47,7 +60,7 @@ def register_callbacks(dash_app) -> None:
             return [], None
         g = P.games_for_pitcher(pid, start=start, end=end)
         opts = dr.game_options(g)
-        value = int(g.iloc[0]["game_id"]) if not g.empty else dr.ALL_IN_RANGE
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None
         return opts, value
 
     @dash_app.callback(
@@ -91,12 +104,7 @@ def register_callbacks(dash_app) -> None:
     def _render_tab(tab, data_json, sel):
         if tab == "outings":
             sel = sel or {}
-            anchor = sel.get("game_id")
-            if anchor == dr.ALL_IN_RANGE:
-                g = P.games_for_pitcher(int(sel["pitcher_id"]),
-                                        start=sel.get("start"), end=sel.get("end")) \
-                    if sel.get("pitcher_id") else None
-                anchor = int(g.iloc[0]["game_id"]) if g is not None and not g.empty else None
+            anchor = _outings_anchor(sel)
             return last_outings.render(sel.get("pitcher_id"), anchor, 5)
         df = _read_game_df(data_json)
         if df.empty:
@@ -116,7 +124,7 @@ def register_callbacks(dash_app) -> None:
     )
     def _lo_body(n, sel):
         sel = sel or {}
-        return last_outings.body(sel.get("pitcher_id"), sel.get("game_id"), n or 5)
+        return last_outings.body(sel.get("pitcher_id"), _outings_anchor(sel), n or 5)
 
     # Chip click -> toggle the pitch type in the active-set store.
     @dash_app.callback(

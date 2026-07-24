@@ -10,24 +10,53 @@ _PA_TABLE_COLS = ["PitchofPA", "TaggedPitchType", "PitchCall", "PlayResult",
                   "Balls", "Strikes", "ExitSpeed", "Pitcher"]
 
 
+def _pa_keys(game_df: pd.DataFrame) -> list[tuple]:
+    """Ordered composite PA identity: (GameID, Inning, PAofInning).
+
+    A pooled multi-game df reuses Inning/PAofInning per game (every game has its
+    own Inning 1, PAofInning 1, …), so GameID must be part of the key or PAs from
+    different games collapse together. GameID defaults to 0 when the column is
+    absent so a single game's grouping/ordering is unaffected.
+    """
+    if "GameID" not in game_df.columns:
+        return [(0, i, p) for i, p in
+                sorted(game_df.groupby(["Inning", "PAofInning"]).groups.keys())]
+    return sorted(game_df.groupby(["GameID", "Inning", "PAofInning"]).groups.keys())
+
+
+def _pa_value(key: tuple) -> str:
+    gid, inn, pa = key
+    return f"{int(gid)}|{int(inn)}|{int(pa)}"
+
+
 def pa_choices(game_df: pd.DataFrame) -> list[dict]:
     if game_df is None or game_df.empty:
         return []
-    keys = sorted(game_df.groupby(["Inning", "PAofInning"]).groups.keys())
+    keys = _pa_keys(game_df)
+    multi_game = len({k[0] for k in keys}) > 1
+    choices = []
     # Label by the hitter's sequential game PA (1,2,3…), not PAofInning.
-    return [{"label": f"PA {seq} · Inn {int(i)}", "value": f"{int(i)}-{int(p)}"}
-            for seq, (i, p) in enumerate(keys, 1)]
+    for seq, key in enumerate(keys, 1):
+        gid, inn, pa = key
+        label = f"PA {seq} · Inn {inn}"
+        if multi_game:
+            label = f"G{gid} · {label}"
+        choices.append({"label": label, "value": _pa_value(key)})
+    return choices
 
 
 def _pa_slice(game_df, pa_value):
-    keys = sorted(game_df.groupby(["Inning", "PAofInning"]).groups.keys())
+    keys = _pa_keys(game_df)
     if not keys:
         return game_df.iloc[0:0]
     if pa_value:
-        inn, pa = (int(x) for x in pa_value.split("-"))
+        gid, inn, pa = (int(x) for x in pa_value.split("|"))
     else:
-        inn, pa = keys[0]
-    return game_df[(game_df["Inning"] == inn) & (game_df["PAofInning"] == pa)]
+        gid, inn, pa = keys[0]
+    mask = (game_df["Inning"] == inn) & (game_df["PAofInning"] == pa)
+    if "GameID" in game_df.columns:
+        mask &= (game_df["GameID"] == gid)
+    return game_df[mask]
 
 
 def render_breakdown(game_df: pd.DataFrame, pa_value: str | None) -> html.Div:
@@ -47,10 +76,11 @@ def render_breakdown(game_df: pd.DataFrame, pa_value: str | None) -> html.Div:
 def render_all_pas(game_df: pd.DataFrame) -> dcc.Graph | html.Div:
     """All-PAs facet grid, capped to the 12 most recent PAs when pooling a range.
 
-    A pooled multi-game df carries a `GameID` column (every game reuses Inning 1,
-    PAofInning 1, etc., so GameID must be part of the PA key to avoid conflating
-    PAs across games); a single game's df has no GameID variation, so the cap is
-    keyed by Inning/PAofInning alone there (a no-op — a game has only a handful).
+    PA identity is `["GameID", "Inning", "PAofInning"]` (every game reuses Inning
+    1, PAofInning 1, etc., so GameID must be part of the PA key to avoid
+    conflating PAs across games). `GameID` is always present (from `_PITCH_SELECT`)
+    but constant for a single game, so the cap is a no-op there — a game has only
+    a handful of PAs.
     """
     df = game_df
     capped_note = None
