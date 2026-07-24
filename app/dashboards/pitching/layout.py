@@ -5,6 +5,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import pitching as P
+from app.dashboards import date_range as dr
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
 from app.dashboards.pitching import selectors
 
@@ -42,7 +43,11 @@ def sidebar(pitcher_id) -> html.Div:
     ], style={"padding": "8px"})
 
 
-def scoreboard(game_id) -> html.Div:
+def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
+    if game_id == dr.ALL_IN_RANGE:
+        return html.Div(dr.range_scoreboard_text(games_df, start, end),
+                        style={"color": "white", "fontWeight": "bold",
+                               "fontSize": "20px", "alignSelf": "center"})
     if not game_id:
         return html.Div()
     try:
@@ -66,8 +71,16 @@ def serve_layout() -> html.Div:
     default_pitcher = selectors.resolve_pitcher(
         pitchers[0]["value"] if pitchers else None,
         is_coach=is_coach, own_trackman_id=own)
-    outings = selectors.outing_options(default_pitcher)
-    default_game = outings[0]["value"] if outings else None
+    games_df = P.games_for_pitcher(default_pitcher) if default_pitcher else None
+    if games_df is not None and not games_df.empty:
+        start_d = str(games_df["game_date"].min())
+        end_d = str(games_df["game_date"].max())
+        outings = dr.game_options(games_df)
+        default_game = int(games_df.iloc[0]["game_id"])  # most recent single game
+    else:
+        start_d = end_d = None
+        outings = []
+        default_game = None
 
     selector_row = html.Div([
         html.Div([
@@ -75,6 +88,10 @@ def serve_layout() -> html.Div:
             dcc.Dropdown(id="pitcher-dd", options=pitchers, value=default_pitcher,
                          clearable=False, disabled=not is_coach,
                          style={"minWidth": "220px"}),
+        ]),
+        html.Div([
+            html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
+            dr.date_picker("pit", start_d, end_d),
         ]),
         html.Div([
             html.Label("Outing", style={"color": "white", "fontWeight": "bold"}),
@@ -94,7 +111,8 @@ def serve_layout() -> html.Div:
 
     return html.Div([
         dcc.Store(id="selection", data={"pitcher_id": default_pitcher,
-                                        "game_id": default_game}),
+                                        "game_id": default_game,
+                                        "start": start_d, "end": end_d}),
         dcc.Store(id="game-data"),
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div([

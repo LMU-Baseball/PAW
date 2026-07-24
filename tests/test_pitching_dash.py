@@ -99,3 +99,26 @@ def test_last_outings_render(real_pitcher):
     from app.dashboards.pitching.tabs import last_outings
     gid = int(P.games_for_pitcher(real_pitcher).iloc[0]["game_id"])
     assert last_outings.render(real_pitcher, gid, 5) is not None
+
+
+def test_pitching_aggregate_load_live():
+    from app import create_app
+    from config import Config
+    from app.data import pitching as P
+    from app.dashboards.date_range import ALL_IN_RANGE
+    class T(Config):
+        TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
+    app = create_app(T)
+    with app.app_context():
+        pit = P.wh_lmu_pitchers()
+        if pit.empty:
+            import pytest; pytest.skip("no pitchers")
+        pid = int(pit.iloc[0]["PitcherId"])
+        g = P.games_for_pitcher(pid)
+        if g.empty:
+            import pytest; pytest.skip("no games")
+        lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
+        pooled = P.range_pitches_for(pid, lo, hi)
+        assert not pooled.empty
+        # sentinel is what the callback routes on
+        assert ALL_IN_RANGE == "__all_in_range__"

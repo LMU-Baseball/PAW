@@ -8,6 +8,7 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import pitching as P
+from app.dashboards import date_range as dr
 from app.dashboards.pitching import layout, selectors
 from app.dashboards.pitching.tabs import last_outings, location_movement, pitch_breakdown, rhh_lhh
 
@@ -21,33 +22,65 @@ def _read_game_df(data_json):
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
-        Output("outing-dd", "options"), Output("outing-dd", "value"),
-        Input("pitcher-dd", "value"),
+        Output("pit-daterange", "start_date"), Output("pit-daterange", "end_date"),
+        Input("pitcher-dd", "value"), prevent_initial_call=True,
     )
-    def _on_pitcher(pitcher_id):
+    def _on_pitcher_range(pitcher_id):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
-        opts = selectors.outing_options(pid)
-        return opts, (opts[0]["value"] if opts else None)
+        g = P.games_for_pitcher(pid) if pid else None
+        if g is None or g.empty:
+            return None, None
+        return str(g["game_date"].min()), str(g["game_date"].max())
+
+    @dash_app.callback(
+        Output("outing-dd", "options"), Output("outing-dd", "value"),
+        Input("pit-daterange", "start_date"), Input("pit-daterange", "end_date"),
+        State("pitcher-dd", "value"), prevent_initial_call=True,
+    )
+    def _on_range(start, end, pitcher_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
+        if not pid or not start or not end:
+            return [], None
+        g = P.games_for_pitcher(pid, start=start, end=end)
+        opts = dr.game_options(g)
+        value = int(g.iloc[0]["game_id"]) if not g.empty else dr.ALL_IN_RANGE
+        return opts, value
 
     @dash_app.callback(
         Output("selection", "data"), Output("sidebar", "children"),
         Output("scoreboard", "children"),
         Input("pitcher-dd", "value"), Input("outing-dd", "value"),
+        State("pit-daterange", "start_date"), State("pit-daterange", "end_date"),
     )
-    def _on_selection(pitcher_id, game_id):
+    def _on_selection(pitcher_id, game_id, start, end):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
-        return ({"pitcher_id": pid, "game_id": game_id},
-                layout.sidebar(pid), layout.scoreboard(game_id))
+        if game_id == dr.ALL_IN_RANGE:
+            g = P.games_for_pitcher(pid, start=start, end=end) if pid else None
+            sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
+        else:
+            sb = layout.scoreboard(game_id)
+        return ({"pitcher_id": pid, "game_id": game_id, "start": start, "end": end},
+                layout.sidebar(pid), sb)
 
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))
     def _on_load_data(sel):
-        if not sel or sel.get("game_id") is None or sel.get("pitcher_id") is None:
+        if not sel or sel.get("pitcher_id") is None:
             return None
-        df = P.game_pitches_for(int(sel["game_id"]), int(sel["pitcher_id"]))
+        gid = sel.get("game_id")
+        if gid == dr.ALL_IN_RANGE:
+            if not sel.get("start") or not sel.get("end"):
+                return None
+            df = P.range_pitches_for(int(sel["pitcher_id"]), sel["start"], sel["end"])
+        elif gid is None:
+            return None
+        else:
+            df = P.game_pitches_for(int(gid), int(sel["pitcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(
@@ -58,7 +91,13 @@ def register_callbacks(dash_app) -> None:
     def _render_tab(tab, data_json, sel):
         if tab == "outings":
             sel = sel or {}
-            return last_outings.render(sel.get("pitcher_id"), sel.get("game_id"), 5)
+            anchor = sel.get("game_id")
+            if anchor == dr.ALL_IN_RANGE:
+                g = P.games_for_pitcher(int(sel["pitcher_id"]),
+                                        start=sel.get("start"), end=sel.get("end")) \
+                    if sel.get("pitcher_id") else None
+                anchor = int(g.iloc[0]["game_id"]) if g is not None and not g.empty else None
+            return last_outings.render(sel.get("pitcher_id"), anchor, 5)
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",
