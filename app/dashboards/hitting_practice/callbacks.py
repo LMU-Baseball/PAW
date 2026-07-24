@@ -9,7 +9,7 @@ from dash import Input, Output, ctx, html
 from flask_login import current_user
 
 from app.data import practice as P
-from app.dashboards.hitting_practice import selectors
+from app.dashboards.hitting_practice import layout, selectors
 from app.dashboards.hitting_practice.tabs import (
     contact_overview, pitch_zones, session_tables, swing_frequency,
 )
@@ -139,3 +139,19 @@ def register_callbacks(dash_app) -> None:
         if tab == "sessions":
             return session_tables.render(stats, sessions, player=player)
         return html.Div()
+
+    @dash_app.callback(
+        Output("prac-sidebar", "children"),
+        Input("prac-filters", "data"),
+    )
+    def _sidebar(filt):
+        filt = filt or {}
+        exclude_test = bool(filt.get("exclude_test", True))
+        pitch, _, _, _ = _load_all(exclude_test)
+        from datetime import date
+        start = date.fromisoformat(filt["start"]) if filt.get("start") else None
+        end = date.fromisoformat(filt["end"]) if filt.get("end") else None
+        player = filt.get("player") or "All Players"
+        d = P.apply_filters(pitch, player=player, start=start, end=end,
+                            session=filt.get("session"))
+        return layout.sidebar(d, player)

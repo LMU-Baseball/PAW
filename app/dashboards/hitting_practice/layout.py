@@ -6,9 +6,56 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
+from app.data import roster_media
 from app.dashboards import date_range as dr
-from app.dashboards.shell import BANNER, header
+from app.dashboards.shell import BANNER, PHOTO_PLACEHOLDER, header
 from app.dashboards.hitting_practice import selectors
+
+
+def _tile(label, value):
+    from app.dashboards.shell import CRIMSON
+    return html.Div([
+        html.Div(str(value), style={"fontSize": "24px", "fontWeight": "bold", "color": CRIMSON}),
+        html.Div(label, style={"fontSize": "13px", "color": "#555"}),
+    ], style={"textAlign": "center", "padding": "6px 8px",
+              "backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px"})
+
+
+def sidebar(pitch_df, player) -> html.Div:
+    import pandas as pd
+    from app.data import practice as P
+    is_all = (not player) or player == "All Players"
+    if is_all:
+        photo, name = PHOTO_PLACEHOLDER, "All Players"
+    else:
+        media = roster_media.player_media_by_name(player)
+        photo = media.get("photo_url") or PHOTO_PLACEHOLDER
+        name = player
+    d = pitch_df if (pitch_df is not None and not pitch_df.empty) else pd.DataFrame()
+    if not d.empty:
+        d = P.trim_to_first_contact(d)
+    summ = P.contact_summary(d)
+    sds = P.swing_decision_score(d)
+
+    def f(v, s=""):
+        return "—" if v is None else f"{v}{s}"
+
+    return html.Div([
+        html.Img(src=photo, style={"width": "100%", "borderRadius": "8px",
+                                   "border": "4px solid white", "background": "rgba(255,255,255,0.6)"}),
+        html.Div(name, style={"fontSize": "22px", "fontWeight": "bold", "marginTop": "8px"}),
+        html.Div("Swing Frequency", style={"fontSize": "14px", "color": "#9A0021",
+                                            "fontWeight": "bold", "marginTop": "10px"}),
+        html.Div([_tile("Pitches", summ["pitches"]), _tile("Contacts", summ["contacts"]),
+                  _tile("Contact%", f(summ["contact_pct"], "%"))],
+                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
+        html.Div("Swing Decision", style={"fontSize": "14px", "color": "#9A0021",
+                                          "fontWeight": "bold", "marginTop": "10px"}),
+        html.Div([_tile("In-Zone%", f(sds["in_zone_pct"], "%")),
+                  _tile("Chase%", f(sds["chase_pct"], "%")),
+                  _tile("SD Score", f(sds["score"]))],
+                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
+    ], style={"padding": "8px"})
 
 
 def serve_layout() -> html.Div:
@@ -88,12 +135,16 @@ def serve_layout() -> html.Div:
         dcc.Store(id="prac-pitch-data"),
         header(back_href="/hitting", back_label="← Hitting"),
         html.Div([
-            html.H2("HitTrax Practice Analytics",
-                    style={"color": "#9A0021", "margin": "0 0 4px"}),
-            html.Div("Ported from the Streamlit batting-practice dashboard. "
-                     "Data refreshes via the HitTrax ELT pipeline (Mon–Sat).",
-                     style={"color": "#555", "marginBottom": "8px"}),
-            filters, tabs,
-            html.Div(id="prac-tab-content", style={"padding": "8px 16px"}),
-        ], style={"padding": "16px"}),
+            html.Div(id="prac-sidebar", children=sidebar(pitch_all, default_player),
+                     style={"width": "240px", "flexShrink": "0"}),
+            html.Div([
+                html.H2("HitTrax Practice Analytics",
+                        style={"color": "#9A0021", "margin": "0 0 4px"}),
+                html.Div("Ported from the Streamlit batting-practice dashboard. "
+                         "Data refreshes via the HitTrax ELT pipeline (Mon–Sat).",
+                         style={"color": "#555", "marginBottom": "8px"}),
+                filters, tabs,
+                html.Div(id="prac-tab-content", style={"padding": "8px 16px"}),
+            ], style={"flexGrow": "1"}),
+        ], style={"display": "flex", "gap": "16px", "padding": "16px", "alignItems": "flex-start"}),
     ])

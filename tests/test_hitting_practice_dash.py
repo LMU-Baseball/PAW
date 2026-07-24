@@ -123,3 +123,15 @@ def test_new_practice_figs_build():
         {"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive"}])) is not None
     assert charts.contact_type_bar(pd.DataFrame([
         {"Hit Type": "Line Drive", "Count": 10}, {"Hit Type": "Fly Ball", "Count": 5}])) is not None
+
+
+def test_practice_sidebar_renders_player_and_all():
+    import pandas as pd
+    from app.dashboards.hitting_practice import layout
+    df = pd.DataFrame([{"px": 0.0, "py": 2.5, "result": 1, "zone_section": 5,
+                        "exit_velocity": 90.0, "is_contact": True,
+                        "player_name": "Andrew Mhoon", "play_date": "2026-04-01",
+                        "session_id": 1, "play_timestamp": "2026-04-01 10:00:00"}])
+    assert layout.sidebar(df, "Andrew Mhoon") is not None
+    assert layout.sidebar(df, "All Players") is not None
+    assert layout.sidebar(pd.DataFrame(), "All Players") is not None
