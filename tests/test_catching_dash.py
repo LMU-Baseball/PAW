@@ -184,6 +184,23 @@ def test_game_options_for_real_catcher(real_catcher):
     assert opts and {"label", "value"} <= set(opts[0])
 
 
+def test_all_tabs_render_live(real_catcher):
+    from app.data import catching as C
+    from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
+    games = C.games_for_catcher(real_catcher)
+    if games.empty:
+        pytest.skip("No games found for live catcher")
+    gid = int(games.iloc[0]["game_id"])
+    df = C.game_pitches_for(gid, real_catcher)
+    if df.empty:
+        pytest.skip("No pitch rows for live catcher's game")
+    assert framing.render(df) is not None
+    assert framing.body(df, bat_side="All", pitcher_throws="All",
+                         pitch_speed="All", zone="All") is not None
+    assert static_framing.render(df) is not None
+    assert caught_stealing.render(df) is not None
+
+
 def test_static_framing_render():
     from app.dashboards.catching.tabs import static_framing
     comp = static_framing.render(_sample_df())
