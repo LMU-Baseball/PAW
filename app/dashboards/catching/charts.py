@@ -43,11 +43,15 @@ def _base_axes(fig, row=None, col=None):
     fig.update_yaxes(range=[-25, 25], visible=False, row=row, col=col)
 
 
-def _scatter_traces(fig, d, row=None, col=None, showlegend=True):
+def _scatter_traces(fig, d, row=None, col=None, shown=None):
+    if shown is None:
+        shown = set()
     for ct in _ORDER:
         sub = d[d["CallType"] == ct]
         if sub.empty:
             continue
+        showlegend = ct not in shown
+        shown.add(ct)
         fig.add_trace(go.Scatter(
             x=sub["_x"], y=sub["_y"], mode="markers", name=ct,
             legendgroup=ct, showlegend=showlegend,
@@ -75,13 +79,14 @@ def framing_scatter(df: pd.DataFrame) -> go.Figure:
 
 
 def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
-    d = C.add_framing_cols(df) if not df.empty else df
+    d = C.add_framing_cols(df) if not df.empty and "CallType" not in df.columns else df
     vals = sorted(d[by].dropna().unique()) if not d.empty and by in d.columns else []
     n = max(1, len(vals))
     fig = make_subplots(rows=1, cols=n, subplot_titles=[str(v) for v in vals] or [title])
+    shown = set()
     for i, v in enumerate(vals, start=1):
         _zone_frame(fig, row=1, col=i)
-        _scatter_traces(fig, d[d[by] == v], row=1, col=i, showlegend=(i == 1))
+        _scatter_traces(fig, d[d[by] == v], row=1, col=i, shown=shown)
         _base_axes(fig, row=1, col=i)
     if not vals:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)

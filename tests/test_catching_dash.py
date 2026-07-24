@@ -99,6 +99,28 @@ def test_framing_facets_builds():
     assert fig is not None
 
 
+def test_framing_facets_legend_covers_all_calltypes():
+    from app.dashboards.catching import charts
+    fig = charts.framing_facets(_sample_df(), by="batter_side", title="Batter Side")
+    present = {t.name for t in fig.data if t.name}
+    legended = {t.name for t in fig.data if t.name and t.showlegend}
+    # every CallType actually plotted somewhere in the figure has exactly-once
+    # legend coverage across facets (not gated on the first facet only)
+    assert present == legended
+
+
+def test_framing_scatter_empty_df():
+    from app.dashboards.catching import charts
+    fig = charts.framing_scatter(pd.DataFrame())
+    assert fig is not None
+
+
+def test_framing_facets_empty_df():
+    from app.dashboards.catching import charts
+    fig = charts.framing_facets(pd.DataFrame(), by="batter_side", title="X")
+    assert fig is not None
+
+
 @pytest.fixture(scope="module")
 def real_catcher():
     """Live-DB fixture (unguarded when DB is up; skips if unreachable/empty)."""
