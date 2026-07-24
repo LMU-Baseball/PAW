@@ -615,6 +615,30 @@ def pitch_color(pt: str) -> str:
     return PITCH_COLORS.get(pt) or _PT_FALLBACK[zlib.crc32(str(pt).encode()) % len(_PT_FALLBACK)]
 
 
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _cov_ellipse(x, y, n_std: float = 1.0, n_pts: int = 40):
+    """(xs, ys) polygon for the n_std covariance ellipse of points (x, y),
+    or None if <3 points or a degenerate covariance."""
+    x = np.asarray(x, dtype=float); y = np.asarray(y, dtype=float)
+    if len(x) < 3:
+        return None
+    cov = np.cov(x, y)
+    if not np.all(np.isfinite(cov)):
+        return None
+    vals, vecs = np.linalg.eigh(cov)
+    if np.any(vals < 0):
+        return None
+    t = np.linspace(0, 2 * np.pi, n_pts)
+    circle = np.stack([np.cos(t), np.sin(t)])
+    ell = (vecs @ (np.sqrt(vals)[:, None] * circle)) * n_std
+    return ell[0] + x.mean(), ell[1] + y.mean()
+
+
 _RESULT_LABELS = {
     "StrikeCalled": "Called Strike", "StrikeSwinging": "Swinging Strike",
     "BallCalled": "Ball", "BallinDirt": "Ball (Dirt)",
@@ -671,6 +695,17 @@ def fig_movement(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["horz_break", "induced_vert_break"]).copy()
     d["_pt"] = pitch_type(d)
     fig = go.Figure()
+    # 1-sigma covariance ellipse per pitch type, drawn under the markers
+    for pt, sub in d.groupby("_pt"):
+        ell = _cov_ellipse(sub["horz_break"], sub["induced_vert_break"])
+        if ell is None:
+            continue
+        xs, ys = ell
+        fig.add_trace(go.Scatter(
+            x=list(xs) + [xs[0]], y=list(ys) + [ys[0]], mode="lines",
+            fill="toself", fillcolor=_rgba(pitch_color(pt), 0.15),
+            line=dict(color=pitch_color(pt), width=1),
+            name=f"{pt} 1σ", showlegend=False, hoverinfo="skip"))
     for pt, sub in d.groupby("_pt"):
         fig.add_trace(go.Scatter(x=sub["horz_break"], y=sub["induced_vert_break"],
                                  mode="markers", name=pt,

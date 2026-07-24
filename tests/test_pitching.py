@@ -320,3 +320,19 @@ def test_pitching_figs_have_labeled_hovers():
                for t in mv.data)
     inn = P.fig_velo_by_inning(df)
     assert any("Avg Velo:" in (t.hovertemplate or "") for t in inn.data)
+
+
+def test_fig_movement_has_one_ellipse_per_pitch_type():
+    import pandas as pd
+    from app.data import pitching as P
+    rows = []
+    for pt, hb0, ivb0 in [("Fastball", -10, 22), ("Sweeper", 12, 4)]:
+        for k in range(4):
+            rows.append({"horz_break": hb0 + k, "induced_vert_break": ivb0 + k,
+                         "auto_pitch_type": pt, "tagged_pitch_type": pt})
+    df = pd.DataFrame(rows)
+    fig = P.fig_movement(df)
+    ellipses = [t for t in fig.data if getattr(t, "fill", None) == "toself"]
+    assert len(ellipses) == 2  # one per pitch type
+    # markers still present (mode='markers')
+    assert any(t.mode == "markers" for t in fig.data)
