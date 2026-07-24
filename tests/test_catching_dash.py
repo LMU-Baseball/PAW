@@ -220,3 +220,18 @@ def test_caught_stealing_render_empty():
         {"play_result": "Single", "pitch_call": "InPlay",
          "plate_loc_side": 0.0, "plate_loc_height": 2.5}]))
     assert comp is not None
+
+
+def test_catching_range_pooled_render_live(real_catcher):
+    from app.data import catching as C
+    from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
+    g = C.games_for_catcher(real_catcher)
+    if g.empty:
+        import pytest; pytest.skip("no games")
+    lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
+    pooled = C.range_pitches_for(real_catcher, lo, hi)
+    if pooled.empty:
+        import pytest; pytest.skip("no pooled pitches")
+    assert framing.render(pooled) is not None
+    assert static_framing.render(pooled) is not None
+    assert caught_stealing.render(pooled) is not None

@@ -8,6 +8,7 @@ from dash import Input, Output, State, html
 from flask_login import current_user
 
 from app.data import catching as C
+from app.dashboards import date_range as dr
 from app.dashboards.catching import layout, selectors
 from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
 
@@ -21,33 +22,65 @@ def _read_game_df(data_json):
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
-        Output("game-dd", "options"), Output("game-dd", "value"),
-        Input("catcher-dd", "value"),
+        Output("cat-daterange", "start_date"), Output("cat-daterange", "end_date"),
+        Input("catcher-dd", "value"), prevent_initial_call=True,
     )
-    def _on_catcher(catcher_id):
+    def _on_catcher_range(catcher_id):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
-        opts = selectors.game_options(cid)
-        return opts, (opts[0]["value"] if opts else None)
+        g = C.games_for_catcher(cid) if cid else None
+        if g is None or g.empty:
+            return None, None
+        return str(g["game_date"].min()), str(g["game_date"].max())
+
+    @dash_app.callback(
+        Output("game-dd", "options"), Output("game-dd", "value"),
+        Input("cat-daterange", "start_date"), Input("cat-daterange", "end_date"),
+        State("catcher-dd", "value"), prevent_initial_call=True,
+    )
+    def _on_range(start, end, catcher_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
+        if not cid or not start or not end:
+            return [], None
+        g = C.games_for_catcher(cid, start=start, end=end)
+        opts = dr.game_options(g)
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
+        return opts, value
 
     @dash_app.callback(
         Output("selection", "data"), Output("sidebar", "children"),
         Output("scoreboard", "children"),
         Input("catcher-dd", "value"), Input("game-dd", "value"),
+        State("cat-daterange", "start_date"), State("cat-daterange", "end_date"),
     )
-    def _on_selection(catcher_id, game_id):
+    def _on_selection(catcher_id, game_id, start, end):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
-        return ({"catcher_id": cid, "game_id": game_id},
-                layout.sidebar(cid), layout.scoreboard(game_id))
+        if game_id == dr.ALL_IN_RANGE:
+            g = C.games_for_catcher(cid, start=start, end=end) if cid else None
+            sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
+        else:
+            sb = layout.scoreboard(game_id)
+        return ({"catcher_id": cid, "game_id": game_id, "start": start, "end": end},
+                layout.sidebar(cid), sb)
 
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))
     def _on_load_data(sel):
-        if not sel or sel.get("game_id") is None or sel.get("catcher_id") is None:
+        if not sel or sel.get("catcher_id") is None:
             return None
-        df = C.game_pitches_for(int(sel["game_id"]), int(sel["catcher_id"]))
+        gid = sel.get("game_id")
+        if gid == dr.ALL_IN_RANGE:
+            if not sel.get("start") or not sel.get("end"):
+                return None
+            df = C.range_pitches_for(int(sel["catcher_id"]), sel["start"], sel["end"])
+        elif gid is None:
+            return None
+        else:
+            df = C.game_pitches_for(int(gid), int(sel["catcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(

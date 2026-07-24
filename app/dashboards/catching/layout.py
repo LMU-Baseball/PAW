@@ -5,6 +5,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import catching as C
+from app.dashboards import date_range as dr
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
 from app.dashboards.catching import selectors
 
@@ -42,7 +43,11 @@ def sidebar(catcher_id) -> html.Div:
     ], style={"padding": "8px"})
 
 
-def scoreboard(game_id) -> html.Div:
+def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
+    if game_id == dr.ALL_IN_RANGE:
+        return html.Div(dr.range_scoreboard_text(games_df, start, end),
+                        style={"color": "white", "fontWeight": "bold",
+                               "fontSize": "20px", "alignSelf": "center"})
     if not game_id:
         return html.Div()
     try:
@@ -66,8 +71,16 @@ def serve_layout() -> html.Div:
     default_catcher = selectors.resolve_catcher(
         catchers[0]["value"] if catchers else None,
         is_coach=is_coach, own_trackman_id=own)
-    games = selectors.game_options(default_catcher)
-    default_game = games[0]["value"] if games else None
+    games_df = C.games_for_catcher(default_catcher) if default_catcher else None
+    if games_df is not None and not games_df.empty:
+        start_d = str(games_df["game_date"].min())
+        end_d = str(games_df["game_date"].max())
+        games = dr.game_options(games_df)
+        default_game = int(games_df.iloc[0]["game_id"])
+    else:
+        start_d = end_d = None
+        games = []
+        default_game = None
 
     selector_row = html.Div([
         html.Div([
@@ -75,6 +88,10 @@ def serve_layout() -> html.Div:
             dcc.Dropdown(id="catcher-dd", options=catchers, value=default_catcher,
                          clearable=False, disabled=not is_coach,
                          style={"minWidth": "220px"}),
+        ]),
+        html.Div([
+            html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
+            dr.date_picker("cat", start_d, end_d),
         ]),
         html.Div([
             html.Label("Game", style={"color": "white", "fontWeight": "bold"}),
@@ -93,7 +110,8 @@ def serve_layout() -> html.Div:
 
     return html.Div([
         dcc.Store(id="selection", data={"catcher_id": default_catcher,
-                                        "game_id": default_game}),
+                                        "game_id": default_game,
+                                        "start": start_d, "end": end_d}),
         dcc.Store(id="game-data"),
         header(back_href="/catching", back_label="← Catching"),
         html.Div([
