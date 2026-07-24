@@ -160,3 +160,25 @@ def test_outings_anchor_sentinel_missing_range_returns_none():
     assert _outings_anchor({"pitcher_id": 1, "game_id": ALL_IN_RANGE,
                             "start": None, "end": None}) is None
     assert _outings_anchor(None) is None
+
+
+def test_df_table_colors_pitch_column():
+    import pandas as pd
+    from app.dashboards.pitching import tables
+    from app.data import pitching as P
+    df = pd.DataFrame({"Pitch": ["Fastball", "Sweeper"], "Velo": [90.0, 80.0]})
+    tbl = tables.df_table(df, id_="t")
+    conds = tbl.style_data_conditional or []
+    # one colored rule per distinct pitch, each carrying that pitch's color
+    colored = {c.get("color") for c in conds if c.get("column_id") == "Pitch"}
+    assert P.pitch_color("Fastball") in colored
+    assert P.pitch_color("Sweeper") in colored
+
+
+def test_df_table_no_pitch_column_no_color_rules():
+    import pandas as pd
+    from app.dashboards.pitching import tables
+    df = pd.DataFrame({"Metric": ["Strike%"], "Value": [55.0]})
+    tbl = tables.df_table(df, id_="t2")
+    conds = tbl.style_data_conditional or []
+    assert not any(c.get("column_id") == "Pitch" for c in conds)
