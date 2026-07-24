@@ -97,7 +97,7 @@ def load_plays(exclude_test: bool = True) -> pd.DataFrame:
     return query_df(f"""
         SELECT player_name, player_id,
                DATE(play_timestamp) AS play_date,
-               exit_velocity, distance_feet,
+               exit_velocity, distance_feet, horizontal_angle,
                hit_type, launch_angle, session_id, result
           FROM practice_plays
           {where}
@@ -271,24 +271,68 @@ def zone_contact_table(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def heatmap_contact_rate(df: pd.DataFrame, bins: int = 20):
-    """Return (z, x_edges, y_edges) contact-rate % grid for Plotly heatmap."""
+def heatmap_metric(df: pd.DataFrame, metric: str = "contact", bins: int = 20):
+    """(z, x_edges, y_edges) grid for a Plotly heatmap. metric: contact|ev|distance.
+    z[y][x]; NaN where no pitches in a bin."""
     xedges = np.linspace(-2, 2, bins + 1)
     yedges = np.linspace(0.5, 5.0, bins + 1)
     if df.empty:
-        z = np.full((bins, bins), np.nan)
-        return z, xedges, yedges
+        return np.full((bins, bins), np.nan), xedges, yedges
     d = df.dropna(subset=["px", "py"]).copy()
-    d["is_contact"] = d["result"] != -4
-    counts, _, _ = np.histogram2d(d["px"], d["py"], bins=[xedges, yedges])
-    contacts, _, _ = np.histogram2d(
-        d.loc[d["is_contact"], "px"], d.loc[d["is_contact"], "py"],
-        bins=[xedges, yedges],
-    )
-    with np.errstate(divide="ignore", invalid="ignore"):
-        z = np.where(counts > 0, 100.0 * contacts / counts, np.nan)
-    # histogram2d returns [x][y]; Plotly heatmap wants z[y][x]
+    if metric == "contact":
+        d["_c"] = d["result"] != -4
+        counts, _, _ = np.histogram2d(d["px"], d["py"], bins=[xedges, yedges])
+        made, _, _ = np.histogram2d(d.loc[d["_c"], "px"], d.loc[d["_c"], "py"],
+                                    bins=[xedges, yedges])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = np.where(counts > 0, 100.0 * made / counts, np.nan)
+    else:
+        col = "exit_velocity" if metric == "ev" else "distance_feet"
+        sub = d[d[col].notna()]
+        counts, _, _ = np.histogram2d(sub["px"], sub["py"], bins=[xedges, yedges])
+        sums, _, _ = np.histogram2d(sub["px"], sub["py"], bins=[xedges, yedges],
+                                    weights=sub[col])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            z = np.where(counts > 0, sums / counts, np.nan)
     return z.T, xedges, yedges
+
+
+def heatmap_contact_rate(df: pd.DataFrame, bins: int = 20):
+    """Back-compat wrapper: contact-rate grid."""
+    return heatmap_metric(df, "contact", bins)
+
+
+def swing_decision_trend(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-date swing-decision score (in-zone 1-9 contact% - chase 10-13 contact%).
+    Only dates where the score is computable. PROVISIONAL."""
+    cols = ["play_date", "in_zone_pct", "chase_pct", "score"]
+    if df.empty or "play_date" not in df.columns:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for d, sub in df.groupby("play_date"):
+        s = swing_decision_score(sub)
+        if s["score"] is not None:
+            rows.append({"play_date": d, "in_zone_pct": s["in_zone_pct"],
+                         "chase_pct": s["chase_pct"], "score": s["score"]})
+    return pd.DataFrame(rows, columns=cols).sort_values("play_date").reset_index(drop=True)
+
+
+def spray_points(plays: pd.DataFrame) -> pd.DataFrame:
+    """Batted-ball landing points from horizontal_angle + distance_feet.
+    x = dist*sin(angle) (neg=left field), y = dist*cos(angle). Batted balls only
+    (hit_type 1/2/3). PROVISIONAL."""
+    cols = ["x", "y", "hit_type_label"]
+    if plays.empty or "horizontal_angle" not in plays.columns:
+        return pd.DataFrame(columns=cols)
+    d = plays[plays["hit_type"].isin([1, 2, 3])].dropna(
+        subset=["horizontal_angle", "distance_feet"]).copy()
+    if d.empty:
+        return pd.DataFrame(columns=cols)
+    ang = np.radians(d["horizontal_angle"].astype(float))
+    d["x"] = d["distance_feet"].astype(float) * np.sin(ang)
+    d["y"] = d["distance_feet"].astype(float) * np.cos(ang)
+    d["hit_type_label"] = d["hit_type"].map(HIT_TYPE_MAP)
+    return d[cols].reset_index(drop=True)
 
 
 def hit_type_counts(plays: pd.DataFrame) -> pd.DataFrame:

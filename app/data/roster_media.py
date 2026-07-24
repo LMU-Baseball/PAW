@@ -83,3 +83,24 @@ def player_media(batter_tm_id) -> dict:
     """{'jersey','photo_url'} for a batter_tm_id, blanks if not present."""
     entry = load_roster_media().get(str(batter_tm_id)) or {}
     return {"jersey": entry.get("jersey", ""), "photo_url": entry.get("photo_url", "")}
+
+
+def player_media_by_name(name) -> dict:
+    """{'jersey','photo_url'} matched to a roster entry by name (norm + last/first
+    fallback); blanks if unmatched. For HitTrax names (no trackman id)."""
+    blank = {"jersey": "", "photo_url": ""}
+    if not name:
+        return blank
+    data = load_roster_media()
+    key = _norm_name(name)
+    for entry in data.values():
+        if _norm_name(entry.get("name", "")) == key:
+            return {"jersey": entry.get("jersey", ""), "photo_url": entry.get("photo_url", "")}
+    f, l = _name_parts(name)
+    if l:
+        for entry in data.values():
+            ef, el = _name_parts(entry.get("name", ""))
+            if el == l and ef[:1] == f[:1]:
+                return {"jersey": entry.get("jersey", ""),
+                        "photo_url": entry.get("photo_url", "")}
+    return blank

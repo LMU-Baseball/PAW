@@ -112,3 +112,15 @@ def test_build_media_unmatched_dominant_does_not_inherit_stray_face():
                (900001, "Nomatch, Ghost", 500)]      # dominant, no card
     media, _, _ = s.build_media(players, cards)
     assert "900001" not in media  # did NOT inherit Malone's face
+
+
+def test_player_media_by_name(monkeypatch):
+    from app.data import roster_media
+    monkeypatch.setattr(roster_media, "load_roster_media", lambda: {
+        "813709": {"jersey": "27", "photo_url": "u.jpg", "name": "Tanner Warady"},
+    })
+    got = roster_media.player_media_by_name("Tanner Warady")
+    assert got["jersey"] == "27" and got["photo_url"] == "u.jpg"
+    # unmatched -> blanks
+    assert roster_media.player_media_by_name("Nobody Here") == {"jersey": "", "photo_url": ""}
+    assert roster_media.player_media_by_name("") == {"jersey": "", "photo_url": ""}

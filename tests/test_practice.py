@@ -75,3 +75,47 @@ def test_hit_type_counts():
     plays = pd.DataFrame({"hit_type": [0, 1, 2, 2, 3]})
     c = P.hit_type_counts(plays)
     assert "Line Drive" in set(c["Hit Type"])
+
+
+def test_swing_decision_trend():
+    import pandas as pd
+    from app.data import practice as P
+    df = pd.DataFrame([
+        # 2026-04-01: 1 in-zone contact, 1 chase miss -> iz 100, chase 0, score 100
+        {"play_date": "2026-04-01", "zone_section": 5, "result": 1},
+        {"play_date": "2026-04-01", "zone_section": 11, "result": -4},
+        # 2026-04-08: 1 in-zone miss -> iz 0, chase None -> score None (excluded)
+        {"play_date": "2026-04-08", "zone_section": 3, "result": -4},
+    ])
+    df["is_contact"] = df["result"] != -4
+    t = P.swing_decision_trend(df)
+    assert list(t["play_date"]) == ["2026-04-01"]
+    assert t.iloc[0]["score"] == 100.0
+
+
+def test_heatmap_metric_ev_and_distance():
+    import numpy as np, pandas as pd
+    from app.data import practice as P
+    df = pd.DataFrame([
+        {"px": 0.0, "py": 2.5, "result": 1, "exit_velocity": 90.0, "distance_feet": 300.0},
+        {"px": 0.0, "py": 2.5, "result": 1, "exit_velocity": 80.0, "distance_feet": 100.0},
+    ])
+    z_ev, xe, ye = P.heatmap_metric(df, "ev")
+    z_dist, _, _ = P.heatmap_metric(df, "distance")
+    # the one populated bin averages the two rows
+    assert np.nanmax(z_ev) == 85.0
+    assert np.nanmax(z_dist) == 200.0
+
+
+def test_spray_points_sign_and_filter():
+    import pandas as pd
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -45.0, "distance_feet": 100.0, "hit_type": 2},  # left, LD
+        {"horizontal_angle": 45.0, "distance_feet": 100.0, "hit_type": 3},   # right, FB
+        {"horizontal_angle": 0.0, "distance_feet": 0.0, "hit_type": 0},      # miss -> dropped
+    ])
+    s = P.spray_points(plays)
+    assert len(s) == 2  # miss excluded
+    assert s.iloc[0]["x"] < 0 and s.iloc[1]["x"] > 0  # neg angle = left
+    assert set(s["hit_type_label"]) == {"Line Drive", "Fly Ball"}
