@@ -98,7 +98,69 @@ def ev_distance_by_pitch(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-_HIT_COLORS = {"Ground Ball": "#7a5230", "Line Drive": "#9A0021", "Fly Ball": "#0076A5"}
+_HIT_COLORS = P.HIT_TYPE_COLORS
+
+
+def _crimson_shade(frac: float) -> str:
+    """Light-pink -> brand crimson by fraction 0..1."""
+    frac = max(0.0, min(1.0, frac))
+    c0, c1 = (253, 234, 238), (154, 0, 33)
+    r, g, b = (round(c0[i] + (c1[i] - c0[i]) * frac) for i in range(3))
+    return f"rgb({r},{g},{b})"
+
+
+def _fan_field(fig: go.Figure) -> None:
+    L = P.FAN_DISPLAY_MAX
+    # foul lines from home plate along +/-45 deg
+    for sgn in (-1, 1):
+        th = np.radians(45.0) * sgn
+        fig.add_shape(type="line", x0=0, y0=0, x1=L * np.sin(th), y1=L * np.cos(th),
+                      line=dict(color="#888", width=1))
+    # outer arc
+    ts = np.radians(np.linspace(-45, 45, 40))
+    xs, ys = L * np.sin(ts), L * np.cos(ts)
+    path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    fig.add_shape(type="path", path=path, line=dict(color="#888", width=1))
+
+
+def spray_distribution_fan(fan_df: pd.DataFrame) -> go.Figure:
+    """Filled fan: each cell shaded by its share of batted balls + % label."""
+    fig = go.Figure()
+    _fan_field(fig)
+    annotations = []
+    if fan_df is not None and not fan_df.empty:
+        maxpct = max(float(fan_df["pct"].max()), 1e-9)
+        for _, row in fan_df.iterrows():
+            if row["count"] <= 0:
+                continue
+            a0, a1 = np.radians(row["a0"]), np.radians(row["a1"])
+            r0, r1 = float(row["r0"]), float(row["r1"])
+            ts = np.linspace(a0, a1, 12)
+            outer = [(r1 * np.sin(t), r1 * np.cos(t)) for t in ts]
+            inner = [(r0 * np.sin(t), r0 * np.cos(t)) for t in ts[::-1]]
+            poly = outer + inner
+            xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+            fig.add_trace(go.Scatter(
+                x=xs, y=ys, mode="lines", fill="toself",
+                fillcolor=_crimson_shade(float(row["pct"]) / (maxpct)),
+                line=dict(color="#bbb", width=0.5), showlegend=False,
+                hovertext=f"{row['direction']} · {row['ring']}: "
+                          f"{row['pct']:.0f}% ({int(row['count'])})",
+                hoverinfo="text"))
+            mid_a = (a0 + a1) / 2; mid_r = (r0 + r1) / 2
+            annotations.append(dict(x=mid_r * np.sin(mid_a), y=mid_r * np.cos(mid_a),
+                                    text=f"{row['pct']:.0f}%", showarrow=False,
+                                    font=dict(family="Teko, sans-serif", size=14,
+                                              color="#1a1a1a")))
+    fig.update_layout(
+        title="Batted-Ball Distribution", annotations=annotations,
+        xaxis=dict(range=[-P.FAN_DISPLAY_MAX, P.FAN_DISPLAY_MAX], visible=False),
+        yaxis=dict(range=[-20, P.FAN_DISPLAY_MAX + 20], visible=False,
+                   scaleanchor="x", scaleratio=1),
+        height=460, margin=dict(l=10, r=10, t=50, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
+    return fig
 
 
 def _date_labels(series: pd.Series) -> pd.Series:
@@ -148,11 +210,16 @@ def spray_chart_fig(spray_df: pd.DataFrame) -> go.Figure:
                   path=f"M 0,0 L {b},{b} L 0,{2*b} L {-b},{b} Z",
                   line=dict(color="#bbb", width=1), fillcolor="rgba(0,0,0,0)")
     if spray_df is not None and not spray_df.empty:
+        has_hover = {"distance_feet", "exit_velocity"} <= set(spray_df.columns)
         for label, sub in spray_df.groupby("hit_type_label"):
-            fig.add_trace(go.Scatter(
-                x=sub["x"], y=sub["y"], mode="markers", name=str(label),
-                marker=dict(color=_HIT_COLORS.get(label, "#5a5a5a"), size=8,
-                            line=dict(width=0.5, color="#666"))))
+            trace = dict(x=sub["x"], y=sub["y"], mode="markers", name=str(label),
+                         marker=dict(color=_HIT_COLORS.get(label, "#5a5a5a"), size=8,
+                                     line=dict(width=0.5, color="#666")))
+            if has_hover:
+                trace["customdata"] = sub[["distance_feet", "exit_velocity"]].to_numpy()
+                trace["hovertemplate"] = (f"{label}<br>Distance: %{{customdata[0]:.0f}} ft"
+                                          "<br>Exit Velo: %{customdata[1]:.1f} mph<extra></extra>")
+            fig.add_trace(go.Scatter(**trace))
     fig.update_layout(
         title="Spray Chart", showlegend=True,
         xaxis=dict(range=[-260, 260], visible=False),
@@ -164,11 +231,12 @@ def spray_chart_fig(spray_df: pd.DataFrame) -> go.Figure:
 
 
 def contact_type_bar(counts_df: pd.DataFrame) -> go.Figure:
-    """Vertical bar of hit-type counts, sorted descending."""
+    """Vertical bar of hit-type counts, sorted descending, colored per hit type."""
     fig = go.Figure()
     if counts_df is not None and not counts_df.empty:
         d = counts_df.sort_values("Count", ascending=False)
-        fig.add_trace(go.Bar(x=d["Hit Type"], y=d["Count"], marker_color=CRIMSON,
+        colors = [_HIT_COLORS.get(ht, "#5a5a5a") for ht in d["Hit Type"]]
+        fig.add_trace(go.Bar(x=d["Hit Type"], y=d["Count"], marker_color=colors,
                              text=d["Count"], textposition="outside"))
     fig.update_layout(
         title="Contact Type", yaxis_title="Count",

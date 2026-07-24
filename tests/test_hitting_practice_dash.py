@@ -249,3 +249,41 @@ def test_on_filters_signature_dropped_session_exclude():
     assert 'Input("prac-session"' not in src
     assert 'Input("prac-exclude-test"' not in src
     assert 'Output("prac-session"' not in src
+
+
+def test_spray_distribution_fan_builds_cells():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 120.0, "hit_type": 1},
+        {"horizontal_angle": 10.0, "distance_feet": 350.0, "hit_type": 3},
+    ])
+    fig = charts.spray_distribution_fan(P.spray_fan(plays))
+    # at least one filled sector polygon + a % annotation
+    assert any(getattr(t, "fill", None) == "toself" for t in fig.data)
+    assert fig.layout.annotations and any("%" in a.text for a in fig.layout.annotations)
+    # empty fan still renders
+    assert charts.spray_distribution_fan(P.spray_fan(pd.DataFrame(
+        columns=["horizontal_angle", "distance_feet", "hit_type"]))) is not None
+
+
+def test_spray_scatter_hover_has_distance_and_ev():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    spray = pd.DataFrame([{"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive",
+                           "distance_feet": 206.2, "exit_velocity": 95.4}])
+    fig = charts.spray_chart_fig(spray)
+    assert any("Distance:" in (t.hovertemplate or "") and "Exit Velo:" in (t.hovertemplate or "")
+               for t in fig.data if t.mode == "markers")
+
+
+def test_contact_type_bar_uses_hit_type_colors():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    from app.data import practice as P
+    counts = pd.DataFrame([{"Hit Type": "Line Drive", "Count": 10},
+                           {"Hit Type": "Fly Ball", "Count": 5}])
+    fig = charts.contact_type_bar(counts)
+    marker_colors = list(fig.data[0].marker.color)
+    assert marker_colors == [P.HIT_TYPE_COLORS["Line Drive"], P.HIT_TYPE_COLORS["Fly Ball"]]
