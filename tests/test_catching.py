@@ -147,3 +147,46 @@ def test_catching_games_date_filter_and_range():
     pooled = C.range_pitches_for(cid, lo, hi)
     single = sum(len(C.game_pitches_for(int(g), cid)) for g in allg["game_id"])
     assert len(pooled) == single
+
+
+def test_caught_stealing_trend():
+    import pandas as pd
+    from app.data import catching as C
+    df = pd.DataFrame([
+        {"play_result": "CaughtStealing", "pop_time": 1.9, "exchange_time": 0.7,
+         "throw_speed": 80.0, "game_date": "2026-04-01"},
+        {"play_result": "StolenBase", "pop_time": 2.1, "exchange_time": 0.75,
+         "throw_speed": 78.0, "game_date": "2026-04-01"},
+        {"play_result": "StolenBase", "pop_time": None, "exchange_time": None,
+         "throw_speed": None, "game_date": "2026-04-08"},
+        {"play_result": "Single", "pop_time": None, "exchange_time": None,
+         "throw_speed": None, "game_date": "2026-04-08"},
+    ])
+    t = C.caught_stealing_trend(df)
+    assert list(t["game_date"]) == ["2026-04-01", "2026-04-08"]
+    assert list(t["attempts"]) == [2, 1]
+    assert list(t["caught"]) == [1, 0]
+    assert t.iloc[0]["cs_pct"] == 50.0 and t.iloc[1]["cs_pct"] == 0.0
+    assert t.iloc[0]["avg_pop"] == 2.0 and t.iloc[1]["avg_pop"] is None
+
+
+def test_caught_stealing_trend_empty():
+    import pandas as pd
+    from app.data import catching as C
+    assert C.caught_stealing_trend(pd.DataFrame()).empty
+    # df with no CS attempts -> empty trend
+    only_single = pd.DataFrame([{"play_result": "Single", "game_date": "2026-04-01"}])
+    assert C.caught_stealing_trend(only_single).empty
+
+
+def test_game_pitches_for_has_game_date():
+    from app.data import catching as C
+    cats = C.wh_lmu_catchers()
+    if cats.empty:
+        import pytest; pytest.skip("no catchers")
+    cid = int(cats.iloc[0]["CatcherId"])
+    g = C.games_for_catcher(cid)
+    if g.empty:
+        import pytest; pytest.skip("no games")
+    df = C.game_pitches_for(int(g.iloc[0]["game_id"]), cid)
+    assert "game_date" in df.columns

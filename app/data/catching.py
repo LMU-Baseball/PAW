@@ -132,9 +132,11 @@ def game_pitches_for(game_id: int, catcher_id: int) -> pd.DataFrame:
     params["gid"] = int(game_id)
     return query_df(
         f"""
-        SELECT * FROM fact_tm_game_pitch
-         WHERE game_id = :gid AND catcher_id IN ({marks})
-         ORDER BY pitch_no
+        SELECT f.*, g.game_date
+          FROM fact_tm_game_pitch f
+          JOIN dim_tm_game g ON g.game_id = f.game_id
+         WHERE f.game_id = :gid AND f.catcher_id IN ({marks})
+         ORDER BY f.pitch_no
         """,
         params,
     )
@@ -148,7 +150,7 @@ def range_pitches_for(catcher_id: int, start, end) -> pd.DataFrame:
     params["end"] = str(end)
     return query_df(
         f"""
-        SELECT f.* FROM fact_tm_game_pitch f
+        SELECT f.*, g.game_date FROM fact_tm_game_pitch f
           JOIN dim_tm_game g ON g.game_id = f.game_id
          WHERE f.catcher_id IN ({marks})
            AND g.game_date BETWEEN :start AND :end
@@ -374,3 +376,30 @@ def caught_stealing_summary(df: pd.DataFrame) -> dict:
         "cs_pct": round(100.0 * caught / n, 1),
         "avg_pop": None if pops.empty else round(float(pops.mean()), 2),
     }
+
+
+def caught_stealing_trend(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-game-date caught-stealing trend. PROVISIONAL v1.
+
+    Columns: game_date, attempts, caught, cs_pct, avg_pop. Only dates with >=1
+    stolen-base attempt; sorted by date. Sparse by nature (few attempts/season).
+    """
+    cols = ["game_date", "attempts", "caught", "cs_pct", "avg_pop"]
+    ev = caught_stealing_events(df)
+    if ev.empty or "game_date" not in ev.columns:
+        return pd.DataFrame(columns=cols)
+    rows = []
+    for d, sub in ev.groupby("game_date"):
+        n = len(sub)
+        c = int(sub["Caught"].sum())
+        pops = sub["pop_time"].dropna()
+        rows.append({
+            "game_date": d, "attempts": n, "caught": c,
+            "cs_pct": round(100.0 * c / n, 1),
+            "avg_pop": None if pops.empty else round(float(pops.mean()), 2),
+        })
+    out = pd.DataFrame(rows, columns=cols).sort_values("game_date").reset_index(drop=True)
+    # Keep avg_pop as Python None on dateless rows: pandas silently coerces a
+    # float64 column's None -> NaN, but callers (and tests) expect None.
+    out["avg_pop"] = out["avg_pop"].astype(object).where(out["avg_pop"].notna(), None)
+    return out
