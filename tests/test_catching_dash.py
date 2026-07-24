@@ -18,17 +18,17 @@ def server(tmp_path):
 def _sample_df():
     return pd.DataFrame([
         {"pitch_call": "StrikeCalled", "play_result": "Undefined",
-         "plate_loc_side": 0.0, "plate_loc_height": 2.5,
-         "inning": 1, "balls": 0, "strikes": 0, "pitcher_name": "A, B",
-         "pop_time": None, "exchange_time": None, "throw_speed": None},
-        {"pitch_call": "BallinDirt", "play_result": "Undefined",
-         "plate_loc_side": 0.1, "plate_loc_height": 0.8,
-         "inning": 3, "balls": 0, "strikes": 2, "pitcher_name": "A, B",
-         "pop_time": None, "exchange_time": None, "throw_speed": None},
+         "plate_loc_side": 1.5, "plate_loc_height": 2.5, "batter_side": "Right",
+         "pitcher_throws": "Left", "tagged_pitch_type": "Fastball",
+         "inning": 1, "pitcher_name": "A, B", "pop_time": None},
+        {"pitch_call": "BallCalled", "play_result": "Undefined",
+         "plate_loc_side": 0.0, "plate_loc_height": 2.5, "batter_side": "Left",
+         "pitcher_throws": "Right", "tagged_pitch_type": "Slider",
+         "inning": 3, "pitcher_name": "A, B", "pop_time": None},
         {"pitch_call": "InPlay", "play_result": "CaughtStealing",
-         "plate_loc_side": -0.2, "plate_loc_height": 2.1,
-         "inning": 6, "balls": 1, "strikes": 1, "pitcher_name": "A, B",
-         "pop_time": 1.88, "exchange_time": 0.68, "throw_speed": 80.0},
+         "plate_loc_side": -0.2, "plate_loc_height": 2.1, "batter_side": "Right",
+         "pitcher_throws": "Right", "tagged_pitch_type": "ChangeUp",
+         "inning": 6, "pitcher_name": "A, B", "pop_time": 1.9},
     ])
 
 
@@ -82,6 +82,20 @@ def test_throws_tab_render():
 def test_framing_scatter_returns_figure():
     from app.dashboards.catching import charts
     fig = charts.framing_scatter(_sample_df())
+    assert fig is not None
+
+
+def test_framing_scatter_has_calltype_traces():
+    from app.dashboards.catching import charts
+    fig = charts.framing_scatter(_sample_df())
+    names = {t.name for t in fig.data}
+    # at least one CallType series present; figure builds without error
+    assert names & {"Stolen Strike", "Lost Strike", "Correct Call"}
+
+
+def test_framing_facets_builds():
+    from app.dashboards.catching import charts
+    fig = charts.framing_facets(_sample_df(), by="batter_side", title="Batter Side")
     assert fig is not None
 
 

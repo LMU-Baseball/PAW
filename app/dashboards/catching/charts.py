@@ -1,106 +1,93 @@
-"""Plotly figures for the catching dashboard (pure functions of pitch DataFrames)."""
+"""Plotly figures for the catching dashboard (pure functions of pitch DataFrames).
+
+Framing scatter/facets use the legacy stolen/lost color scheme over a catcher-view
+strike-zone frame (home-plate pentagon + nested rulebook/Heart/Shadow rectangles).
+"""
 from __future__ import annotations
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from app.data import catching as C
-from app.dashboards.shell import CRIMSON
 
-# Reuse hitting zone geometry conventions (inches).
-_ZONE_RECTS = [
-    (-20.5, -25.5, 20.5, 25.5, "rgba(0,0,0,0.06)"),
-    (-13.5, -15.125, 13.5, 15.125, "rgba(0,0,0,0.10)"),
-    (-7.25, -8.75, 7.25, 8.75, "rgba(0,0,0,0.16)"),
-]
-_SZ = (-10, -13, 10, 13)
-_VLINES = (-3.33, 3.33)
-_HLINES = (-4.33, 4.33)
+CALLTYPE_COLORS = {
+    "Stolen Strike": "#000000",
+    "Lost Strike": "#9A0021",
+    "Correct Call": "#cccccc",
+}
+_ORDER = ["Correct Call", "Stolen Strike", "Lost Strike"]  # draw grey first
+
+
+def _zone_frame(fig, row=None, col=None):
+    """Catcher-view zone frame in inches (matches src/app.R)."""
+    def seg(x0, y0, x1, y1):
+        fig.add_shape(type="line", x0=x0, y0=y0, x1=x1, y1=y1,
+                      line=dict(color="black", width=1), row=row, col=col)
+    def rect(x0, y0, x1, y1, dash=None, width=1.5):
+        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
+                      line=dict(color="black", width=width,
+                                dash=dash) if dash else dict(color="black", width=width),
+                      fillcolor="rgba(0,0,0,0)", row=row, col=col)
+    # home-plate pentagon
+    seg(-9, -21.5, 9, -21.5); seg(-9, -21.5, -9, -23.5); seg(9, -21.5, 9, -23.5)
+    seg(-9, -23.5, 0, -25); seg(9, -23.5, 0, -25)
+    # rulebook box (solid) + Heart + wide (dashed)
+    rect(-10, -13, 10, 13, width=1.5)
+    rect(-7.25, -8.75, 7.25, 8.75, dash="dash", width=1)
+    rect(-13.5, -16, 13.5, 16, dash="dash", width=1)
+
+
+def _base_axes(fig, row=None, col=None):
+    fig.update_xaxes(range=[-40, 40], visible=False, row=row, col=col)
+    fig.update_yaxes(range=[-25, 25], visible=False, row=row, col=col)
+
+
+def _scatter_traces(fig, d, row=None, col=None, showlegend=True):
+    for ct in _ORDER:
+        sub = d[d["CallType"] == ct]
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=sub["_x"], y=sub["_y"], mode="markers", name=ct,
+            legendgroup=ct, showlegend=showlegend,
+            marker=dict(color=CALLTYPE_COLORS[ct], size=9,
+                        line=dict(width=0.5, color="#666")),
+            hovertext=sub["pitch_call"].astype(str), hoverinfo="text",
+        ), row=row, col=col)
 
 
 def framing_scatter(df: pd.DataFrame) -> go.Figure:
-    """Strike-zone scatter of takes: crimson = called strike, blue = ball."""
-    t = C.takes(df)
     fig = go.Figure()
-    for x0, y0, x1, y1, fill in _ZONE_RECTS:
-        fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
-                      line=dict(width=0), fillcolor=fill, layer="below")
-    x0, y0, x1, y1 = _SZ
-    fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
-                  line=dict(color="#888", width=1.5), fillcolor="rgba(0,0,0,0)")
-    for vx in _VLINES:
-        fig.add_shape(type="line", x0=vx, y0=y0, x1=vx, y1=y1,
-                      line=dict(color="#bbb", width=1))
-    for hy in _HLINES:
-        fig.add_shape(type="line", x0=x0, y0=hy, x1=x1, y1=hy,
-                      line=dict(color="#bbb", width=1))
-
-    if not t.empty and "plate_loc_side" in t.columns:
-        d = t[t["plate_loc_side"].notna() & t["plate_loc_height"].notna()].copy()
-        d["_x"] = d["plate_loc_side"] * -12
-        d["_y"] = d["plate_loc_height"] * 12 - 30
-        strikes = d[d["is_strike"]]
-        balls = d[~d["is_strike"]]
-        if not strikes.empty:
-            fig.add_trace(go.Scatter(
-                x=strikes["_x"], y=strikes["_y"], mode="markers",
-                name="Called Strike",
-                marker=dict(color=CRIMSON, size=9, line=dict(width=0)),
-                hovertext=strikes["pitch_call"].astype(str),
-                hoverinfo="text",
-            ))
-        if not balls.empty:
-            fig.add_trace(go.Scatter(
-                x=balls["_x"], y=balls["_y"], mode="markers",
-                name="Ball / Other",
-                marker=dict(color="#0076A5", size=9, line=dict(width=0)),
-                hovertext=balls["pitch_call"].astype(str),
-                hoverinfo="text",
-            ))
-
+    _zone_frame(fig)
+    if not df.empty:
+        d = C.add_framing_cols(df) if "CallType" not in df.columns else df
+        d = d[d["plate_loc_side"].notna() & d["plate_loc_height"].notna()]
+        _scatter_traces(fig, d)
+    _base_axes(fig)
     fig.update_layout(
-        title="Takes — Catcher View",
-        showlegend=True,
-        margin=dict(l=20, r=20, t=40, b=20),
-        height=420,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.85)",
+        title="Zone Location — Catcher View", showlegend=True,
+        margin=dict(l=20, r=20, t=40, b=20), height=460,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
-        xaxis=dict(range=[-50, 50], visible=False, showgrid=False, zeroline=False),
-        yaxis=dict(range=[-35, 35], visible=False, showgrid=False, zeroline=False),
     )
     return fig
 
 
-def pop_time_chart(df: pd.DataFrame) -> go.Figure:
-    """Pop-time distribution for throw attempts (lower is better)."""
-    t = C.throw_attempts(df)
-    fig = go.Figure()
-    if not t.empty and t["pop_time"].notna().any():
-        d = t.dropna(subset=["pop_time"]).sort_values("pop_time")
-        fig.add_trace(go.Scatter(
-            x=list(range(1, len(d) + 1)),
-            y=d["pop_time"],
-            mode="markers+lines",
-            name="Pop Time",
-            marker=dict(color=CRIMSON, size=10),
-            line=dict(color="#0076A5", width=1),
-            hovertext=[
-                f"Pop {p:.2f}s"
-                + (f" · Exch {e:.2f}s" if pd.notna(e) else "")
-                + (f" · {s:.1f} mph" if pd.notna(s) else "")
-                for p, e, s in zip(d["pop_time"], d["exchange_time"], d["throw_speed"])
-            ],
-            hoverinfo="text",
-        ))
+def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
+    d = C.add_framing_cols(df) if not df.empty else df
+    vals = sorted(d[by].dropna().unique()) if not d.empty and by in d.columns else []
+    n = max(1, len(vals))
+    fig = make_subplots(rows=1, cols=n, subplot_titles=[str(v) for v in vals] or [title])
+    for i, v in enumerate(vals, start=1):
+        _zone_frame(fig, row=1, col=i)
+        _scatter_traces(fig, d[d[by] == v], row=1, col=i, showlegend=(i == 1))
+        _base_axes(fig, row=1, col=i)
+    if not vals:
+        _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
     fig.update_layout(
-        title="Pop Time by Attempt",
-        xaxis_title="Attempt #",
-        yaxis_title="Pop Time (s)",
-        margin=dict(l=40, r=20, t=40, b=40),
-        height=360,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.85)",
+        title=title, height=380, margin=dict(l=10, r=10, t=60, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
     )
     return fig
