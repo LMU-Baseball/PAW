@@ -203,3 +203,9 @@ def test_season_summary_shape(real_catcher):
     from app.data import catching as C
     s = C.season_summary(real_catcher)
     assert {"games", "pitches", "cs_pct", "block_pct"} <= set(s)
+
+
+def test_static_framing_render():
+    from app.dashboards.catching.tabs import static_framing
+    comp = static_framing.render(_sample_df())
+    assert comp is not None
