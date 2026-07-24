@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from app.data import catching as C
+from app.dashboards.shell import CRIMSON
 
 CALLTYPE_COLORS = {
     "Stolen Strike": "#000000",
@@ -126,5 +127,37 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         title=title, height=380, margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
+    )
+    return fig
+
+
+def caught_stealing_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
+    """Dual-axis trend: CS% (crimson, left) + Avg Pop time (blue, right) by game date."""
+    fig = go.Figure()
+    if trend_df is not None and not trend_df.empty:
+        x = trend_df["game_date"].astype(str)
+        fig.add_trace(go.Scatter(
+            x=x, y=trend_df["cs_pct"], name="CS%", yaxis="y",
+            mode="markers+lines", marker=dict(color=CRIMSON, size=10),
+            line=dict(color=CRIMSON, width=2),
+            hovertext=[f"{a} att · {c} caught" for a, c in
+                       zip(trend_df["attempts"], trend_df["caught"])],
+            hoverinfo="text+y",
+        ))
+        fig.add_trace(go.Scatter(
+            x=x, y=trend_df["avg_pop"], name="Avg Pop (s)", yaxis="y2",
+            mode="markers+lines", marker=dict(color="#0076A5", size=9),
+            line=dict(color="#0076A5", width=2, dash="dot"),
+        ))
+    fig.update_layout(
+        title="Caught Stealing Trend",
+        xaxis=dict(title="Game"),
+        yaxis=dict(title="CS%", range=[0, 100], side="left"),
+        yaxis2=dict(title="Avg Pop (s)", overlaying="y", side="right",
+                    showgrid=False),
+        height=340, margin=dict(l=40, r=40, t=40, b=40),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"),
+        legend=dict(orientation="h", y=1.12),
     )
     return fig

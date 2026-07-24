@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import pandas as pd
-from dash import html
+from dash import dcc, html
 
 from app.data import catching as C
-from app.dashboards.catching import tables
+from app.dashboards.catching import charts, tables
 from app.dashboards.shell import CRIMSON, section
 
 
@@ -51,4 +51,13 @@ def render(df: pd.DataFrame) -> html.Div:
         })
         table = tables.df_table(show, id_="cs-table")
 
-    return html.Div([section("Caught Stealing"), tiles, table])
+    trend = C.caught_stealing_trend(df)
+    n_games = df["game_date"].nunique() if ("game_date" in df.columns and not df.empty) else 0
+    trend_children = [section("Caught Stealing Trend"),
+                      dcc.Graph(figure=charts.caught_stealing_trend_fig(trend))]
+    if n_games <= 1:
+        trend_children.append(html.Div(
+            "Select 'All games in range' or widen the date range to see a trend.",
+            style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}))
+
+    return html.Div([section("Caught Stealing"), tiles, *trend_children, table])

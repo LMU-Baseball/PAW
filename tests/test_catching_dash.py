@@ -249,3 +249,36 @@ def test_framing_facets_is_aspect_locked():
     fig = charts.framing_facets(_sample_df(), by="batter_side", title="Batter Side")
     # first facet's y-axis is locked to its x-axis
     assert fig.layout.yaxis.scaleanchor == "x"
+
+
+def test_caught_stealing_trend_fig_builds():
+    import pandas as pd
+    from app.dashboards.catching import charts
+    empty = charts.caught_stealing_trend_fig(pd.DataFrame(
+        columns=["game_date", "attempts", "caught", "cs_pct", "avg_pop"]))
+    assert empty is not None
+    one = charts.caught_stealing_trend_fig(pd.DataFrame([
+        {"game_date": "2026-04-01", "attempts": 2, "caught": 1,
+         "cs_pct": 50.0, "avg_pop": 2.0}]))
+    assert one is not None
+    multi = charts.caught_stealing_trend_fig(pd.DataFrame([
+        {"game_date": "2026-04-01", "attempts": 2, "caught": 1, "cs_pct": 50.0, "avg_pop": 2.0},
+        {"game_date": "2026-04-08", "attempts": 1, "caught": 0, "cs_pct": 0.0, "avg_pop": None}]))
+    assert len(multi.data) >= 1
+
+
+def _has_graph(component):
+    """True if a dcc.Graph appears anywhere in the component tree."""
+    from dash import dcc
+    if isinstance(component, dcc.Graph):
+        return True
+    ch = getattr(component, "children", None)
+    if ch is None or isinstance(ch, str):
+        return False
+    kids = ch if isinstance(ch, (list, tuple)) else [ch]
+    return any(_has_graph(k) for k in kids)
+
+
+def test_caught_stealing_tab_has_trend_graph():
+    from app.dashboards.catching.tabs import caught_stealing
+    assert _has_graph(caught_stealing.render(_sample_df()))
