@@ -5,7 +5,7 @@ import io
 from datetime import date
 
 import pandas as pd
-from dash import Input, Output, ctx, html
+from dash import Input, Output, State, ctx, dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
@@ -139,6 +139,18 @@ def register_callbacks(dash_app) -> None:
         if tab == "sessions":
             return session_tables.render(stats, sessions, player=player)
         return html.Div()
+
+    @dash_app.callback(
+        Output("pz-heatmap", "children"),
+        Input("pz-metric", "value"), State("prac-pitch-data", "data"),
+    )
+    def _pz_metric(metric, pitch_json):
+        from app.dashboards.hitting_practice import charts
+        df = _read_json(pitch_json)
+        if df.empty:
+            return dcc.Graph(figure=charts.pitch_zone_heatmap(df, metric or "contact"))
+        d = P.trim_to_first_contact(df)
+        return dcc.Graph(figure=charts.pitch_zone_heatmap(d, metric or "contact"))
 
     @dash_app.callback(
         Output("prac-sidebar", "children"),

@@ -125,6 +125,24 @@ def test_new_practice_figs_build():
         {"Hit Type": "Line Drive", "Count": 10}, {"Hit Type": "Fly Ball", "Count": 5}])) is not None
 
 
+def test_pitch_zones_has_metric_toggle():
+    import inspect
+    from app.dashboards.hitting_practice.tabs import pitch_zones as pz
+    # the metric toggle id is present, and render accepts a metric arg
+    assert "pz-metric" in inspect.getsource(pz)
+    assert "metric" in inspect.signature(pz.render).parameters
+
+
+def test_pitch_zones_render_ev():
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import pitch_zones
+    df = pd.DataFrame([{"player_name": "Doe, John", "session_id": 1,
+                        "play_timestamp": "2026-04-01 10:00:05", "play_date": "2026-04-01",
+                        "px": 0.0, "py": 2.5, "result": 1, "zone_section": 5,
+                        "exit_velocity": 90.0, "distance_feet": 300.0, "is_contact": True}])
+    assert pitch_zones.render(df, metric="ev") is not None
+
+
 def test_practice_sidebar_renders_player_and_all():
     import pandas as pd
     from app.dashboards.hitting_practice import layout

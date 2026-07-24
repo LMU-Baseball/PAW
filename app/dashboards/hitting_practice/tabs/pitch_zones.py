@@ -23,7 +23,7 @@ def _fmt(v, suffix="%"):
     return "—" if v is None else f"{v}{suffix}"
 
 
-def render(df: pd.DataFrame) -> html.Div:
+def render(df: pd.DataFrame, metric: str = "contact") -> html.Div:
     if df.empty:
         return html.Div("No pitch-location data for these filters. "
                         "Try a wider date range or another player.",
@@ -36,12 +36,18 @@ def render(df: pd.DataFrame) -> html.Div:
         _tile("Contact%", _fmt(summ["contact_pct"])),
         _tile("In-Zone", summ["in_zone"]),
         _tile("In-Zone Contact%", _fmt(summ["in_zone_contact_pct"])),
-    ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap",
-              "marginBottom": "12px"})
+    ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "12px"})
     return html.Div([
         section("Pitch Zones"),
         tiles,
-        dcc.Graph(figure=charts.pitch_zone_heatmap(d)),
+        dcc.RadioItems(id="pz-metric",
+                       options=[{"label": " Contact %", "value": "contact"},
+                                {"label": " Avg EV", "value": "ev"},
+                                {"label": " Avg Distance", "value": "distance"}],
+                       value=metric, inline=True,
+                       style={"margin": "4px 0"},
+                       inputStyle={"marginRight": "4px", "marginLeft": "12px"}),
+        html.Div(id="pz-heatmap", children=dcc.Graph(figure=charts.pitch_zone_heatmap(d, metric))),
         section("Zone Summary"),
         tables.df_table(zone, id_="pz-zone-table"),
         html.Div(
