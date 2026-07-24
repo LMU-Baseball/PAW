@@ -16,6 +16,9 @@ from app.db import query_df
 
 HIT_TYPE_MAP = {0: "Miss/Foul", 1: "Ground Ball", 2: "Line Drive", 3: "Fly Ball"}
 
+HIT_TYPE_COLORS = {"Ground Ball": "#7a5230", "Line Drive": "#9A0021",
+                   "Fly Ball": "#0076A5", "Miss/Foul": "#5a5a5a", "Other": "#5a5a5a"}
+
 SESSION_TYPE_MAP = {
     1: "Hitting", 4: "Baseline", 5: "HitLab", 7: "Quality Hit Game",
     8: "Unknown", 11: "Game", 12: "Entertainment", 16: "Drill",
@@ -28,6 +31,13 @@ SWING_DECISION_END = pd.Timestamp("2026-06-01")
 # College strike zone (feet) — catcher's view
 SZ_X0, SZ_X1 = -0.708, 0.708
 SZ_Y0, SZ_Y1 = 1.5, 3.5
+
+# Batted-ball distribution fan geometry (provisional; coach-confirmable).
+FAN_WEDGE_EDGES = [-45.0, -27.0, -9.0, 9.0, 27.0, 45.0]     # 5 wedges (degrees)
+FAN_DIRECTIONS = ["Left", "Left-Center", "Center", "Right-Center", "Right"]
+FAN_RING_EDGES = [0.0, 150.0, 330.0]                        # inner edges; Deep = >330
+FAN_RINGS = ["Infield", "Outfield", "Deep/HR"]
+FAN_DISPLAY_MAX = 420.0                                     # outer draw radius for Deep
 
 
 def current_season_start() -> str:
@@ -320,8 +330,8 @@ def swing_decision_trend(df: pd.DataFrame) -> pd.DataFrame:
 def spray_points(plays: pd.DataFrame) -> pd.DataFrame:
     """Batted-ball landing points from horizontal_angle + distance_feet.
     x = dist*sin(angle) (neg=left field), y = dist*cos(angle). Batted balls only
-    (hit_type 1/2/3). PROVISIONAL."""
-    cols = ["x", "y", "hit_type_label"]
+    (hit_type 1/2/3). Carries distance_feet + exit_velocity for hover. PROVISIONAL."""
+    cols = ["x", "y", "hit_type_label", "distance_feet", "exit_velocity"]
     if plays.empty or "horizontal_angle" not in plays.columns:
         return pd.DataFrame(columns=cols)
     d = plays[plays["hit_type"].isin([1, 2, 3])].dropna(
@@ -332,7 +342,46 @@ def spray_points(plays: pd.DataFrame) -> pd.DataFrame:
     d["x"] = d["distance_feet"].astype(float) * np.sin(ang)
     d["y"] = d["distance_feet"].astype(float) * np.cos(ang)
     d["hit_type_label"] = d["hit_type"].map(HIT_TYPE_MAP)
+    if "exit_velocity" not in d.columns:
+        d["exit_velocity"] = np.nan
     return d[cols].reset_index(drop=True)
+
+
+def spray_fan(plays: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate batted balls into a 5-wedge x 3-ring fan (always 15 rows).
+    count = balls in each cell; pct = share of all batted balls with valid
+    geometry. Geometry bounds (a0/a1 deg, r0/r1 ft) included for drawing.
+    PROVISIONAL (wedge/ring cutoffs are coach-confirmable constants)."""
+    rows = []
+    for wi, direction in enumerate(FAN_DIRECTIONS):
+        a0, a1 = FAN_WEDGE_EDGES[wi], FAN_WEDGE_EDGES[wi + 1]
+        for ri, ring in enumerate(FAN_RINGS):
+            r0 = FAN_RING_EDGES[ri]
+            r1 = FAN_RING_EDGES[ri + 1] if ri + 1 < len(FAN_RING_EDGES) else FAN_DISPLAY_MAX
+            rows.append({"direction": direction, "ring": ring, "wedge_i": wi,
+                         "ring_i": ri, "a0": a0, "a1": a1, "r0": r0, "r1": r1,
+                         "count": 0, "pct": 0.0})
+    fan = pd.DataFrame(rows)
+    if plays.empty or "horizontal_angle" not in plays.columns:
+        return fan
+    d = plays[plays["hit_type"].isin([1, 2, 3])].dropna(
+        subset=["horizontal_angle", "distance_feet"]).copy()
+    d = d[d["horizontal_angle"].astype(float).between(-45.0, 45.0)]
+    total = len(d)
+    if total == 0:
+        return fan
+    ang = d["horizontal_angle"].astype(float).to_numpy()
+    dist = d["distance_feet"].astype(float).to_numpy()
+    wedge_i = np.clip(np.digitize(ang, FAN_WEDGE_EDGES[1:-1]), 0, 4)
+    ring_i = np.clip(np.digitize(dist, FAN_RING_EDGES[1:]), 0, 2)
+    for wi, ri in zip(wedge_i, ring_i):
+        m = (fan["wedge_i"] == wi) & (fan["ring_i"] == ri)
+        fan.loc[m, "count"] += 1
+    # Not rounded per-cell: rounding each of the 15 shares to 1 decimal can make
+    # the total drift off 100.0 (e.g. three-way splits of 33.3+33.3+33.3=99.9).
+    # Keep full precision here; round only at display time.
+    fan["pct"] = 100.0 * fan["count"] / total
+    return fan
 
 
 def hit_type_counts(plays: pd.DataFrame) -> pd.DataFrame:

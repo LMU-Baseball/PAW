@@ -119,3 +119,35 @@ def test_spray_points_sign_and_filter():
     assert len(s) == 2  # miss excluded
     assert s.iloc[0]["x"] < 0 and s.iloc[1]["x"] > 0  # neg angle = left
     assert set(s["hit_type_label"]) == {"Line Drive", "Fly Ball"}
+
+
+def test_spray_points_carries_distance_and_ev():
+    import pandas as pd
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -20.0, "distance_feet": 200.0, "exit_velocity": 95.0, "hit_type": 2},
+        {"horizontal_angle": 10.0, "distance_feet": 350.0, "exit_velocity": 101.0, "hit_type": 3},
+        {"horizontal_angle": 0.0, "distance_feet": 0.0, "exit_velocity": 0.0, "hit_type": 0},
+    ])
+    pts = P.spray_points(plays)
+    assert list(pts.columns) == ["x", "y", "hit_type_label", "distance_feet", "exit_velocity"]
+    assert len(pts) == 2  # hit_type 0 excluded
+    assert set(pts["exit_velocity"]) == {95.0, 101.0}
+
+
+def test_spray_fan_15_cells_and_pct_sums_100():
+    import pandas as pd
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -40.0, "distance_feet": 120.0, "hit_type": 1},   # Left / Infield
+        {"horizontal_angle": 0.0, "distance_feet": 200.0, "hit_type": 2},     # Center / Outfield
+        {"horizontal_angle": 30.0, "distance_feet": 360.0, "hit_type": 3},    # Right / Deep
+        {"horizontal_angle": 5.0, "distance_feet": 50.0, "hit_type": 0},      # excluded (miss)
+    ])
+    fan = P.spray_fan(plays)
+    assert len(fan) == 15
+    assert round(fan["pct"].sum(), 1) == 100.0
+    assert int(fan["count"].sum()) == 3  # miss excluded
+    # empty df -> 15 zero cells, no crash
+    fan0 = P.spray_fan(pd.DataFrame(columns=["horizontal_angle", "distance_feet", "hit_type"]))
+    assert len(fan0) == 15 and fan0["count"].sum() == 0
