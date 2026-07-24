@@ -170,7 +170,7 @@ def test_df_table_colors_pitch_column():
     tbl = tables.df_table(df, id_="t")
     conds = tbl.style_data_conditional or []
     # one colored rule per distinct pitch, each carrying that pitch's color
-    colored = {c.get("color") for c in conds if c.get("column_id") == "Pitch"}
+    colored = {c.get("color") for c in conds if c.get("if", {}).get("column_id") == "Pitch"}
     assert P.pitch_color("Fastball") in colored
     assert P.pitch_color("Sweeper") in colored
 
@@ -181,4 +181,4 @@ def test_df_table_no_pitch_column_no_color_rules():
     df = pd.DataFrame({"Metric": ["Strike%"], "Value": [55.0]})
     tbl = tables.df_table(df, id_="t2")
     conds = tbl.style_data_conditional or []
-    assert not any(c.get("column_id") == "Pitch" for c in conds)
+    assert not any(c.get("if", {}).get("column_id") == "Pitch" for c in conds)

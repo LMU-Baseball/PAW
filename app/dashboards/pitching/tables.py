@@ -12,8 +12,8 @@ def df_table(df: pd.DataFrame, id_: str | None = None, color_col: str = "Pitch")
     if color_col in df.columns:
         for pt in df[color_col].dropna().unique():
             conditional.append({
-                "if": {"filter_query": f'{{{color_col}}} = "{pt}"'},
-                "column_id": color_col,
+                "if": {"filter_query": f'{{{color_col}}} = "{str(pt)}"',
+                       "column_id": color_col},
                 "color": P.pitch_color(str(pt)),
                 "fontWeight": "bold",
             })
