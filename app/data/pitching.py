@@ -631,7 +631,7 @@ def _cov_ellipse(x, y, n_std: float = 1.0, n_pts: int = 40):
     if not np.all(np.isfinite(cov)):
         return None
     vals, vecs = np.linalg.eigh(cov)
-    if np.any(vals < 0):
+    if np.any(vals <= 0):
         return None
     t = np.linspace(0, 2 * np.pi, n_pts)
     circle = np.stack([np.cos(t), np.sin(t)])

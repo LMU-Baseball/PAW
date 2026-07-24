@@ -326,13 +326,15 @@ def test_fig_movement_has_one_ellipse_per_pitch_type():
     import pandas as pd
     from app.data import pitching as P
     rows = []
-    for pt, hb0, ivb0 in [("Fastball", -10, 22), ("Sweeper", 12, 4)]:
-        for k in range(4):
-            rows.append({"horz_break": hb0 + k, "induced_vert_break": ivb0 + k,
+    for pt, pts in [
+        ("Fastball", [(-11, 21), (-9, 23), (-10, 24), (-8, 22)]),
+        ("Sweeper", [(11, 4), (13, 6), (12, 3), (14, 5)]),
+    ]:
+        for hb, ivb in pts:
+            rows.append({"horz_break": hb, "induced_vert_break": ivb,
                          "auto_pitch_type": pt, "tagged_pitch_type": pt})
     df = pd.DataFrame(rows)
     fig = P.fig_movement(df)
     ellipses = [t for t in fig.data if getattr(t, "fill", None) == "toself"]
     assert len(ellipses) == 2  # one per pitch type
-    # markers still present (mode='markers')
     assert any(t.mode == "markers" for t in fig.data)
