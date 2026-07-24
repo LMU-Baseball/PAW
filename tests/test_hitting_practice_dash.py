@@ -44,16 +44,26 @@ def test_swing_frequency_render():
     assert swing_frequency.render(_sample()) is not None
 
 
-def test_contact_overview_render():
-    from app.dashboards.hitting_practice.tabs import contact_overview
-    stats = pd.DataFrame([{
-        "player_name": "Doe, John", "total_plays": 10, "total_sessions": 2,
-        "avg_exit_velocity": 88.0, "max_exit_velocity": 95.0,
-        "avg_distance": 200.0, "hard_hit_rate": 0.3,
-    }])
-    plays = pd.DataFrame({"hit_type": [1, 2, 3], "session_id": [1, 1, 1],
-                          "player_name": ["Doe, John"] * 3})
-    assert contact_overview.render(plays, stats, player="All Players") is not None
+def _has_graph(component):
+    """True if a dcc.Graph appears anywhere in the tree (add once if not present)."""
+    from dash import dcc
+    if isinstance(component, dcc.Graph):
+        return True
+    ch = getattr(component, "children", None)
+    if ch is None or isinstance(ch, str):
+        return False
+    kids = ch if isinstance(ch, (list, tuple)) else [ch]
+    return any(_has_graph(k) for k in kids)
+
+
+def test_batted_ball_tab_renders():
+    from app.dashboards.hitting_practice.tabs import batted_ball
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 200.0, "hit_type": 2},
+        {"horizontal_angle": 20.0, "distance_feet": 300.0, "hit_type": 3},
+        {"horizontal_angle": 0.0, "distance_feet": 0.0, "hit_type": 0},
+    ])
+    assert _has_graph(batted_ball.render(plays))
 
 
 def test_session_tables_render():

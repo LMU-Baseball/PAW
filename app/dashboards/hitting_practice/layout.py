@@ -122,7 +122,7 @@ def serve_layout() -> html.Div:
     tabs = dcc.Tabs(id="prac-tabs", value="zones", children=[
         dcc.Tab(label="Pitch Zones", value="zones"),
         dcc.Tab(label="Swing Frequency", value="swing"),
-        dcc.Tab(label="Contact Overview", value="contact"),
+        dcc.Tab(label="Batted Ball", value="batted"),
         dcc.Tab(label="Session Tables", value="sessions"),
     ])
 

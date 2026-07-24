@@ -11,7 +11,7 @@ from flask_login import current_user
 from app.data import practice as P
 from app.dashboards.hitting_practice import layout, selectors
 from app.dashboards.hitting_practice.tabs import (
-    contact_overview, pitch_zones, session_tables, swing_frequency,
+    batted_ball, pitch_zones, session_tables, swing_frequency,
 )
 
 
@@ -119,6 +119,14 @@ def register_callbacks(dash_app) -> None:
             return pitch_zones.render(pitch)
         if tab == "swing":
             return swing_frequency.render(pitch)
+        if tab == "batted":
+            _, plays, _, _ = _load_all(exclude_test)
+            if not plays.empty and start and end and "play_date" in plays.columns:
+                plays = plays[pd.to_datetime(plays["play_date"]).between(
+                    pd.Timestamp(start), pd.Timestamp(end))]
+            if player != "All Players" and not plays.empty:
+                plays = plays[plays["player_name"] == player]
+            return batted_ball.render(plays)
 
         _, plays, sessions, stats = _load_all(exclude_test)
         # Date / player filter on plays & sessions
@@ -134,8 +142,6 @@ def register_callbacks(dash_app) -> None:
             if not sessions.empty:
                 sessions = sessions[sessions["player_name"] == player]
 
-        if tab == "contact":
-            return contact_overview.render(plays, stats, player=player)
         if tab == "sessions":
             return session_tables.render(stats, sessions, player=player)
         return html.Div()
