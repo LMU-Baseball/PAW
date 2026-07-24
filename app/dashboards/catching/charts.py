@@ -127,6 +127,12 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         idx = (r - 1) * ncols + c  # make_subplots axis numbering (row-major)
         fig.update_yaxes(scaleanchor=("x" if idx == 1 else f"x{idx}"),
                          scaleratio=1, row=r, col=c)
+    # Hide any unused trailing cells when len(vals) is odd and n < nrows*ncols
+    if vals:
+        for j in range(len(vals), nrows * ncols):
+            r, c = j // ncols + 1, j % ncols + 1
+            fig.update_xaxes(visible=False, row=r, col=c)
+            fig.update_yaxes(visible=False, row=r, col=c)
     if not vals:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
         fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)

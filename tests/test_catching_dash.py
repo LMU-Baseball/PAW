@@ -366,3 +366,23 @@ def test_framing_facets_wraps_to_two_columns():
     assert n_xaxes == 4
     # rows=2 => the grid height grows beyond a single-row figure
     assert fig.layout.height and fig.layout.height >= 700
+
+
+def test_framing_facets_hides_unused_trailing_cells():
+    import pandas as pd
+    from app.dashboards.catching import charts
+    # three Zone values -> should be a 2x2 grid, but 4th cell must be hidden
+    df = pd.DataFrame([
+        {"plate_loc_side": s, "plate_loc_height": h,
+         "pitch_call": "StrikeCalled", "batter_side": "Right",
+         "pitcher_throws": "Right", "rel_speed": 90.0, "tagged_pitch_type": "Fastball"}
+        for s, h in [(-1.5, 0.5), (-0.5, 2.0), (-1.0, 1.5)]
+        # These map to: Chase, Heart, Shadow (3 unique zones)
+    ])
+    fig = charts.framing_facets(df, by="Zone", title="Zone Location")
+    # 3 facets in 2x2 grid => xaxis1, xaxis2, xaxis3, xaxis4
+    n_xaxes = len([k for k in fig.layout if k.startswith("xaxis")])
+    assert n_xaxes == 4
+    # The 4th cell (unused) must have its axes hidden
+    assert fig.layout.xaxis4.visible is False
+    assert fig.layout.yaxis4.visible is False
