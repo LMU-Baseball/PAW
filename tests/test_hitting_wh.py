@@ -119,3 +119,19 @@ def test_wh_slash_line_shape_and_values(top_batter):
 
 def test_wh_slash_line_no_data_is_dashes():
     assert wh.wh_slash_line(-1) == {"BA": "—", "SLG": "—", "OBP": "—"}
+
+
+def test_hitting_games_date_filter_and_range():
+    from app.data import hitting_wh as H
+    hitters = H.wh_lmu_hitters()
+    if hitters.empty:
+        import pytest; pytest.skip("no hitters")
+    bid = int(hitters.iloc[0]["BatterId"])
+    allg = H.wh_games_for_batter(bid)
+    if allg.empty:
+        import pytest; pytest.skip("no games")
+    lo, hi = str(allg["game_date"].min()), str(allg["game_date"].max())
+    assert len(H.wh_games_for_batter(bid, start=lo, end=hi)) == len(allg)
+    pooled = H.wh_range_pitches(bid, lo, hi)
+    single = sum(len(H.wh_game_pitches(int(g), bid)) for g in allg["game_id"])
+    assert len(pooled) == single

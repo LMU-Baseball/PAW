@@ -111,8 +111,13 @@ def wh_lmu_hitters() -> pd.DataFrame:
     )
 
 
-def wh_games_for_batter(batter_tm_id) -> pd.DataFrame:
+def wh_games_for_batter(batter_tm_id, start=None, end=None) -> pd.DataFrame:
     ph, idp = _in_clause(_sibling_ids(batter_tm_id))
+    date_clause = ""
+    if start is not None and end is not None:
+        date_clause = " AND g.game_date BETWEEN :start AND :end"
+        idp["start"] = str(start)
+        idp["end"] = str(end)
     df = query_df(
         f"""
         SELECT g.game_id, g.game_date, g.home_team_id,
@@ -123,6 +128,7 @@ def wh_games_for_batter(batter_tm_id) -> pd.DataFrame:
           JOIN dim_tm_game g ON g.game_id = bg.game_id
           JOIN tm_team t ON t.team_id = CASE WHEN g.home_team_id = :lmu
                                              THEN g.away_team_id ELSE g.home_team_id END
+         WHERE 1=1{date_clause}
          ORDER BY g.game_date DESC
         """,
         {"lmu": LMU_TEAM_ID, **idp},
@@ -156,6 +162,28 @@ def wh_season_pitches(batter_tm_id) -> pd.DataFrame:
           FROM fact_tm_game_pitch
          WHERE batter_tm_id IN ({ph})
          ORDER BY game_id, pitch_no
+        """,
+        idp,
+    )
+    return _finish(df)
+
+
+def wh_range_pitches(batter_tm_id, start, end) -> pd.DataFrame:
+    """All of a batter's pitches across in-range games (sibling-id union)."""
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
+    idp["start"] = str(start)
+    idp["end"] = str(end)
+    # game_id is ambiguous once joined to dim_tm_game (both tables have it);
+    # prefix with f. here only — the shared _PITCH_SELECT stays unqualified.
+    pitch_select = _PITCH_SELECT.replace("game_id AS GameID", "f.game_id AS GameID")
+    df = query_df(
+        f"""
+        SELECT {pitch_select}
+          FROM fact_tm_game_pitch f
+          JOIN dim_tm_game g ON g.game_id = f.game_id
+         WHERE f.batter_tm_id IN ({ph})
+           AND g.game_date BETWEEN :start AND :end
+         ORDER BY f.game_id, f.pitch_no
         """,
         idp,
     )
