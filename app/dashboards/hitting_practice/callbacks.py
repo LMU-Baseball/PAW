@@ -5,7 +5,7 @@ import io
 from datetime import date
 
 import pandas as pd
-from dash import Input, Output, State, ctx, dcc, html
+from dash import ALL, Input, Output, State, ctx, dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
@@ -151,6 +151,49 @@ def register_callbacks(dash_app) -> None:
             return dcc.Graph(figure=charts.pitch_zone_heatmap(df, metric or "contact"))
         d = P.trim_to_first_contact(df)
         return dcc.Graph(figure=charts.pitch_zone_heatmap(d, metric or "contact"))
+
+    @dash_app.callback(
+        Output("sfz-active", "data"),
+        Input({"type": "sfz-chip", "index": ALL}, "n_clicks"),
+        State("sfz-active", "data"), prevent_initial_call=True,
+    )
+    def _sfz_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        z = tid["index"]
+        active = list(active or [])
+        return [x for x in active if x != z] if z in active else active + [z]
+
+    @dash_app.callback(
+        Output("sf-ev-body", "children"),
+        Input("sfz-active", "data"), State("prac-pitch-data", "data"),
+    )
+    def _sfz_body(active, pitch_json):
+        from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+        df = _read_json(pitch_json)
+        if df.empty:
+            return sf.ev_body(df, active)
+        return sf.ev_body(P.trim_to_first_contact(df), active)
+
+    @dash_app.callback(
+        Output({"type": "sfz-chip", "index": ALL}, "style"),
+        Input("sfz-active", "data"),
+        State({"type": "sfz-chip", "index": ALL}, "id"),
+    )
+    def _sfz_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            on = i["index"] in active
+            out.append({"border": "2px solid #9A0021",
+                        "background": "#9A0021" if on else "#fff",
+                        "color": "#fff" if on else "#9A0021",
+                        "borderRadius": "12px", "padding": "2px 10px",
+                        "margin": "0 4px 4px 0", "cursor": "pointer",
+                        "opacity": "1" if on else ".55",
+                        "fontFamily": "Teko, sans-serif", "fontSize": "14px"})
+        return out
 
     @dash_app.callback(
         Output("prac-sidebar", "children"),

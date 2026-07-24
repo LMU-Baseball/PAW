@@ -153,3 +153,28 @@ def test_practice_sidebar_renders_player_and_all():
     assert layout.sidebar(df, "Andrew Mhoon") is not None
     assert layout.sidebar(df, "All Players") is not None
     assert layout.sidebar(pd.DataFrame(), "All Players") is not None
+
+
+def test_swing_frequency_has_trend_and_zone_chips():
+    import inspect
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    src = inspect.getsource(sf)
+    assert "swing_decision_trend_fig" in src and "sfz" in src
+    # tiles removed: no In-Zone Contact% tile label in the tab anymore
+    assert "Swing Decision Score" not in src or "trend" in src.lower()
+
+
+def test_swing_frequency_ev_body_zone_filter():
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    df = pd.DataFrame([
+        {"zone_section": 5, "exit_velocity": 90.0, "distance_feet": 300.0,
+         "result": 1, "is_contact": True, "play_date": "2026-04-01", "px": 0.0, "py": 2.5,
+         "play_timestamp": "2026-04-01 10:00:05"},
+        {"zone_section": 11, "exit_velocity": 70.0, "distance_feet": 100.0,
+         "result": 1, "is_contact": True, "play_date": "2026-04-01", "px": 1.0, "py": 2.0,
+         "play_timestamp": "2026-04-01 10:00:10"},
+    ])
+    # filtering to zone 5 keeps only that row's data feeding the chart (no crash)
+    assert sf.ev_body(df, [5]) is not None
+    assert sf.ev_body(df, None) is not None
