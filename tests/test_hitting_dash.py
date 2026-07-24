@@ -321,3 +321,27 @@ def test_read_game_df_roundtrip_no_futurewarning():
     empty = callbacks._read_game_df(None)
     assert isinstance(empty, pd.DataFrame)
     assert empty.empty
+
+
+def test_hitting_range_pooled_render_live():
+    from app import create_app
+    from config import Config
+    from app.data import hitting_wh as H
+    from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
+    class T(Config):
+        TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
+    with create_app(T).app_context():
+        hitters = H.wh_lmu_hitters()
+        if hitters.empty:
+            import pytest; pytest.skip("no hitters")
+        bid = int(hitters.iloc[0]["BatterId"])
+        g = H.wh_games_for_batter(bid)
+        if g.empty:
+            import pytest; pytest.skip("no games")
+        lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
+        pooled = H.wh_range_pitches(bid, lo, hi)
+        if pooled.empty:
+            import pytest; pytest.skip("no pooled")
+        assert game_level.render(pooled, note="") is not None
+        assert pa.render_all_pas(pooled) is not None
+        assert zl.render(pooled, "All Swings") is not None

@@ -44,6 +44,31 @@ def render_breakdown(game_df: pd.DataFrame, pa_value: str | None) -> html.Div:
     ])
 
 
-def render_all_pas(game_df: pd.DataFrame) -> dcc.Graph:
-    return dcc.Graph(figure=charts.all_pas_figure(game_df),
-                     config={"displayModeBar": False})
+def render_all_pas(game_df: pd.DataFrame) -> dcc.Graph | html.Div:
+    """All-PAs facet grid, capped to the 12 most recent PAs when pooling a range.
+
+    A pooled multi-game df carries a `GameID` column (every game reuses Inning 1,
+    PAofInning 1, etc., so GameID must be part of the PA key to avoid conflating
+    PAs across games); a single game's df has no GameID variation, so the cap is
+    keyed by Inning/PAofInning alone there (a no-op — a game has only a handful).
+    """
+    df = game_df
+    capped_note = None
+    if df is not None and not df.empty:
+        key_cols = ["GameID", "Inning", "PAofInning"] if "GameID" in df.columns \
+            else ["Inning", "PAofInning"]
+        keys = df[key_cols].drop_duplicates()
+        if len(keys) > 12:
+            recent = keys.tail(12)
+            df = df.merge(recent, on=key_cols, how="inner")
+            capped_note = f"showing 12 most recent of {len(keys)} PAs"
+
+    graph = dcc.Graph(figure=charts.all_pas_figure(df),
+                      config={"displayModeBar": False})
+    if not capped_note:
+        return graph
+    return html.Div([
+        html.Div(capped_note, style={"fontSize": "13px", "color": "#888",
+                                     "marginBottom": "4px"}),
+        graph,
+    ])

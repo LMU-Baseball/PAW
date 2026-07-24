@@ -8,14 +8,23 @@ from dash import Input, Output, State, dcc, html
 from flask_login import current_user
 
 from app.data import hitting_wh
+from app.dashboards import date_range as dr
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
 
 
 def _load_game_df(store) -> pd.DataFrame:
-    if not store or store.get("game_id") is None or store.get("batter_id") is None:
+    if not store or store.get("batter_id") is None:
         return pd.DataFrame()
-    return hitting_wh.wh_game_pitches(int(store["game_id"]), int(store["batter_id"]))
+    gid = store.get("game_id")
+    if gid == dr.ALL_IN_RANGE:
+        if not store.get("start") or not store.get("end"):
+            return pd.DataFrame()
+        return hitting_wh.wh_range_pitches(int(store["batter_id"]),
+                                           store["start"], store["end"])
+    if gid is None:
+        return pd.DataFrame()
+    return hitting_wh.wh_game_pitches(int(gid), int(store["batter_id"]))
 
 
 def _read_game_df(data_json):
@@ -27,30 +36,55 @@ def _read_game_df(data_json):
 
 def register_callbacks(dash_app) -> None:
 
-    # Coach picks a hitter -> refresh that hitter's game options (players locked).
+    # Coach picks a hitter -> refresh the date range to that hitter's season span.
     @dash_app.callback(
-        Output("game-dd", "options"), Output("game-dd", "value"),
-        Input("hitter-dd", "value"),
+        Output("hit-daterange", "start_date"), Output("hit-daterange", "end_date"),
+        Input("hitter-dd", "value"), prevent_initial_call=True,
     )
-    def _on_hitter(batter_id):
+    def _on_hitter_range(batter_id):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
-        opts = selectors.game_options(bid)
-        return opts, (opts[0]["value"] if opts else None)
+        g = hitting_wh.wh_games_for_batter(bid) if bid else None
+        if g is None or g.empty:
+            return None, None
+        return str(g["game_date"].min()), str(g["game_date"].max())
+
+    # Date range change -> refresh the game options within that range (players locked).
+    @dash_app.callback(
+        Output("game-dd", "options"), Output("game-dd", "value"),
+        Input("hit-daterange", "start_date"), Input("hit-daterange", "end_date"),
+        State("hitter-dd", "value"), prevent_initial_call=True,
+    )
+    def _on_range(start, end, batter_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
+        if not bid or not start or not end:
+            return [], None
+        g = hitting_wh.wh_games_for_batter(bid, start=start, end=end)
+        opts = dr.game_options(g)
+        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
+        return opts, value
 
     # Selection -> selection store + sidebar + scoreboard.
     @dash_app.callback(
         Output("selection", "data"), Output("sidebar", "children"),
         Output("scoreboard", "children"),
         Input("hitter-dd", "value"), Input("game-dd", "value"),
+        State("hit-daterange", "start_date"), State("hit-daterange", "end_date"),
     )
-    def _on_selection(batter_id, game_id):
+    def _on_selection(batter_id, game_id, start, end):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
-        return ({"batter_id": bid, "game_id": game_id},
-                layout.sidebar(bid), layout.scoreboard(game_id))
+        if game_id == dr.ALL_IN_RANGE:
+            g = hitting_wh.wh_games_for_batter(bid, start=start, end=end) if bid else None
+            sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
+        else:
+            sb = layout.scoreboard(game_id)
+        return ({"batter_id": bid, "game_id": game_id, "start": start, "end": end},
+                layout.sidebar(bid), sb)
 
     # Selection -> load the game pitch df into the game-data store.
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))
