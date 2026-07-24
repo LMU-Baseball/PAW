@@ -188,3 +188,20 @@ def test_swing_frequency_ev_body_zone_filter():
     # filtering to zone 5 keeps only that row's data feeding the chart (no crash)
     assert sf.ev_body(df, [5]) is not None
     assert sf.ev_body(df, None) is not None
+
+
+def test_swing_trend_uses_real_dates_not_epoch():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    # play_date arriving as int64 epoch-ms (post dcc.Store round-trip)
+    df = pd.DataFrame([
+        {"play_date": 1774915200000, "in_zone_pct": 80, "chase_pct": 30, "score": 50},
+        {"play_date": 1775088000000, "in_zone_pct": 70, "chase_pct": 40, "score": 30},
+    ])
+    fig = charts.swing_decision_trend_fig(df)
+    xs = list(fig.data[0].x)
+    # no raw epoch integers on the axis; labels look like dates
+    assert all("2026" in str(v) or any(m in str(v) for m in
+               ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])
+               for v in xs)
+    assert "1774915200000" not in [str(v) for v in xs]

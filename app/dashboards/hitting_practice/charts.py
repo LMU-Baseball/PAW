@@ -101,10 +101,21 @@ def ev_distance_by_pitch(df: pd.DataFrame) -> go.Figure:
 _HIT_COLORS = {"Ground Ball": "#7a5230", "Line Drive": "#9A0021", "Fly Ball": "#0076A5"}
 
 
+def _date_labels(series: pd.Series) -> pd.Series:
+    """Human-readable date labels from either date/datetime values or the
+    int64 epoch-ms that a dcc.Store JSON round-trip produces."""
+    s = pd.Series(series)
+    if pd.api.types.is_numeric_dtype(s):
+        dt = pd.to_datetime(s, unit="ms")
+    else:
+        dt = pd.to_datetime(s, errors="coerce")
+    return dt.dt.strftime("%b %d")
+
+
 def swing_decision_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     if trend_df is not None and not trend_df.empty:
-        x = trend_df["play_date"].astype(str)
+        x = _date_labels(trend_df["play_date"])
         fig.add_trace(go.Scatter(
             x=x, y=trend_df["score"], mode="lines+markers", name="Swing Decision Score",
             line=dict(color=CRIMSON, width=2), marker=dict(color=CRIMSON, size=9)))
@@ -112,6 +123,7 @@ def swing_decision_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         title="Swing Decision Score by Session (In-Zone % − Chase %)",
         xaxis_title="Session date", yaxis_title="Score",
+        xaxis=dict(type="category"),
         height=340, margin=dict(l=40, r=20, t=50, b=40),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
