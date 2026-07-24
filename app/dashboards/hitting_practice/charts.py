@@ -12,26 +12,31 @@ from app.dashboards.shell import CRIMSON
 _BLUE = "#0076A5"
 
 
-def pitch_zone_heatmap(df: pd.DataFrame) -> go.Figure:
-    z, xedges, yedges = P.heatmap_contact_rate(df)
+_METRIC_CFG = {
+    "contact": ("Contact %", "YlOrRd", (0, 100), "Contact Rate"),
+    "ev": ("Avg EV (mph)", "YlOrRd", (None, None), "Avg Exit Velocity"),
+    "distance": ("Avg Dist (ft)", "YlOrRd", (None, None), "Avg Distance"),
+}
+
+
+def pitch_zone_heatmap(df: pd.DataFrame, metric: str = "contact") -> go.Figure:
+    label, scale, (zmin, zmax), title = _METRIC_CFG.get(metric, _METRIC_CFG["contact"])
+    z, xedges, yedges = P.heatmap_metric(df, metric)
     x_centers = (xedges[:-1] + xedges[1:]) / 2
     y_centers = (yedges[:-1] + yedges[1:]) / 2
     fig = go.Figure(data=go.Heatmap(
-        z=z, x=x_centers, y=y_centers,
-        colorscale="YlOrRd", zmin=0, zmax=100,
-        colorbar=dict(title="Contact %"),
-        hovertemplate="x=%{x:.2f}ft<br>y=%{y:.2f}ft<br>Contact=%{z:.1f}%<extra></extra>",
+        z=z, x=x_centers, y=y_centers, colorscale=scale,
+        zmin=zmin, zmax=zmax, colorbar=dict(title=label),
+        hovertemplate="x=%{x:.2f}ft<br>y=%{y:.2f}ft<br>%{z:.1f}<extra></extra>",
     ))
-    # Strike zone rectangle (catcher's view)
     fig.add_shape(type="rect", x0=P.SZ_X0, y0=P.SZ_Y0, x1=P.SZ_X1, y1=P.SZ_Y1,
-                  line=dict(color="white", width=2), fillcolor="rgba(0,0,0,0)")
+                  line=dict(color="black", width=2), fillcolor="rgba(0,0,0,0)")
     fig.update_layout(
-        title="Pitch Zones — Contact Rate (Catcher's View)",
+        title=f"Pitch Zones — {title} (Catcher's View)",
         xaxis_title="Horizontal (ft)", yaxis_title="Height (ft)",
         yaxis=dict(scaleanchor="x", scaleratio=1),
         height=480, margin=dict(l=40, r=20, t=50, b=40),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.85)",
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
     )
     return fig
@@ -90,6 +95,74 @@ def ev_distance_by_pitch(df: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(title_text="EV (mph)", secondary_y=False)
     fig.update_yaxes(title_text="Distance (ft)", secondary_y=True)
     fig.update_xaxes(title_text="Pitch #")
+    return fig
+
+
+_HIT_COLORS = {"Ground Ball": "#7a5230", "Line Drive": "#9A0021", "Fly Ball": "#0076A5"}
+
+
+def swing_decision_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    if trend_df is not None and not trend_df.empty:
+        x = trend_df["play_date"].astype(str)
+        fig.add_trace(go.Scatter(
+            x=x, y=trend_df["score"], mode="lines+markers", name="Swing Decision Score",
+            line=dict(color=CRIMSON, width=2), marker=dict(color=CRIMSON, size=9)))
+        fig.add_hline(y=0, line=dict(color="#bbb", width=1))
+    fig.update_layout(
+        title="Swing Decision Score by Session (In-Zone % − Chase %)",
+        xaxis_title="Session date", yaxis_title="Score",
+        height=340, margin=dict(l=40, r=20, t=50, b=40),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
+    return fig
+
+
+def spray_chart_fig(spray_df: pd.DataFrame) -> go.Figure:
+    """Plotly-drawn field + batted-ball landing points colored by hit type."""
+    fig = go.Figure()
+    # Field: foul lines from home (0,0), outfield arc (~330ft), infield diamond.
+    L = 330.0
+    fig.add_shape(type="line", x0=0, y0=0, x1=-L * 0.707, y1=L * 0.707,
+                  line=dict(color="#888", width=1))
+    fig.add_shape(type="line", x0=0, y0=0, x1=L * 0.707, y1=L * 0.707,
+                  line=dict(color="#888", width=1))
+    fig.add_shape(type="path",
+                  path=f"M {-L*0.707},{L*0.707} Q 0,{L*1.15} {L*0.707},{L*0.707}",
+                  line=dict(color="#888", width=1))
+    # infield diamond (~90ft bases, rotated): home->1st->2nd->3rd
+    b = 63.6  # 90/sqrt(2)
+    fig.add_shape(type="path",
+                  path=f"M 0,0 L {b},{b} L 0,{2*b} L {-b},{b} Z",
+                  line=dict(color="#bbb", width=1), fillcolor="rgba(0,0,0,0)")
+    if spray_df is not None and not spray_df.empty:
+        for label, sub in spray_df.groupby("hit_type_label"):
+            fig.add_trace(go.Scatter(
+                x=sub["x"], y=sub["y"], mode="markers", name=str(label),
+                marker=dict(color=_HIT_COLORS.get(label, "#5a5a5a"), size=8,
+                            line=dict(width=0.5, color="#666"))))
+    fig.update_layout(
+        title="Spray Chart", showlegend=True,
+        xaxis=dict(range=[-260, 260], visible=False),
+        yaxis=dict(range=[-20, 400], visible=False, scaleanchor="x", scaleratio=1),
+        height=460, margin=dict(l=10, r=10, t=50, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
+    return fig
+
+
+def contact_type_bar(counts_df: pd.DataFrame) -> go.Figure:
+    """Vertical bar of hit-type counts, sorted descending."""
+    fig = go.Figure()
+    if counts_df is not None and not counts_df.empty:
+        d = counts_df.sort_values("Count", ascending=False)
+        fig.add_trace(go.Bar(x=d["Hit Type"], y=d["Count"], marker_color=CRIMSON,
+                             text=d["Count"], textposition="outside"))
+    fig.update_layout(
+        title="Contact Type", yaxis_title="Count",
+        height=340, margin=dict(l=40, r=20, t=50, b=40),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
     return fig
 
 

@@ -98,3 +98,28 @@ def test_practice_layout_has_daterange():
         # date_range.date_picker builds id=f"{id_prefix}-daterange" dynamically,
         # so assert the call site that wires "prac" as the prefix.
         assert 'dr.date_picker("prac"' in src
+
+
+def test_pitch_zone_heatmap_black_box_and_metric():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    df = pd.DataFrame([{"px": 0.0, "py": 2.5, "result": 1,
+                        "exit_velocity": 90.0, "distance_feet": 300.0}])
+    fig = charts.pitch_zone_heatmap(df, metric="ev")
+    # the strike-zone rectangle shape is drawn black
+    rects = [s for s in fig.layout.shapes if s.type == "rect"]
+    assert rects and any(s.line.color == "black" for s in rects)
+
+
+def test_new_practice_figs_build():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    assert charts.swing_decision_trend_fig(pd.DataFrame(
+        columns=["play_date", "in_zone_pct", "chase_pct", "score"])) is not None
+    assert charts.swing_decision_trend_fig(pd.DataFrame([
+        {"play_date": "2026-04-01", "in_zone_pct": 80, "chase_pct": 30, "score": 50}])) is not None
+    assert charts.spray_chart_fig(pd.DataFrame(columns=["x", "y", "hit_type_label"])) is not None
+    assert charts.spray_chart_fig(pd.DataFrame([
+        {"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive"}])) is not None
+    assert charts.contact_type_bar(pd.DataFrame([
+        {"Hit Type": "Line Drive", "Count": 10}, {"Hit Type": "Fly Ball", "Count": 5}])) is not None
