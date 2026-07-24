@@ -1,4 +1,5 @@
 """Tests for the Dash catching dashboard (shell, selectors, tab renders)."""
+import math
 import pandas as pd
 import pytest
 
@@ -346,3 +347,22 @@ def test_caught_stealing_no_note_when_multi_game():
 
     text = _text(comp)
     assert "widen the date range" not in text
+
+
+def test_framing_facets_wraps_to_two_columns():
+    import pandas as pd
+    from app.dashboards.catching import charts
+    # four Zone values -> should be a 2x2 grid (2 rows), not 1x4
+    df = pd.DataFrame([
+        {"plate_loc_side": s, "plate_loc_height": h,
+         "pitch_call": "StrikeCalled", "batter_side": "Right",
+         "pitcher_throws": "Right", "rel_speed": 90.0, "tagged_pitch_type": "Fastball"}
+        for s, h in [(-1.5, 0.5), (-0.5, 2.0), (-1.0, 1.5), (-2.0, 0.5)]
+        # These map to: Chase, Heart, Shadow, Waste (4 unique zones)
+    ])
+    fig = charts.framing_facets(df, by="Zone", title="Zone Location")
+    # 4 subplots across 2 columns => 2 rows => 4 xaxis objects, y range spans 2 rows
+    n_xaxes = len([k for k in fig.layout if k.startswith("xaxis")])
+    assert n_xaxes == 4
+    # rows=2 => the grid height grows beyond a single-row figure
+    assert fig.layout.height and fig.layout.height >= 700

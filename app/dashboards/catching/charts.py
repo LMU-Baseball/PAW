@@ -109,22 +109,29 @@ def framing_scatter(df: pd.DataFrame) -> go.Figure:
 
 
 def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
+    import math
     d = C.add_framing_cols(df) if not df.empty and "CallType" not in df.columns else df
     vals = sorted(d[by].dropna().unique()) if not d.empty and by in d.columns else []
     n = max(1, len(vals))
-    fig = make_subplots(rows=1, cols=n, subplot_titles=[str(v) for v in vals] or [title])
+    ncols = min(2, n)
+    nrows = math.ceil(n / ncols)
+    fig = make_subplots(rows=nrows, cols=ncols,
+                        subplot_titles=[str(v) for v in vals] or [title],
+                        vertical_spacing=0.12, horizontal_spacing=0.06)
     shown = set()
-    for i, v in enumerate(vals, start=1):
-        _zone_frame(fig, row=1, col=i)
-        _scatter_traces(fig, d[d[by] == v], row=1, col=i, shown=shown)
-        _base_axes(fig, row=1, col=i)
-        fig.update_yaxes(scaleanchor=("x" if i == 1 else f"x{i}"),
-                         scaleratio=1, row=1, col=i)
+    for i, v in enumerate(vals):
+        r, c = i // ncols + 1, i % ncols + 1
+        _zone_frame(fig, row=r, col=c)
+        _scatter_traces(fig, d[d[by] == v], row=r, col=c, shown=shown)
+        _base_axes(fig, row=r, col=c)
+        idx = (r - 1) * ncols + c  # make_subplots axis numbering (row-major)
+        fig.update_yaxes(scaleanchor=("x" if idx == 1 else f"x{idx}"),
+                         scaleratio=1, row=r, col=c)
     if not vals:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
         fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
     fig.update_layout(
-        title=title, height=380, margin=dict(l=10, r=10, t=60, b=10),
+        title=title, height=360 * nrows, margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
     )
