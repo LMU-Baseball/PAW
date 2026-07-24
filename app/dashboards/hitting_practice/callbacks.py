@@ -193,6 +193,58 @@ def register_callbacks(dash_app) -> None:
                 for i in ids]
 
     @dash_app.callback(
+        Output("bb-active", "data"),
+        Input({"type": "bb-chip", "index": ALL}, "n_clicks"),
+        State("bb-active", "data"), State("bb-present", "data"),
+        prevent_initial_call=True,
+    )
+    def _bb_toggle(_clicks, active, present):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        label = tid["index"]
+        present = set(present or [])
+        if label not in present:
+            return active
+        active = list(active or [])
+        return [x for x in active if x != label] if label in active else active + [label]
+
+    @dash_app.callback(
+        Output({"type": "bb-chip", "index": ALL}, "style"),
+        Input("bb-active", "data"),
+        State("bb-present", "data"),
+        State({"type": "bb-chip", "index": ALL}, "id"),
+    )
+    def _bb_styles(active, present, ids):
+        from app.dashboards.hitting_practice.tabs.swing_frequency import chip_style
+        active = set(active or [])
+        present = set(present or [])
+        return [chip_style(active=i["index"] in active, present=i["index"] in present)
+                for i in ids]
+
+    @dash_app.callback(
+        Output("bb-body", "children"),
+        Input("bb-active", "data"),
+        State("prac-filters", "data"),
+    )
+    def _bb_body(active, filt):
+        from app.dashboards.hitting_practice.tabs import batted_ball
+        filt = filt or {}
+        _, plays, _, _ = _load_all(bool(filt.get("exclude_test", True)))
+        start = date.fromisoformat(filt["start"]) if filt.get("start") else None
+        end = date.fromisoformat(filt["end"]) if filt.get("end") else None
+        player = filt.get("player") or "All Players"
+        if not plays.empty and start and end and "play_date" in plays.columns:
+            plays = plays[pd.to_datetime(plays["play_date"]).between(
+                pd.Timestamp(start), pd.Timestamp(end))]
+        if player != "All Players" and not plays.empty:
+            plays = plays[plays["player_name"] == player]
+        if plays.empty:
+            return html.Div("No batted-ball data for these filters.",
+                            style={"color": "#555", "padding": "12px"})
+        return batted_ball.body(plays, active)
+
+    @dash_app.callback(
         Output("prac-sidebar", "children"),
         Input("prac-filters", "data"),
     )

@@ -287,3 +287,37 @@ def test_contact_type_bar_uses_hit_type_colors():
     fig = charts.contact_type_bar(counts)
     marker_colors = list(fig.data[0].marker.color)
     assert marker_colors == [P.HIT_TYPE_COLORS["Line Drive"], P.HIT_TYPE_COLORS["Fly Ball"]]
+
+
+def test_batted_ball_two_fields_and_chips():
+    import inspect
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import batted_ball
+    src = inspect.getsource(batted_ball)
+    assert "spray_distribution_fan" in src and "spray_chart_fig" in src
+    assert "bb-chip" in src and "bb-active" in src
+
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 200.0, "exit_velocity": 90.0, "hit_type": 2},
+        {"horizontal_angle": 20.0, "distance_feet": 300.0, "exit_velocity": 95.0, "hit_type": 3},
+    ])
+    # two graphs (fan + scatter) + the contact bar => at least 3 graphs
+    def _count_graphs(node, n=0):
+        from dash import dcc
+        if isinstance(node, dcc.Graph):
+            n += 1
+        ch = getattr(node, "children", None)
+        kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+        for k in kids:
+            n = _count_graphs(k, n)
+        return n
+    assert _count_graphs(batted_ball.render(plays)) >= 3
+    # filtering to Fly Ball only keeps the FB row feeding the fan/scatter (no crash)
+    assert batted_ball.body(plays, ["Fly Ball"]) is not None
+
+
+def test_batted_ball_chip_callbacks_registered():
+    import inspect
+    from app.dashboards.hitting_practice import callbacks
+    src = inspect.getsource(callbacks)
+    assert "bb-active" in src and "bb-body" in src
