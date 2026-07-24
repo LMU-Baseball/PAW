@@ -212,15 +212,13 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output({"type": "bb-chip", "index": ALL}, "style"),
         Input("bb-active", "data"),
-        State("bb-present", "data"),
         State({"type": "bb-chip", "index": ALL}, "id"),
     )
-    def _bb_styles(active, present, ids):
-        from app.dashboards.hitting_practice.tabs.swing_frequency import chip_style
+    def _bb_styles(active, ids):
+        from app.dashboards.hitting_practice.tabs.batted_ball import bb_chip_style
         active = set(active or [])
-        present = set(present or [])
-        return [chip_style(active=i["index"] in active, present=i["index"] in present)
-                for i in ids]
+        return [bb_chip_style(P.HIT_TYPE_COLORS.get(i["index"], "#5a5a5a"),
+                              active=i["index"] in active) for i in ids]
 
     @dash_app.callback(
         Output("bb-body", "children"),

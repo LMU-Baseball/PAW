@@ -6,10 +6,18 @@ from dash import dcc, html
 
 from app.data import practice as P
 from app.dashboards.hitting_practice import charts
-from app.dashboards.hitting_practice.tabs.swing_frequency import chip_style
 from app.dashboards.shell import section
 
 _HIT_ORDER = ["Ground Ball", "Line Drive", "Fly Ball"]
+
+
+def bb_chip_style(color: str, active: bool) -> dict:
+    return {"border": f"2px solid {color}",
+            "background": color if active else "#fff",
+            "color": "#fff" if active else color,
+            "borderRadius": "12px", "padding": "2px 10px", "margin": "0 4px 4px 0",
+            "cursor": "pointer", "opacity": "1" if active else ".55",
+            "fontFamily": "Teko, sans-serif", "fontSize": "14px"}
 
 
 def chip_row(plays: pd.DataFrame) -> html.Div:
@@ -20,7 +28,8 @@ def chip_row(plays: pd.DataFrame) -> html.Div:
     if not present:
         present = list(_HIT_ORDER)
     chips = [html.Button(t, id={"type": "bb-chip", "index": t}, n_clicks=0,
-                         style=chip_style(active=True, present=True)) for t in present]
+                         style=bb_chip_style(P.HIT_TYPE_COLORS.get(t, "#5a5a5a"), active=True))
+             for t in present]
     return html.Div([dcc.Store(id="bb-active", data=present),
                      dcc.Store(id="bb-present", data=present),
                      html.Div(chips)], style={"margin": "6px 0"})

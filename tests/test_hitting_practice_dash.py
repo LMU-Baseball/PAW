@@ -321,3 +321,31 @@ def test_batted_ball_chip_callbacks_registered():
     from app.dashboards.hitting_practice import callbacks
     src = inspect.getsource(callbacks)
     assert "bb-active" in src and "bb-body" in src
+
+
+def test_batted_ball_chips_colored_per_hit_type():
+    import pandas as pd
+    from dash import html
+    from app.dashboards.hitting_practice.tabs import batted_ball
+    from app.data import practice as P
+
+    def _buttons(node, out):
+        if isinstance(node, html.Button):
+            out.append(node)
+        ch = getattr(node, "children", None)
+        kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+        for k in kids:
+            if hasattr(k, "children") or isinstance(k, html.Button):
+                _buttons(k, out)
+        return out
+
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 200.0, "exit_velocity": 90.0, "hit_type": 2},
+        {"horizontal_angle": 20.0, "distance_feet": 300.0, "exit_velocity": 95.0, "hit_type": 3},
+    ])
+    row = batted_ball.chip_row(plays)
+    btns = _buttons(row, [])
+    styles = {b.children: b.style for b in btns}
+    # Line Drive (hit_type 2) and Fly Ball (hit_type 3) chips use their hit-type colors
+    assert styles["Line Drive"]["background"] == P.HIT_TYPE_COLORS["Line Drive"]
+    assert styles["Fly Ball"]["background"] == P.HIT_TYPE_COLORS["Fly Ball"]
