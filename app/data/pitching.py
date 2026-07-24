@@ -54,6 +54,25 @@ def game_pitches_for(game_id: int, pitcher_id: int) -> pd.DataFrame:
     )
 
 
+def range_pitches_for(pitcher_id: int, start, end) -> pd.DataFrame:
+    """All of a pitcher's pitches across in-range games (sibling-id union)."""
+    ids = _sibling_pitcher_ids(pitcher_id)
+    marks = ", ".join(f":id{i}" for i in range(len(ids)))
+    params = {f"id{i}": v for i, v in enumerate(ids)}
+    params["start"] = str(start)
+    params["end"] = str(end)
+    return query_df(
+        f"""
+        SELECT f.* FROM fact_tm_game_pitch f
+          JOIN dim_tm_game g ON g.game_id = f.game_id
+         WHERE f.pitcher_id IN ({marks})
+           AND g.game_date BETWEEN :start AND :end
+         ORDER BY f.game_id, f.pitch_no
+        """,
+        params,
+    )
+
+
 def game_context(game_id: int) -> dict:
     # NOTE: tm_team has no `name` column — the actual columns are
     # team_id/school_name/team_name/nickname (verified against the live
@@ -268,12 +287,18 @@ def _sibling_pitcher_ids(pitcher_id: int) -> list[int]:
     return ids or [int(pitcher_id)]
 
 
-def games_for_pitcher(pitcher_id: int) -> pd.DataFrame:
-    """A pitcher's outings, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'."""
+def games_for_pitcher(pitcher_id: int, start=None, end=None) -> pd.DataFrame:
+    """A pitcher's outings, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'.
+    Optional start/end (inclusive) bound game_date."""
     ids = _sibling_pitcher_ids(pitcher_id)
     marks = ", ".join(f":id{i}" for i in range(len(ids)))
     params = {f"id{i}": v for i, v in enumerate(ids)}
     params["lmu"] = LMU_TEAM_ID
+    date_clause = ""
+    if start is not None and end is not None:
+        date_clause = " AND g.game_date BETWEEN :start AND :end"
+        params["start"] = str(start)
+        params["end"] = str(end)
     df = query_df(
         f"""
         SELECT DISTINCT g.game_id, g.game_date,
@@ -283,18 +308,18 @@ def games_for_pitcher(pitcher_id: int) -> pd.DataFrame:
           JOIN dim_tm_game g ON g.game_id = f.game_id
           LEFT JOIN tm_team ht ON ht.team_id = g.home_team_id
           LEFT JOIN tm_team at ON at.team_id = g.away_team_id
-         WHERE f.pitcher_id IN ({marks})
+         WHERE f.pitcher_id IN ({marks}){date_clause}
          ORDER BY g.game_date DESC, g.game_id DESC
         """,
         params,
     )
     if df.empty:
-        return pd.DataFrame(columns=["game_id", "GameLabel"])
+        return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
     lmu_home = df["home_team_id"] == LMU_TEAM_ID
     opp = df["away_team"].where(lmu_home, df["home_team"])
     loc = pd.Series("vs", index=df.index).where(lmu_home, "@")
     df["GameLabel"] = (df["game_date"].astype(str) + " " + loc + " " + opp.fillna("?"))
-    return df[["game_id", "GameLabel"]].reset_index(drop=True)
+    return df[["game_id", "game_date", "GameLabel"]].reset_index(drop=True)
 
 
 def pitcher_profile(pitcher_id: int) -> dict:

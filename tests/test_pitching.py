@@ -261,3 +261,40 @@ def test_fig_outings_velo_trend_two_lines(real_pitcher_id_and_game):
     fig = P.fig_outings_velo_trend(recent)
     names = {tr.name for tr in fig.data}
     assert {"Avg Velo", "Max Velo"} <= names
+
+
+# ============ Date-bounded games + pooled loader (Task 2) =====================
+
+def test_games_for_pitcher_date_filter():
+    from app.data import pitching as P
+    pit = P.wh_lmu_pitchers()
+    if pit.empty:
+        import pytest; pytest.skip("no LMU pitchers")
+    pid = int(pit.iloc[0]["PitcherId"])
+    allg = P.games_for_pitcher(pid)
+    assert {"game_id", "game_date", "GameLabel"} <= set(allg.columns)
+    if len(allg) >= 2:
+        lo = str(allg["game_date"].min())
+        hi = str(allg["game_date"].max())
+        bounded = P.games_for_pitcher(pid, start=lo, end=hi)
+        assert len(bounded) == len(allg)  # full span == all games
+        # narrow to only the most recent game's date
+        recent = str(allg["game_date"].max())
+        narrowed = P.games_for_pitcher(pid, start=recent, end=recent)
+        assert len(narrowed) >= 1 and len(narrowed) <= len(allg)
+
+
+def test_range_pitches_for_unions_range():
+    from app.data import pitching as P
+    pit = P.wh_lmu_pitchers()
+    if pit.empty:
+        import pytest; pytest.skip("no LMU pitchers")
+    pid = int(pit.iloc[0]["PitcherId"])
+    allg = P.games_for_pitcher(pid)
+    if allg.empty:
+        import pytest; pytest.skip("no games")
+    lo, hi = str(allg["game_date"].min()), str(allg["game_date"].max())
+    pooled = P.range_pitches_for(pid, lo, hi)
+    # pooled equals the sum of single-game loads across the range
+    single_total = sum(len(P.game_pitches_for(int(g), pid)) for g in allg["game_id"])
+    assert len(pooled) == single_total
