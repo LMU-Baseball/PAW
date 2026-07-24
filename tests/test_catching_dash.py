@@ -15,6 +15,26 @@ def server(tmp_path):
     return create_app(TestConfig)
 
 
+def _collect_ids(component):
+    """Recursively gather all component ids in a Dash layout tree."""
+    ids = set()
+
+    def walk(c):
+        if c is None or isinstance(c, str):
+            return
+        if isinstance(c, (list, tuple)):
+            for x in c:
+                walk(x)
+            return
+        cid = getattr(c, "id", None)
+        if isinstance(cid, str):
+            ids.add(cid)
+        walk(getattr(c, "children", None))
+
+    walk(component)
+    return ids
+
+
 def _sample_df():
     return pd.DataFrame([
         {"pitch_call": "StrikeCalled", "play_result": "Undefined",
@@ -65,6 +85,20 @@ def test_framing_tab_render():
     from app.dashboards.catching.tabs import framing
     assert framing.render(_sample_df()) is not None
     assert framing.render(pd.DataFrame()) is not None
+
+
+def test_framing_tab_has_filter_ids():
+    from app.dashboards.catching.tabs import framing
+    comp = framing.render(_sample_df())
+    ids = _collect_ids(comp)
+    assert {"fr-bat", "fr-throws", "fr-speed", "fr-zone", "fr-body"} <= ids
+
+
+def test_framing_body_builds():
+    from app.dashboards.catching.tabs import framing
+    comp = framing.body(_sample_df(), bat_side="All", pitcher_throws="All",
+                        pitch_speed="All", zone="All")
+    assert comp is not None
 
 
 def test_blocking_tab_render():
