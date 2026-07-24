@@ -31,6 +31,7 @@ def call_chip_row() -> html.Div:
     return html.Div([dcc.Store(id="call-active", data=list(_CALL_ORDER)),
                      html.Div(chips)], style={"margin": "6px 0"})
 
+
 _TABLE_LABELS = {
     "net_strikes": "Net Strikes", "steal_pct": "Steal%",
     "shadow_net": "Shadow Net", "shadow_steal_pct": "Shadow Steal%",

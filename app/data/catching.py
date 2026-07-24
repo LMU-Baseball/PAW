@@ -399,7 +399,7 @@ def caught_stealing_trend(df: pd.DataFrame) -> pd.DataFrame:
             "avg_pop": None if pops.empty else round(float(pops.mean()), 2),
         })
     out = pd.DataFrame(rows, columns=cols).sort_values("game_date").reset_index(drop=True)
-    # Keep avg_pop as Python None on dateless rows: pandas silently coerces a
+    # Keep avg_pop as Python None on pop-less rows: pandas silently coerces a
     # float64 column's None -> NaN, but callers (and tests) expect None.
     out["avg_pop"] = out["avg_pop"].astype(object).where(out["avg_pop"].notna(), None)
     return out

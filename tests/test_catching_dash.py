@@ -316,3 +316,33 @@ def test_framing_body_call_filter_scatter_only():
         walk(c)
         return out
     assert find_table(full)[0].data == find_table(filtered)[0].data
+
+
+def test_caught_stealing_no_note_when_multi_game():
+    """Verify the 'widen the date range' note is absent when df spans multiple games."""
+    from app.dashboards.catching.tabs import caught_stealing
+    df = pd.DataFrame([
+        {"play_result": "CaughtStealing", "game_date": "2026-04-01", "pop_time": 1.9,
+         "exchange_time": 0.7, "throw_speed": 80.0, "inning": 1, "pitcher_name": "A, B"},
+        {"play_result": "StolenBase", "game_date": "2026-04-08", "pop_time": 2.0,
+         "exchange_time": 0.72, "throw_speed": 78.0, "inning": 3, "pitcher_name": "A, B"},
+    ])
+    comp = caught_stealing.render(df)
+
+    def _text(c):
+        """Recursively collect all text strings from component tree."""
+        out = []
+        def walk(x):
+            if isinstance(x, str):
+                out.append(x)
+                return
+            ch = getattr(x, "children", None)
+            if ch is None:
+                return
+            for k in (ch if isinstance(ch, (list, tuple)) else [ch]):
+                walk(k)
+        walk(c)
+        return " ".join(out)
+
+    text = _text(comp)
+    assert "widen the date range" not in text
