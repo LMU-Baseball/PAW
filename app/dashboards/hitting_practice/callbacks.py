@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import io
 from datetime import date
+from datetime import date as _date
 
 import pandas as pd
-from dash import Input, Output, html
+from dash import Input, Output, ctx, html
 from flask_login import current_user
 
 from app.data import practice as P
@@ -47,17 +48,26 @@ def register_callbacks(dash_app) -> None:
         Output("prac-filters", "data"),
         Output("prac-player", "options"),
         Output("prac-session", "options"),
+        Output("prac-daterange", "start_date"),
+        Output("prac-daterange", "end_date"),
         Input("prac-date-preset", "value"),
         Input("prac-player", "value"),
         Input("prac-session", "value"),
         Input("prac-exclude-test", "value"),
+        Input("prac-daterange", "start_date"),
+        Input("prac-daterange", "end_date"),
     )
-    def _on_filters(preset, player, session, exclude_vals):
+    def _on_filters(preset, player, session, exclude_vals, ds, de):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own_name = getattr(current_user, "name", None)
         exclude_test = "exclude" in (exclude_vals or [])
         pitch, _, _, _ = _load_all(exclude_test)
-        start, end = P.preset_date_range(preset or "Custom")
+        # Calendar edit wins when it fired; otherwise the preset drives the window.
+        if ctx.triggered_id == "prac-daterange" and ds and de:
+            start = _date.fromisoformat(ds[:10])
+            end = _date.fromisoformat(de[:10])
+        else:
+            start, end = P.preset_date_range(preset or "Custom")
         # Narrow player list to selected date window for discoverability
         windowed = P.apply_filters(pitch, player=None, start=start, end=end, session=None)
         base = windowed if not windowed.empty else pitch
@@ -71,7 +81,7 @@ def register_callbacks(dash_app) -> None:
              "session": session or "All session types",
              "exclude_test": exclude_test,
              "start": start.isoformat(), "end": end.isoformat()},
-            popts, sopts,
+            popts, sopts, start.isoformat(), end.isoformat(),
         )
 
     @dash_app.callback(

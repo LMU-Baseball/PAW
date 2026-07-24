@@ -6,6 +6,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
+from app.dashboards import date_range as dr
 from app.dashboards.shell import BANNER, header
 from app.dashboards.hitting_practice import selectors
 
@@ -22,6 +23,7 @@ def serve_layout() -> html.Div:
         pitch_all = pd.DataFrame()
 
     start, end = P.preset_date_range("Custom")
+    min_d, max_d = P.date_bounds()
     players = selectors.player_options(pitch_all, is_coach=is_coach, own_name=own_name)
     default_player = players[0]["value"] if players else "All Players"
     sessions = [{"label": s, "value": s} for s in P.session_options(pitch_all)]
@@ -40,6 +42,11 @@ def serve_layout() -> html.Div:
                 ],
                 value="Custom", clearable=False, style={"minWidth": "220px"},
             ),
+        ]),
+        html.Div([
+            html.Label("Calendar", style={"color": "white", "fontWeight": "bold"}),
+            dr.date_picker("prac", start.isoformat(), end.isoformat(),
+                           min_date=str(min_d), max_date=str(max_d)),
         ]),
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),

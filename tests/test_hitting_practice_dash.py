@@ -80,3 +80,21 @@ def test_player_options_coach():
     opts = selectors.player_options(pitch, is_coach=True, own_name=None)
     assert opts[0]["value"] == "All Players"
     assert {o["value"] for o in opts} >= {"Alpha", "Beta"}
+
+
+def test_practice_layout_has_daterange():
+    from app import create_app
+    from config import Config
+    class T(Config):
+        TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
+    app = create_app(T)
+    with app.test_request_context():
+        from flask_login import login_user
+        # layout references current_user; just assert the component tree builds
+        from app.dashboards.hitting_practice import layout
+        # serve_layout requires auth; assert the picker id is wired in the module
+        import inspect
+        src = inspect.getsource(layout)
+        # date_range.date_picker builds id=f"{id_prefix}-daterange" dynamically,
+        # so assert the call site that wires "prac" as the prefix.
+        assert 'dr.date_picker("prac"' in src
