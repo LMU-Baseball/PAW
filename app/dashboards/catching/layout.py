@@ -117,7 +117,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Div(id="sidebar", children=sidebar(default_catcher),
                      style={"width": "240px", "flexShrink": "0"}),
-            html.Div([selector_row, notes_ui.note_card("catching"), tabs,
+            html.Div([selector_row, tabs, notes_ui.note_card("catching"),
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],
                      style={"flexGrow": "1"}),
         ], style={"display": "flex", "gap": "16px", "padding": "16px",
