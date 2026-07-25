@@ -35,9 +35,9 @@ SZ_Y0, SZ_Y1 = 1.5, 3.5
 # Batted-ball distribution fan geometry (provisional; coach-confirmable).
 FAN_WEDGE_EDGES = [-45.0, -27.0, -9.0, 9.0, 27.0, 45.0]     # 5 wedges (degrees)
 FAN_DIRECTIONS = ["Left", "Left-Center", "Center", "Right-Center", "Right"]
-FAN_RING_EDGES = [0.0, 150.0, 330.0]                        # inner edges; Deep = >330
-FAN_RINGS = ["Infield", "Outfield", "Deep/HR"]
-FAN_DISPLAY_MAX = 420.0                                     # outer draw radius for Deep
+FAN_INFIELD_MAX = 150.0                                     # Infield/Outfield boundary
+FAN_RINGS = ["Infield", "Outfield", "HR"]                  # Outfield/HR boundary = fence
+FAN_DISPLAY_MAX = 440.0                                     # outer draw radius (> CF fence 406)
 
 # LMU field dimensions (coach-supplied): fence carry (ft) by spray angle
 # (deg; neg=left, 0=center, +45=RF line). PROVISIONAL (linear between points).
@@ -366,19 +366,22 @@ def spray_points(plays: pd.DataFrame) -> pd.DataFrame:
 
 
 def spray_fan(plays: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate batted balls into a 5-wedge x 3-ring fan (always 15 rows).
-    count = balls in each cell; pct = share of all batted balls with valid
-    geometry. Geometry bounds (a0/a1 deg, r0/r1 ft) included for drawing.
-    PROVISIONAL (wedge/ring cutoffs are coach-confirmable constants)."""
+    """Aggregate FAIR batted balls into a 5-wedge x 3-ring fan (always 15 rows).
+    Rings: Infield (0-150), Outfield (150-fence), HR (>= fence at the ball's angle).
+    Per cell: count, pct (share of fair batted balls), avg_ev, avg_dist. Geometry
+    bounds (a0/a1 deg, r0/r1 ft) are nominal (fence at the wedge mid-angle) for
+    annotation placement; the chart draws the fence as a curve. PROVISIONAL."""
     rows = []
     for wi, direction in enumerate(FAN_DIRECTIONS):
         a0, a1 = FAN_WEDGE_EDGES[wi], FAN_WEDGE_EDGES[wi + 1]
+        fence_mid = float(fence_distance((a0 + a1) / 2.0))
+        bounds = [(0.0, FAN_INFIELD_MAX), (FAN_INFIELD_MAX, fence_mid),
+                  (fence_mid, FAN_DISPLAY_MAX)]
         for ri, ring in enumerate(FAN_RINGS):
-            r0 = FAN_RING_EDGES[ri]
-            r1 = FAN_RING_EDGES[ri + 1] if ri + 1 < len(FAN_RING_EDGES) else FAN_DISPLAY_MAX
+            r0, r1 = bounds[ri]
             rows.append({"direction": direction, "ring": ring, "wedge_i": wi,
                          "ring_i": ri, "a0": a0, "a1": a1, "r0": r0, "r1": r1,
-                         "count": 0, "pct": 0.0})
+                         "count": 0, "pct": 0.0, "avg_ev": None, "avg_dist": None})
     fan = pd.DataFrame(rows)
     if plays.empty or "horizontal_angle" not in plays.columns:
         return fan
@@ -390,14 +393,17 @@ def spray_fan(plays: pd.DataFrame) -> pd.DataFrame:
         return fan
     ang = d["horizontal_angle"].astype(float).to_numpy()
     dist = d["distance_feet"].astype(float).to_numpy()
-    wedge_i = np.clip(np.digitize(ang, FAN_WEDGE_EDGES[1:-1]), 0, 4)
-    ring_i = np.clip(np.digitize(dist, FAN_RING_EDGES[1:]), 0, 2)
-    for wi, ri in zip(wedge_i, ring_i):
+    fen = fence_distance(ang)
+    d["_wi"] = np.clip(np.digitize(ang, FAN_WEDGE_EDGES[1:-1]), 0, 4)
+    d["_ri"] = np.where(dist < FAN_INFIELD_MAX, 0, np.where(dist >= fen, 2, 1))
+    for (wi, ri), sub in d.groupby(["_wi", "_ri"]):
         m = (fan["wedge_i"] == wi) & (fan["ring_i"] == ri)
-        fan.loc[m, "count"] += 1
-    # Not rounded per-cell: rounding each of the 15 shares to 1 decimal can make
-    # the total drift off 100.0 (e.g. three-way splits of 33.3+33.3+33.3=99.9).
-    # Keep full precision here; round only at display time.
+        fan.loc[m, "count"] = len(sub)
+        ev = sub["exit_velocity"].dropna() if "exit_velocity" in sub.columns else sub.iloc[0:0]
+        di = sub["distance_feet"].dropna()
+        fan.loc[m, "avg_ev"] = round(float(ev.mean()), 1) if len(ev) else None
+        fan.loc[m, "avg_dist"] = round(float(di.mean()), 0) if len(di) else None
+    # full-precision pct (per-cell rounding can drift the total off 100.0)
     fan["pct"] = 100.0 * fan["count"] / total
     return fan
 

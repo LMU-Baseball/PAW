@@ -182,3 +182,23 @@ def test_spray_points_foul_and_hr_flags():
     assert {"is_foul", "is_hr"} <= set(pts.columns)
     assert list(pts["is_hr"]) == [True, False, False, False]
     assert list(pts["is_foul"]) == [False, False, True, False]
+
+
+def test_spray_fan_hr_ring_and_averages():
+    import pandas as pd
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -40.0, "distance_feet": 120.0, "exit_velocity": 85.0, "hit_type": 1},   # Left infield
+        {"horizontal_angle": 0.0, "distance_feet": 200.0, "exit_velocity": 90.0, "hit_type": 2},     # Center outfield (fence 406)
+        {"horizontal_angle": -40.0, "distance_feet": 360.0, "exit_velocity": 102.0, "hit_type": 3},  # Left HR (fence ~334)
+    ])
+    fan = P.spray_fan(plays)
+    assert len(fan) == 15
+    assert round(fan["pct"].sum(), 1) == 100.0
+    assert "HR" in set(fan["ring"])
+    hr = fan[(fan["ring"] == "HR") & (fan["count"] > 0)]
+    assert len(hr) == 1 and int(hr.iloc[0]["count"]) == 1
+    assert hr.iloc[0]["avg_ev"] == 102.0 and hr.iloc[0]["avg_dist"] == 360.0
+    # empty df -> 15 zero cells, averages None
+    fan0 = P.spray_fan(pd.DataFrame(columns=["horizontal_angle", "distance_feet", "hit_type"]))
+    assert len(fan0) == 15 and fan0["count"].sum() == 0 and fan0["avg_ev"].isna().all()
