@@ -100,7 +100,7 @@ def framing_scatter(df: pd.DataFrame) -> go.Figure:
     _base_axes(fig)
     fig.update_yaxes(scaleanchor="x", scaleratio=1)
     fig.update_layout(
-        title="Zone Location — Catcher View", showlegend=True,
+        title="Zone Location — Catcher View", showlegend=False,
         margin=dict(l=20, r=20, t=40, b=20), height=460,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
@@ -137,7 +137,7 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
         fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
     fig.update_layout(
-        title=title, height=360 * nrows, margin=dict(l=10, r=10, t=60, b=10),
+        title=title, showlegend=False, height=360 * nrows, margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
     )

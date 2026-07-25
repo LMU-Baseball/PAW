@@ -386,3 +386,17 @@ def test_framing_facets_hides_unused_trailing_cells():
     # The 4th cell (unused) must have its axes hidden
     assert fig.layout.xaxis4.visible is False
     assert fig.layout.yaxis4.visible is False
+
+
+def test_framing_legends_are_off():
+    import pandas as pd
+    from app.dashboards.catching import charts
+    df = pd.DataFrame([
+        {"plate_loc_side": s, "plate_loc_height": h, "izt_zone": z,
+         "pitch_call": "StrikeCalled", "batter_side": "Right",
+         "pitcher_throws": "Right", "rel_speed": 90.0, "tagged_pitch_type": "Fastball"}
+        for s, h, z in [(-0.5, 2.5, "1"), (0.5, 2.5, "Ball")]
+    ])
+    assert charts.framing_scatter(df).layout.showlegend is False
+    assert charts.framing_facets(df, by="batter_side",
+                                 title="Batter Side").layout.showlegend is False
