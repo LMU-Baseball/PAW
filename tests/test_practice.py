@@ -130,7 +130,7 @@ def test_spray_points_carries_distance_and_ev():
         {"horizontal_angle": 0.0, "distance_feet": 0.0, "exit_velocity": 0.0, "hit_type": 0},
     ])
     pts = P.spray_points(plays)
-    assert list(pts.columns) == ["x", "y", "hit_type_label", "distance_feet", "exit_velocity"]
+    assert list(pts.columns) == ["x", "y", "hit_type_label", "distance_feet", "exit_velocity", "is_foul", "is_hr"]
     assert len(pts) == 2  # hit_type 0 excluded
     assert set(pts["exit_velocity"]) == {95.0, 101.0}
 
@@ -151,3 +151,34 @@ def test_spray_fan_15_cells_and_pct_sums_100():
     # empty df -> 15 zero cells, no crash
     fan0 = P.spray_fan(pd.DataFrame(columns=["horizontal_angle", "distance_feet", "hit_type"]))
     assert len(fan0) == 15 and fan0["count"].sum() == 0
+
+
+def test_fence_distance_interpolates_lmu_dimensions():
+    import numpy as np
+    from app.data import practice as P
+    assert round(float(P.fence_distance(0.0))) == 406
+    assert round(float(P.fence_distance(-45.0))) == 326
+    assert round(float(P.fence_distance(45.0))) == 321
+    # interpolates between LF line (326) and LF-center (362)
+    mid = float(P.fence_distance(-33.75))
+    assert 326 < mid < 362
+    # clamps beyond the fair range
+    assert float(P.fence_distance(-60.0)) == float(P.fence_distance(-45.0))
+    # array input
+    out = P.fence_distance(np.array([0.0, 45.0]))
+    assert list(np.round(out)) == [406, 321]
+
+
+def test_spray_points_foul_and_hr_flags():
+    import pandas as pd
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -45.0, "distance_feet": 340.0, "exit_velocity": 100.0, "hit_type": 3},  # fair, over 326 -> HR
+        {"horizontal_angle": -22.5, "distance_feet": 340.0, "exit_velocity": 100.0, "hit_type": 3},  # fair, under 362 -> not HR
+        {"horizontal_angle": -60.0, "distance_feet": 250.0, "exit_velocity": 80.0, "hit_type": 2},   # foul
+        {"horizontal_angle": 0.0, "distance_feet": 100.0, "exit_velocity": 70.0, "hit_type": 1},     # fair infield
+    ])
+    pts = P.spray_points(plays)
+    assert {"is_foul", "is_hr"} <= set(pts.columns)
+    assert list(pts["is_hr"]) == [True, False, False, False]
+    assert list(pts["is_foul"]) == [False, False, True, False]

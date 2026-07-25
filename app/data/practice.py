@@ -39,6 +39,18 @@ FAN_RING_EDGES = [0.0, 150.0, 330.0]                        # inner edges; Deep 
 FAN_RINGS = ["Infield", "Outfield", "Deep/HR"]
 FAN_DISPLAY_MAX = 420.0                                     # outer draw radius for Deep
 
+# LMU field dimensions (coach-supplied): fence carry (ft) by spray angle
+# (deg; neg=left, 0=center, +45=RF line). PROVISIONAL (linear between points).
+FENCE_ANGLES = [-45.0, -22.5, 0.0, 22.5, 45.0]
+FENCE_DISTS = [326.0, 362.0, 406.0, 365.0, 321.0]
+
+
+def fence_distance(angle):
+    """Interpolated LMU fence carry (ft) at a spray angle (deg). Scalar or array;
+    clamped to the +/-45 fair range."""
+    a = np.clip(np.asarray(angle, dtype=float), -45.0, 45.0)
+    return np.interp(a, FENCE_ANGLES, FENCE_DISTS)
+
 
 def current_season_start() -> str:
     today = date.today()
@@ -330,20 +342,26 @@ def swing_decision_trend(df: pd.DataFrame) -> pd.DataFrame:
 def spray_points(plays: pd.DataFrame) -> pd.DataFrame:
     """Batted-ball landing points from horizontal_angle + distance_feet.
     x = dist*sin(angle) (neg=left field), y = dist*cos(angle). Batted balls only
-    (hit_type 1/2/3). Carries distance_feet + exit_velocity for hover. PROVISIONAL."""
-    cols = ["x", "y", "hit_type_label", "distance_feet", "exit_velocity"]
+    (hit_type 1/2/3), fair AND foul. Carries distance_feet + exit_velocity for
+    hover, plus is_foul (|angle|>45) and is_hr (fair & carry>=fence). PROVISIONAL."""
+    cols = ["x", "y", "hit_type_label", "distance_feet", "exit_velocity",
+            "is_foul", "is_hr"]
     if plays.empty or "horizontal_angle" not in plays.columns:
         return pd.DataFrame(columns=cols)
     d = plays[plays["hit_type"].isin([1, 2, 3])].dropna(
         subset=["horizontal_angle", "distance_feet"]).copy()
     if d.empty:
         return pd.DataFrame(columns=cols)
-    ang = np.radians(d["horizontal_angle"].astype(float))
-    d["x"] = d["distance_feet"].astype(float) * np.sin(ang)
-    d["y"] = d["distance_feet"].astype(float) * np.cos(ang)
+    angf = d["horizontal_angle"].astype(float).to_numpy()
+    distf = d["distance_feet"].astype(float).to_numpy()
+    rad = np.radians(angf)
+    d["x"] = distf * np.sin(rad)
+    d["y"] = distf * np.cos(rad)
     d["hit_type_label"] = d["hit_type"].map(HIT_TYPE_MAP)
     if "exit_velocity" not in d.columns:
         d["exit_velocity"] = np.nan
+    d["is_foul"] = np.abs(angf) > 45.0
+    d["is_hr"] = (~d["is_foul"].to_numpy()) & (distf >= fence_distance(angf))
     return d[cols].reset_index(drop=True)
 
 
