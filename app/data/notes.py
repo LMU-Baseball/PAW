@@ -1,7 +1,7 @@
 """Per-game coach notes, stored in the app DB and shared across game dashboards."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.extensions import db
 
@@ -45,7 +45,7 @@ def upsert_note(module, subject_id, game_id, text, author_id=None) -> None:
         db.session.add(row)
     row.text = text
     row.author_id = author_id
-    row.updated_at = datetime.utcnow()
+    row.updated_at = datetime.now(timezone.utc)
     db.session.commit()
 
 
