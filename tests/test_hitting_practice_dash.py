@@ -349,3 +349,29 @@ def test_batted_ball_chips_colored_per_hit_type():
     # Line Drive (hit_type 2) and Fly Ball (hit_type 3) chips use their hit-type colors
     assert styles["Line Drive"]["background"] == P.HIT_TYPE_COLORS["Line Drive"]
     assert styles["Fly Ball"]["background"] == P.HIT_TYPE_COLORS["Fly Ball"]
+
+
+def test_heatmap_uses_crimson_scale_all_metrics():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    df = pd.DataFrame([{"px": 0.0, "py": 2.5, "result": 1,
+                        "exit_velocity": 90.0, "distance_feet": 300.0}])
+    for metric in ("contact", "ev", "distance"):
+        cs = charts.pitch_zone_heatmap(df, metric).data[0].colorscale
+        assert cs != "YlOrRd"
+        stops = [str(s[1]).lower().replace(" ", "") for s in cs]
+        assert any(v in stops for v in ("#9a0021", "rgb(154,0,33)"))
+
+
+def test_ev_distance_by_pitch_labeled_hovers():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    df = pd.DataFrame([
+        {"is_contact": True, "play_timestamp": "2026-04-01 10:00:05",
+         "exit_velocity": 90.0, "distance_feet": 250.0},
+        {"is_contact": True, "play_timestamp": "2026-04-01 10:00:10",
+         "exit_velocity": 95.0, "distance_feet": 300.0},
+    ])
+    tmpls = [t.hovertemplate or "" for t in charts.ev_distance_by_pitch(df).data]
+    assert any("Pitch #:" in t and "Exit Velo:" in t for t in tmpls)
+    assert any("Pitch #:" in t and "Distance:" in t for t in tmpls)

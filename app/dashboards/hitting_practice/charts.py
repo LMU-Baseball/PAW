@@ -10,12 +10,13 @@ from app.data import practice as P
 from app.dashboards.shell import CRIMSON
 
 _BLUE = "#0076A5"
+_CRIMSON_SCALE = [[0.0, "rgb(253,234,238)"], [0.5, "rgb(200,90,110)"], [1.0, "#9A0021"]]
 
 
 _METRIC_CFG = {
-    "contact": ("Contact %", "YlOrRd", (0, 100), "Contact Rate"),
-    "ev": ("Avg EV (mph)", "YlOrRd", (None, None), "Avg Exit Velocity"),
-    "distance": ("Avg Dist (ft)", "YlOrRd", (None, None), "Avg Distance"),
+    "contact": ("Contact %", _CRIMSON_SCALE, (0, 100), "Contact Rate"),
+    "ev": ("Avg EV (mph)", _CRIMSON_SCALE, (None, None), "Avg Exit Velocity"),
+    "distance": ("Avg Dist (ft)", _CRIMSON_SCALE, (None, None), "Avg Distance"),
 }
 
 
@@ -27,7 +28,8 @@ def pitch_zone_heatmap(df: pd.DataFrame, metric: str = "contact") -> go.Figure:
     fig = go.Figure(data=go.Heatmap(
         z=z, x=x_centers, y=y_centers, colorscale=scale,
         zmin=zmin, zmax=zmax, colorbar=dict(title=label),
-        hovertemplate="x=%{x:.2f}ft<br>y=%{y:.2f}ft<br>%{z:.1f}<extra></extra>",
+        hovertemplate=("Horizontal: %{x:.2f} ft<br>Height: %{y:.2f} ft<br>"
+                       f"{label}: %{{z:.1f}}<extra></extra>"),
     ))
     fig.add_shape(type="rect", x0=P.SZ_X0, y0=P.SZ_Y0, x1=P.SZ_X1, y1=P.SZ_Y1,
                   line=dict(color="black", width=2), fillcolor="rgba(0,0,0,0)")
@@ -79,10 +81,12 @@ def ev_distance_by_pitch(df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=d["pitch_n"], y=d["exit_velocity"], name="Exit Velo",
         mode="lines+markers", line=dict(color=CRIMSON),
+        hovertemplate="Pitch #: %{x}<br>Exit Velo: %{y:.1f} mph<extra></extra>",
     ), secondary_y=False)
     fig.add_trace(go.Scatter(
         x=d["pitch_n"], y=d["distance_feet"], name="Distance",
         mode="lines+markers", line=dict(color=_BLUE),
+        hovertemplate="Pitch #: %{x}<br>Distance: %{y:.0f} ft<extra></extra>",
     ), secondary_y=True)
     fig.update_layout(
         title="Exit Velo & Distance by Pitch #",
