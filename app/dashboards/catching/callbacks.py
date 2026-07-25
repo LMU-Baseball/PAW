@@ -148,4 +148,47 @@ def register_callbacks(dash_app) -> None:
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
 
+    @dash_app.callback(
+        Output("static-call-active", "data"),
+        Input({"type": "static-call-chip", "index": ALL}, "n_clicks"),
+        State("static-call-active", "data"),
+        prevent_initial_call=True,
+    )
+    def _static_call_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        ct = tid["index"]
+        active = list(active or [])
+        return [c for c in active if c != ct] if ct in active else active + [ct]
+
+    @dash_app.callback(
+        Output("static-body", "children"),
+        Input("static-call-active", "data"), State("game-data", "data"),
+    )
+    def _static_body(active, data_json):
+        df = _read_game_df(data_json)
+        if df.empty:
+            return html.Div("No pitch data.")
+        return static_framing.body(df, active_calls=active)
+
+    @dash_app.callback(
+        Output({"type": "static-call-chip", "index": ALL}, "style"),
+        Input("static-call-active", "data"),
+        State({"type": "static-call-chip", "index": ALL}, "id"),
+    )
+    def _static_call_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            ct = i["index"]; col = charts.CALLTYPE_COLORS[ct]; on = ct in active
+            out.append({"border": f"2px solid {col}",
+                        "background": col if on else "#fff",
+                        "color": "#fff" if on else col,
+                        "borderRadius": "14px", "padding": "3px 12px",
+                        "margin": "0 6px 6px 0", "cursor": "pointer",
+                        "opacity": "1" if on else ".55",
+                        "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
+        return out
+
     notes_ui.register_note_callbacks(dash_app, "catching", "catcher_id")

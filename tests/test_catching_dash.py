@@ -400,3 +400,28 @@ def test_framing_legends_are_off():
     assert charts.framing_scatter(df).layout.showlegend is False
     assert charts.framing_facets(df, by="batter_side",
                                  title="Batter Side").layout.showlegend is False
+
+
+def test_static_framing_has_call_chips_and_filters():
+    import inspect
+    import pandas as pd
+    from app.dashboards.catching.tabs import static_framing
+    src = inspect.getsource(static_framing)
+    assert "static-call-chip" in src and "static-call-active" in src
+    df = pd.DataFrame([
+        {"plate_loc_side": s, "plate_loc_height": h, "izt_zone": z,
+         "pitch_call": pc, "batter_side": "Right", "pitcher_throws": "Right",
+         "rel_speed": 90.0, "tagged_pitch_type": "Fastball"}
+        for s, h, z, pc in [(-0.5, 2.5, "1", "StrikeCalled"),
+                            (0.6, 2.6, "Ball", "StrikeCalled")]
+    ])
+    # body accepts an active_calls filter and still renders
+    assert static_framing.body(df, active_calls=["Stolen Strike"]) is not None
+    assert static_framing.body(df, active_calls=None) is not None
+
+
+def test_catching_callbacks_have_static_call():
+    import inspect
+    from app.dashboards.catching import callbacks
+    src = inspect.getsource(callbacks)
+    assert "static-call-active" in src and "static-body" in src
