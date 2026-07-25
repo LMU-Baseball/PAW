@@ -113,22 +113,28 @@ def _crimson_shade(frac: float) -> str:
     return f"rgb({r},{g},{b})"
 
 
+def _fence_path() -> str:
+    """SVG path of the real LMU outfield fence (carry vs angle)."""
+    degs = np.linspace(-45.0, 45.0, 60)
+    fr = P.fence_distance(degs)
+    ts = np.radians(degs)
+    xs, ys = fr * np.sin(ts), fr * np.cos(ts)
+    return "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+
+
 def _fan_field(fig: go.Figure) -> None:
     L = P.FAN_DISPLAY_MAX
-    # foul lines from home plate along +/-45 deg
-    for sgn in (-1, 1):
+    for sgn in (-1, 1):  # foul lines from home to the display edge
         th = np.radians(45.0) * sgn
         fig.add_shape(type="line", x0=0, y0=0, x1=L * np.sin(th), y1=L * np.cos(th),
                       line=dict(color="#888", width=1))
-    # outer arc
-    ts = np.radians(np.linspace(-45, 45, 40))
-    xs, ys = L * np.sin(ts), L * np.cos(ts)
-    path = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
-    fig.add_shape(type="path", path=path, line=dict(color="#888", width=1))
+    fig.add_shape(type="path", path=_fence_path(), line=dict(color="#888", width=1.5))
 
 
 def spray_distribution_fan(fan_df: pd.DataFrame) -> go.Figure:
-    """Filled fan: each cell shaded by its share of batted balls + % label."""
+    """Filled fan: each cell shaded by its share of fair batted balls, % label,
+    and a Balls / Share / Avg EV / Avg Dist hover. Ring boundaries follow the real
+    fence curve."""
     fig = go.Figure()
     _fan_field(fig)
     annotations = []
@@ -137,21 +143,32 @@ def spray_distribution_fan(fan_df: pd.DataFrame) -> go.Figure:
         for _, row in fan_df.iterrows():
             if row["count"] <= 0:
                 continue
-            a0, a1 = np.radians(row["a0"]), np.radians(row["a1"])
-            r0, r1 = float(row["r0"]), float(row["r1"])
-            ts = np.linspace(a0, a1, 12)
-            outer = [(r1 * np.sin(t), r1 * np.cos(t)) for t in ts]
-            inner = [(r0 * np.sin(t), r0 * np.cos(t)) for t in ts[::-1]]
+            ri = int(row["ring_i"])
+            degs = np.linspace(float(row["a0"]), float(row["a1"]), 16)
+            ts = np.radians(degs)
+            if ri == 0:
+                r_in = np.zeros_like(ts); r_out = np.full_like(ts, P.FAN_INFIELD_MAX)
+            elif ri == 1:
+                r_in = np.full_like(ts, P.FAN_INFIELD_MAX); r_out = P.fence_distance(degs)
+            else:
+                r_in = P.fence_distance(degs); r_out = np.full_like(ts, P.FAN_DISPLAY_MAX)
+            outer = list(zip(r_out * np.sin(ts), r_out * np.cos(ts)))
+            inner = list(zip(r_in * np.sin(ts), r_in * np.cos(ts)))[::-1]
             poly = outer + inner
             xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+            ev, di = row["avg_ev"], row["avg_dist"]
+            ev_txt = "—" if ev is None or pd.isna(ev) else f"{ev:.0f} mph"
+            di_txt = "—" if di is None or pd.isna(di) else f"{di:.0f} ft"
             fig.add_trace(go.Scatter(
                 x=xs, y=ys, mode="lines", fill="toself",
-                fillcolor=_crimson_shade(float(row["pct"]) / (maxpct)),
+                fillcolor=_crimson_shade(float(row["pct"]) / maxpct),
                 line=dict(color="#bbb", width=0.5), showlegend=False,
-                hovertext=f"{row['direction']} · {row['ring']}: "
-                          f"{row['pct']:.0f}% ({int(row['count'])})",
+                hovertext=(f"{row['direction']} · {row['ring']}<br>"
+                           f"Balls: {int(row['count'])}<br>Share: {row['pct']:.0f}%<br>"
+                           f"Avg EV: {ev_txt}<br>Avg Dist: {di_txt}"),
                 hoverinfo="text"))
-            mid_a = (a0 + a1) / 2; mid_r = (r0 + r1) / 2
+            mid_a = np.radians((float(row["a0"]) + float(row["a1"])) / 2.0)
+            mid_r = (float(row["r0"]) + float(row["r1"])) / 2.0
             annotations.append(dict(x=mid_r * np.sin(mid_a), y=mid_r * np.cos(mid_a),
                                     text=f"{row['pct']:.0f}%", showarrow=False,
                                     font=dict(family="Teko, sans-serif", size=14,

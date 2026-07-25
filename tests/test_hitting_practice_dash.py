@@ -375,3 +375,20 @@ def test_ev_distance_by_pitch_labeled_hovers():
     tmpls = [t.hovertemplate or "" for t in charts.ev_distance_by_pitch(df).data]
     assert any("Pitch #:" in t and "Exit Velo:" in t for t in tmpls)
     assert any("Pitch #:" in t and "Distance:" in t for t in tmpls)
+
+
+def test_spray_fan_hover_has_balls_ev_dist():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 120.0, "exit_velocity": 85.0, "hit_type": 1},
+        {"horizontal_angle": 10.0, "distance_feet": 360.0, "exit_velocity": 100.0, "hit_type": 3},
+    ])
+    fig = charts.spray_distribution_fan(P.spray_fan(plays))
+    hovers = [t.hovertext for t in fig.data if getattr(t, "fill", None) == "toself"]
+    assert any(("Balls:" in (h or "")) and ("Avg EV:" in (h or ""))
+               and ("Avg Dist:" in (h or "")) for h in hovers)
+    # empty fan still renders
+    assert charts.spray_distribution_fan(P.spray_fan(pd.DataFrame(
+        columns=["horizontal_angle", "distance_feet", "hit_type"]))) is not None
