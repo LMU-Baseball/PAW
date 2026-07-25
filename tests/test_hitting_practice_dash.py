@@ -392,3 +392,26 @@ def test_spray_fan_hover_has_balls_ev_dist():
     # empty fan still renders
     assert charts.spray_distribution_fan(P.spray_fan(pd.DataFrame(
         columns=["horizontal_angle", "distance_feet", "hit_type"]))) is not None
+
+
+def test_spray_chart_marks_foul_and_hr_no_legend():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    spray = pd.DataFrame([
+        {"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive",
+         "distance_feet": 206.0, "exit_velocity": 95.0, "is_foul": False, "is_hr": False},
+        {"x": 10.0, "y": 400.0, "hit_type_label": "Fly Ball",
+         "distance_feet": 405.0, "exit_velocity": 103.0, "is_foul": False, "is_hr": True},
+        {"x": -200.0, "y": 20.0, "hit_type_label": "Line Drive",
+         "distance_feet": 200.0, "exit_velocity": 70.0, "is_foul": True, "is_hr": False},
+    ])
+    fig = charts.spray_chart_fig(spray)
+    assert fig.layout.showlegend is False
+    syms = [t.marker.symbol for t in fig.data if t.mode == "markers"]
+    assert "star" in syms          # HR marker
+    assert "circle-open" in syms   # foul marker
+    assert any(s.type == "path" for s in fig.layout.shapes)  # fence curve drawn
+    # still renders without the flag columns (round-1 contract)
+    plain = pd.DataFrame([{"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive",
+                           "distance_feet": 206.0, "exit_velocity": 95.0}])
+    assert charts.spray_chart_fig(plain) is not None

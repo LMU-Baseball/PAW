@@ -214,37 +214,50 @@ def swing_decision_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
 
 
 def spray_chart_fig(spray_df: pd.DataFrame) -> go.Figure:
-    """Plotly-drawn field + batted-ball landing points colored by hit type."""
+    """Field + batted-ball landing points colored by hit type; foul balls marked
+    open/greyed, home runs marked as stars. Real LMU fence drawn."""
     fig = go.Figure()
-    # Field: foul lines from home (0,0), outfield arc (~330ft), infield diamond.
-    L = 330.0
-    fig.add_shape(type="line", x0=0, y0=0, x1=-L * 0.707, y1=L * 0.707,
-                  line=dict(color="#888", width=1))
-    fig.add_shape(type="line", x0=0, y0=0, x1=L * 0.707, y1=L * 0.707,
-                  line=dict(color="#888", width=1))
-    fig.add_shape(type="path",
-                  path=f"M {-L*0.707},{L*0.707} Q 0,{L*1.15} {L*0.707},{L*0.707}",
-                  line=dict(color="#888", width=1))
-    # infield diamond (~90ft bases, rotated): home->1st->2nd->3rd
-    b = 63.6  # 90/sqrt(2)
-    fig.add_shape(type="path",
-                  path=f"M 0,0 L {b},{b} L 0,{2*b} L {-b},{b} Z",
+    L = P.FAN_DISPLAY_MAX
+    for sgn in (-1, 1):  # foul lines
+        th = np.radians(45.0) * sgn
+        fig.add_shape(type="line", x0=0, y0=0, x1=L * np.sin(th), y1=L * np.cos(th),
+                      line=dict(color="#888", width=1))
+    fig.add_shape(type="path", path=_fence_path(), line=dict(color="#888", width=1.5))
+    b = 63.6  # infield diamond (~90ft bases)
+    fig.add_shape(type="path", path=f"M 0,0 L {b},{b} L 0,{2*b} L {-b},{b} Z",
                   line=dict(color="#bbb", width=1), fillcolor="rgba(0,0,0,0)")
     if spray_df is not None and not spray_df.empty:
         has_hover = {"distance_feet", "exit_velocity"} <= set(spray_df.columns)
+        has_flags = {"is_foul", "is_hr"} <= set(spray_df.columns)
         for label, sub in spray_df.groupby("hit_type_label"):
-            trace = dict(x=sub["x"], y=sub["y"], mode="markers", name=str(label),
-                         marker=dict(color=_HIT_COLORS.get(label, "#5a5a5a"), size=8,
-                                     line=dict(width=0.5, color="#666")))
-            if has_hover:
-                trace["customdata"] = sub[["distance_feet", "exit_velocity"]].to_numpy()
-                trace["hovertemplate"] = (f"{label}<br>Distance: %{{customdata[0]:.0f}} ft"
-                                          "<br>Exit Velo: %{customdata[1]:.1f} mph<extra></extra>")
-            fig.add_trace(go.Scatter(**trace))
+            color = _HIT_COLORS.get(label, "#5a5a5a")
+            if has_flags:
+                classes = [
+                    ("", sub[~sub["is_foul"] & ~sub["is_hr"]],
+                     dict(symbol="circle", color=color, size=8, line=dict(width=0.5, color="#666"))),
+                    (" (HR)", sub[sub["is_hr"]],
+                     dict(symbol="star", color=color, size=13, line=dict(width=1.2, color="#1a1a1a"))),
+                    (" (Foul)", sub[sub["is_foul"]],
+                     dict(symbol="circle-open", color="#999", size=8, line=dict(width=1.2, color="#999"))),
+                ]
+            else:
+                classes = [("", sub, dict(symbol="circle", color=color, size=8,
+                                          line=dict(width=0.5, color="#666")))]
+            for tag, part, marker in classes:
+                if part is None or part.empty:
+                    continue
+                trace = dict(x=part["x"], y=part["y"], mode="markers",
+                             name=f"{label}{tag}", marker=marker, showlegend=False)
+                if has_hover:
+                    trace["customdata"] = part[["distance_feet", "exit_velocity"]].to_numpy()
+                    trace["hovertemplate"] = (
+                        f"{label}{tag}<br>Distance: %{{customdata[0]:.0f}} ft"
+                        "<br>Exit Velo: %{customdata[1]:.1f} mph<extra></extra>")
+                fig.add_trace(go.Scatter(**trace))
     fig.update_layout(
-        title="Spray Chart", showlegend=True,
-        xaxis=dict(range=[-260, 260], visible=False),
-        yaxis=dict(range=[-20, 400], visible=False, scaleanchor="x", scaleratio=1),
+        title="Spray Chart", showlegend=False,
+        xaxis=dict(range=[-340, 340], visible=False),
+        yaxis=dict(range=[-20, L + 20], visible=False, scaleanchor="x", scaleratio=1),
         height=460, margin=dict(l=10, r=10, t=50, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
