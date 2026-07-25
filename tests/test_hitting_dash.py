@@ -394,3 +394,26 @@ def test_hitting_layout_has_back_link_and_dark_footnote():
     # the style dict immediately after the footnote uses #555, not #888
     tail = src[footnote_idx:footnote_idx + 300]
     assert '"#555"' in tail and '"#888"' not in tail
+
+
+def test_hitting_pitch_colors_match_pitching():
+    from app.dashboards.hitting import charts
+    from app.data import pitching as P
+    for pt in ("Fastball", "ChangeUp", "Cutter", "Slider", "Sinker", "Curveball"):
+        assert charts.color_for(pt) == P.pitch_color(pt)
+
+
+def test_stat_table_colors_tagged_pitch_type():
+    import pandas as pd
+    from app.dashboards.hitting import tables
+    from app.data import pitching as P
+    df = pd.DataFrame({"TaggedPitchType": ["Slider", "Sinker"], "Balls": [0, 1]})
+    tbl = tables.stat_table(df, id="t")
+    conds = tbl.style_data_conditional or []
+    colored = {c.get("color") for c in conds
+               if c.get("if", {}).get("column_id") == "TaggedPitchType"}
+    assert P.pitch_color("Slider") in colored and P.pitch_color("Sinker") in colored
+    # no-op without the column
+    plain = tables.stat_table(pd.DataFrame({"PA": [1]}), id="t2")
+    assert not any(c.get("if", {}).get("column_id") == "TaggedPitchType"
+                   for c in (plain.style_data_conditional or []))

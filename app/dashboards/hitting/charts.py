@@ -13,14 +13,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from app.data.hitting import PITCH_ABBR
+from app.data import pitching as _pitching
 
-# Stable per-pitch-type colors (PAW palette; crimson fastball, blue slider).
-PITCH_COLORS = {
-    "Fastball": "#9A0021", "Sinker": "#7a5230", "Cutter": "#e07b39",
-    "Slider": "#0076A5", "Curveball": "#2b4c7e", "ChangeUp": "#e08a1e",
-    "Splitter": "#5a5a5a", "Other": "#9aa0a6",
-}
-_DEFAULT_COLOR = "#9aa0a6"
+PITCH_COLORS = _pitching.PITCH_COLORS  # single source of truth (matches pitchers)
 
 # Zone rectangles as (x0, y0, x1, y1, fillcolor).
 _ZONE_RECTS = [
@@ -36,7 +31,7 @@ _YRANGE = (-35, 35)
 
 
 def color_for(pitch_type: str) -> str:
-    return PITCH_COLORS.get(pitch_type, _DEFAULT_COLOR)
+    return _pitching.pitch_color(pitch_type)
 
 
 def _to_xy(df: pd.DataFrame) -> pd.DataFrame:
