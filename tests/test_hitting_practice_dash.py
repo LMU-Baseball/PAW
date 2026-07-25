@@ -428,6 +428,6 @@ def test_fan_matches_landing_scale_and_labels_spread():
     ])
     fig = charts.spray_distribution_fan(P.spray_fan(plays))
     assert list(fig.layout.xaxis.range) == [-340, 340]
-    # infield-ring (near home) labels are pushed out to >= 108 ft radius (accounting for float precision)
+    # infield-ring (near home) labels are pushed out to >= 108 ft radius
     radii = [float(np.hypot(a.x, a.y)) for a in fig.layout.annotations]
-    assert radii and min(radii) >= 107.99
+    assert radii and min(radii) >= 108.0 - 1e-9  # infield labels floored to 108 ft (float-epsilon tolerance)
