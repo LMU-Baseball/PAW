@@ -415,3 +415,19 @@ def test_spray_chart_marks_foul_and_hr_no_legend():
     plain = pd.DataFrame([{"x": -50.0, "y": 200.0, "hit_type_label": "Line Drive",
                            "distance_feet": 206.0, "exit_velocity": 95.0}])
     assert charts.spray_chart_fig(plain) is not None
+
+
+def test_fan_matches_landing_scale_and_labels_spread():
+    import pandas as pd
+    import numpy as np
+    from app.dashboards.hitting_practice import charts
+    from app.data import practice as P
+    plays = pd.DataFrame([
+        {"horizontal_angle": -30.0, "distance_feet": 100.0, "exit_velocity": 85.0, "hit_type": 1},
+        {"horizontal_angle": 10.0, "distance_feet": 120.0, "exit_velocity": 88.0, "hit_type": 1},
+    ])
+    fig = charts.spray_distribution_fan(P.spray_fan(plays))
+    assert list(fig.layout.xaxis.range) == [-340, 340]
+    # infield-ring (near home) labels are pushed out to >= 108 ft radius (accounting for float precision)
+    radii = [float(np.hypot(a.x, a.y)) for a in fig.layout.annotations]
+    assert radii and min(radii) >= 107.99

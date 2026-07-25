@@ -168,14 +168,14 @@ def spray_distribution_fan(fan_df: pd.DataFrame) -> go.Figure:
                            f"Avg EV: {ev_txt}<br>Avg Dist: {di_txt}"),
                 hoverinfo="text"))
             mid_a = np.radians((float(row["a0"]) + float(row["a1"])) / 2.0)
-            mid_r = (float(row["r0"]) + float(row["r1"])) / 2.0
+            mid_r = max((float(row["r0"]) + float(row["r1"])) / 2.0, 108.0)
             annotations.append(dict(x=mid_r * np.sin(mid_a), y=mid_r * np.cos(mid_a),
                                     text=f"{row['pct']:.0f}%", showarrow=False,
                                     font=dict(family="Teko, sans-serif", size=14,
                                               color="#1a1a1a")))
     fig.update_layout(
         title="Batted-Ball Distribution", annotations=annotations,
-        xaxis=dict(range=[-P.FAN_DISPLAY_MAX, P.FAN_DISPLAY_MAX], visible=False),
+        xaxis=dict(range=[-340, 340], visible=False),
         yaxis=dict(range=[-20, P.FAN_DISPLAY_MAX + 20], visible=False,
                    scaleanchor="x", scaleratio=1),
         height=460, margin=dict(l=10, r=10, t=50, b=10),
