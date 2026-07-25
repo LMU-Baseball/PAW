@@ -103,3 +103,57 @@ def test_dashboard_layouts_place_note_card():
     for mod in ("hitting", "pitching", "catching"):
         lay = __import__(f"app.dashboards.{mod}.layout", fromlist=["x"])
         assert f'note_card("{mod}")' in inspect.getsource(lay)
+
+
+def test_note_delete_status_only_set_when_delete_runs(tmp_path, monkeypatch):
+    """_note_delete should mirror _note_save: no status message on the
+    guard-fail branch (nothing deleted), 'Deleted.' only when
+    notes.delete_note actually ran."""
+    from app.auth.models import User
+    from app.extensions import db
+    from app.dashboards import notes_ui
+    from app.dashboards.date_range import ALL_IN_RANGE
+    from flask_login import login_user
+
+    class TestConfig(Config):
+        TESTING = True
+        SECRET_KEY = "test-secret"
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_path / 't.db'}"
+    app = create_app(TestConfig)
+
+    captured = []
+
+    class FakeApp:
+        def callback(self, *a, **k):
+            def deco(fn):
+                captured.append(fn)
+                return fn
+            return deco
+
+    calls = []
+
+    with app.app_context():
+        coach = User(email="coach@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+
+        monkeypatch.setattr(
+            notes_ui.notes, "delete_note",
+            lambda module, subject_id, game_id: calls.append((module, subject_id, game_id)))
+
+        notes_ui.register_note_callbacks(FakeApp(), "hitting", "batter_id")
+        _render, _save, _delete = captured
+
+        with app.test_request_context():
+            login_user(coach)
+
+            # guard-fail branches: no subject / no game / range sentinel -> no-op, no message
+            assert _delete(1, {"game_id": 5}) == ("", "")
+            assert _delete(1, {"batter_id": 806253}) == ("", "")
+            assert _delete(1, {"batter_id": 806253, "game_id": ALL_IN_RANGE}) == ("", "")
+            assert calls == []
+
+            # real delete path: delete_note runs -> "Deleted."
+            assert _delete(1, {"batter_id": 806253, "game_id": 5}) == ("", "Deleted.")
+            assert calls == [("hitting", 806253, 5)]

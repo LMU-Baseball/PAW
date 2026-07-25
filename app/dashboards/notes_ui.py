@@ -94,4 +94,5 @@ def register_note_callbacks(dash_app, module: str, subject_key: str) -> None:
         gid = sel.get("game_id")
         if sel.get(subject_key) is not None and gid is not None and gid != dr.ALL_IN_RANGE:
             notes.delete_note(module, sel[subject_key], gid)
-        return "", "Deleted."
+            return "", "Deleted."
+        return "", ""
