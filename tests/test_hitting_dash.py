@@ -221,15 +221,15 @@ def test_stat_table_empty_df_is_safe():
 def test_game_level_renders_for_real_and_empty(game_df):
     from app.dashboards.hitting.tabs import game_level
     from dash import html
-    out = game_level.render(game_df, note="Great AB battle.")
+    out = game_level.render(game_df)
     assert isinstance(out, html.Div)
     # empty df must not crash
-    assert isinstance(game_level.render(pd.DataFrame(), note=""), html.Div)
+    assert isinstance(game_level.render(pd.DataFrame()), html.Div)
 
 
 def test_game_level_drops_qc_pathq_columns(game_df):
     from app.dashboards.hitting.tabs import game_level
-    out = game_level.render(game_df, note="Great AB battle.")
+    out = game_level.render(game_df)
     text = str(out)
     assert "Avg QC+" not in text
     assert "Avg PathQ+" not in text
@@ -377,7 +377,7 @@ def test_hitting_range_pooled_render_live():
         pooled = H.wh_range_pitches(bid, lo, hi)
         if pooled.empty:
             import pytest; pytest.skip("no pooled")
-        assert game_level.render(pooled, note="") is not None
+        assert game_level.render(pooled) is not None
         assert pa.render_all_pas(pooled) is not None
         assert zl.render(pooled, "All Swings") is not None
 

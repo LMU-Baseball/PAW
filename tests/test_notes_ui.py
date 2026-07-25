@@ -78,3 +78,28 @@ def test_register_note_callbacks_binds(monkeypatch):
     app = FakeApp()
     notes_ui.register_note_callbacks(app, "catching", "catcher_id")
     assert app.n == 3  # render + save + delete
+
+
+def test_game_level_has_no_inline_note_block():
+    import inspect
+    from app.dashboards.hitting.tabs import game_level
+    src = inspect.getsource(game_level)
+    assert "No note for this game." not in src  # note moved to the shared card
+    assert "Coach Note" not in src
+
+
+def test_dashboard_callbacks_register_notes():
+    import inspect
+    for mod, key in [("hitting", "batter_id"), ("pitching", "pitcher_id"),
+                     ("catching", "catcher_id")]:
+        cb = __import__(f"app.dashboards.{mod}.callbacks", fromlist=["x"])
+        src = inspect.getsource(cb)
+        assert "register_note_callbacks" in src
+        assert f'"{key}"' in src
+
+
+def test_dashboard_layouts_place_note_card():
+    import inspect
+    for mod in ("hitting", "pitching", "catching"):
+        lay = __import__(f"app.dashboards.{mod}.layout", fromlist=["x"])
+        assert f'note_card("{mod}")' in inspect.getsource(lay)

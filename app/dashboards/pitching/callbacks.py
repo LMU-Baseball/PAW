@@ -8,7 +8,7 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import pitching as P
-from app.dashboards import date_range as dr
+from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.pitching import layout, selectors
 from app.dashboards.pitching.tabs import last_outings, location_movement, pitch_breakdown, rhh_lhh
 
@@ -211,3 +211,5 @@ def register_callbacks(dash_app) -> None:
                         "cursor": "pointer", "opacity": "1" if on else ".55",
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
+
+    notes_ui.register_note_callbacks(dash_app, "pitching", "pitcher_id")

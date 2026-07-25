@@ -5,7 +5,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import catching as C
-from app.dashboards import date_range as dr
+from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
 from app.dashboards.catching import selectors
 
@@ -117,7 +117,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Div(id="sidebar", children=sidebar(default_catcher),
                      style={"width": "240px", "flexShrink": "0"}),
-            html.Div([selector_row, tabs,
+            html.Div([selector_row, notes_ui.note_card("catching"), tabs,
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],
                      style={"flexGrow": "1"}),
         ], style={"display": "flex", "gap": "16px", "padding": "16px",

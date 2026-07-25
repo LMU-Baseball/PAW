@@ -8,7 +8,7 @@ from dash import Input, Output, State, dcc, html
 from flask_login import current_user
 
 from app.data import hitting_wh
-from app.dashboards import date_range as dr
+from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
 
@@ -101,9 +101,7 @@ def register_callbacks(dash_app) -> None:
     def _render_tab(tab, data_json, sel):
         df = _read_game_df(data_json)
         if tab == "game":
-            # Coach notes are legacy-keyed (NOTES.GAME_ID) and don't match warehouse
-            # game_ids yet; wiring notes to warehouse games is a deferred follow-up.
-            return game_level.render(df, note="")
+            return game_level.render(df)
         if tab == "pa":
             choices = pa.pa_choices(df)
             return html.Div([
@@ -140,3 +138,5 @@ def register_callbacks(dash_app) -> None:
     def _zone_body(zone_choice, data_json):
         df = _read_game_df(data_json)
         return zl.render(df, zone_choice or "All Swings")
+
+    notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")
