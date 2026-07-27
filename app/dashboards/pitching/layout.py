@@ -107,6 +107,7 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="Location / Movement", value="location"),
         dcc.Tab(label="RHH v. LHH", value="splits"),
         dcc.Tab(label="Last Outings", value="outings"),
+        dcc.Tab(label="Pitch Level", value="pitchlevel"),
     ])
 
     return html.Div([

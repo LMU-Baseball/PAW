@@ -182,3 +182,21 @@ def test_df_table_no_pitch_column_no_color_rules():
     tbl = tables.df_table(df, id_="t2")
     conds = tbl.style_data_conditional or []
     assert not any(c.get("if", {}).get("column_id") == "Pitch" for c in conds)
+
+
+def test_pitchlevel_tab_renders_video_component():
+    from app.dashboards.video.component import render as vrender
+    import pandas as pd
+    from app.data import video as vdata
+    # empty-video game -> empty state (no exception)
+    out = vrender(pd.DataFrame(columns=vdata._ALL_COLS), prefix="pit", default_angle="HomeBehind")
+    assert "No video" in str(out)
+
+
+def test_pitching_tabs_include_pitch_level():
+    from app.dashboards.pitching import layout
+    # serve_layout builds under an app/request context in other tests; here just
+    # assert the tab value string is wired in the module source.
+    import inspect
+    src = inspect.getsource(layout.serve_layout)
+    assert '"pitchlevel"' in src and "Pitch Level" in src

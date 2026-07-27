@@ -8,7 +8,8 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import pitching as P
-from app.dashboards import date_range as dr, notes_ui
+from app.data import video as videodata
+from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.pitching import layout, selectors
 from app.dashboards.pitching.tabs import last_outings, location_movement, pitch_breakdown, rhh_lhh
 
@@ -106,6 +107,21 @@ def register_callbacks(dash_app) -> None:
             sel = sel or {}
             anchor = _outings_anchor(sel)
             return last_outings.render(sel.get("pitcher_id"), anchor, 5)
+        if tab == "pitchlevel":
+            sel = sel or {}
+            pid = sel.get("pitcher_id")
+            if pid is None:
+                return html.Div("Select a pitcher.", style={"padding": "12px", "color": "#555"})
+            gid = sel.get("game_id")
+            if gid == dr.ALL_IN_RANGE:
+                g = P.games_for_pitcher(int(pid), start=sel.get("start"), end=sel.get("end"))
+                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+            elif gid is None:
+                return html.Div("Select an outing.", style={"padding": "12px", "color": "#555"})
+            else:
+                gids = [int(gid)]
+            vdf = videodata.pitch_video_df(gids, pitcher_id=int(pid))
+            return videotab.render(vdf, prefix="pit", default_angle="HomeBehind")
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",
@@ -212,4 +228,5 @@ def register_callbacks(dash_app) -> None:
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
 
+    videotab.register_callbacks(dash_app, "pit", default_angle="HomeBehind")
     notes_ui.register_note_callbacks(dash_app, "pitching", "pitcher_id")
