@@ -264,7 +264,7 @@ def spray_fig(bip_df) -> go.Figure:
                            "<br>EV: %{customdata[1]:.1f} mph<extra></extra>")))
     fig.update_layout(
         title="Spray Chart", height=440, margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(range=[-250, 250], visible=False),
+        xaxis=dict(range=[-300, 300], visible=False),
         yaxis=dict(range=[-20, 430], visible=False, scaleanchor="x", scaleratio=1),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))

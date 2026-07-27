@@ -325,7 +325,8 @@ def wh_scoreboard(game_id) -> dict:
 
 
 _BIP_COLS = ["hit_type", "exit_speed", "la", "bearing", "distance",
-             "x", "y", "rx", "ry", "Count", "Result", "PitchType", "Pitcher"]
+             "x", "y", "rx", "ry", "Count", "Result", "PitchType", "Pitcher",
+             "GameID", "Inning", "PAofInning"]
 
 
 def wh_bip_points(batter_tm_id, game_id) -> pd.DataFrame:
@@ -342,7 +343,8 @@ def wh_bip_points(batter_tm_id, game_id) -> pd.DataFrame:
         SELECT tagged_hit_type AS hit_type, exit_speed, la, bearing, distance,
                play_result AS PlayResult, pitch_call AS PitchCall,
                tagged_pitch_type AS PitchType, pitcher_name AS Pitcher,
-               balls AS Balls, strikes AS Strikes
+               balls AS Balls, strikes AS Strikes,
+               game_id AS GameID, inning AS Inning, pa_of_inning AS PAofInning
           FROM fact_tm_game_pitch
          WHERE game_id IN ({gph}) AND batter_tm_id IN ({ph})
            AND pitch_call = 'InPlay'
@@ -380,7 +382,7 @@ def wh_last_n_pas(batter_tm_id, n: int = 27) -> pd.DataFrame:
             JOIN dim_tm_game g ON g.game_id = f.game_id
            WHERE f.batter_tm_id IN ({ph})
         ) d
-        ORDER BY d.game_date DESC, d.inning DESC, d.pa_of_inning DESC
+        ORDER BY d.game_date DESC, d.game_id DESC, d.inning DESC, d.pa_of_inning DESC
         LIMIT {int(n)}
         """,
         idp,

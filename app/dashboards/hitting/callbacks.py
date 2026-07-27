@@ -131,6 +131,12 @@ def register_callbacks(dash_app) -> None:
             last = hitting_wh.wh_last_n_pas(int(bid), 27)
             gids = sorted({int(g) for g in last["GameID"]}) if not last.empty else []
             bip = hitting_wh.wh_bip_points(int(bid), gids)
+            if not last.empty and not bip.empty:
+                keys = set(zip(last["GameID"].astype(int), last["Inning"].astype(int),
+                               last["PAofInning"].astype(int)))
+                mask = [(int(g), int(i), int(p)) in keys
+                        for g, i, p in zip(bip["GameID"], bip["Inning"], bip["PAofInning"])]
+                bip = bip[mask]
             return last_27.render(last, bip)
         if tab == "video":
             sel = sel or {}
@@ -202,6 +208,7 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("bip-body", "children"),
         Input("bip-active", "data"), State("selection", "data"),
+        prevent_initial_call=True,
     )
     def _bip_body(active, sel):
         sel = sel or {}

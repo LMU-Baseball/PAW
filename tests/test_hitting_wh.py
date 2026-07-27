@@ -172,6 +172,14 @@ def test_wh_bip_points_empty_game_list():
     assert df.empty and "hit_type" in df.columns
 
 
+def test_wh_bip_points_has_pa_keys():
+    from app.data import hitting_wh
+    bid, gid = _a_hitting_bip_batter()
+    df = hitting_wh.wh_bip_points(bid, gid)
+    for c in ("GameID", "Inning", "PAofInning"):
+        assert c in df.columns
+
+
 def test_wh_last_n_pas_shape():
     from app.data import hitting_wh
     bid, _ = _a_hitting_bip_batter()
