@@ -77,3 +77,9 @@ def test_requires_exactly_one_subject(sample):
         video.pitch_video_df(sample["game_id"])
     with pytest.raises(ValueError):
         video.pitch_video_df(sample["game_id"], pitcher_id=1, batter_id=2)
+
+
+def test_empty_game_list_returns_empty(sample):
+    df = video.pitch_video_df([], pitcher_id=sample["pitcher_id"])
+    assert df.empty
+    assert "Pitch" in df.columns and "url_homebehind" in df.columns

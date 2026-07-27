@@ -36,9 +36,10 @@ def _spaced(s: str) -> str:
 
 
 def _result(pitch_call, play_result) -> str:
-    pr = None if play_result is None else str(play_result)
-    if pr and pr not in ("Undefined", "None", ""):
-        return _spaced(pr)
+    if play_result is not None and not (isinstance(play_result, float) and pd.isna(play_result)):
+        pr = str(play_result)
+        if pr not in ("Undefined", "None", ""):
+            return _spaced(pr)
     return _RESULT_MAP.get(str(pitch_call), _spaced(pitch_call))
 
 
@@ -60,6 +61,8 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
     """One row per pitch (angles pivoted to url columns) for a game (or list of
     games) and one subject. Empty full-column frame when there is no video."""
     gids = [int(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
+    if not gids:
+        return pd.DataFrame(columns=_ALL_COLS)
     subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)
 
     gph = ", ".join(f":g{i}" for i in range(len(gids)))

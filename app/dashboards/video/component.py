@@ -39,21 +39,23 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str) -> html.Div:
     buttons = [html.Button(label, id={"type": f"{prefix}-angle", "index": key},
                            n_clicks=0, style=_btn_style(True, False))
                for key, label in ANGLES]
-    player = html.Video(id=f"{prefix}-video-player", src="", controls=True,
-                        autoPlay=True, muted=True, loop=True,
-                        style={"width": "100%", "borderRadius": "8px", "background": "#000"})
+    player = html.Video(
+        id=f"{prefix}-video-player", controls=True, autoPlay=True, muted=True,
+        loop=True, preload="auto",
+        children=html.Source(id=f"{prefix}-video-source", src="", type="video/mp4"),
+        style={"width": "100%", "borderRadius": "8px", "background": "#000"})
+    reload_sink = html.Div(id=f"{prefix}-video-reload", style={"display": "none"})
     return html.Div([
         dcc.Store(id=f"{prefix}-video-pitch"),
         dcc.Store(id=f"{prefix}-video-angle"),
         html.Div([
-            html.Div([html.Div("Click a pitch to load video",
-                               style={"color": "#555", "marginBottom": "4px"}), table],
-                     style={"flex": "1", "minWidth": "340px"}),
+            html.Div([table], style={"flex": "1", "minWidth": "340px"}),
             html.Div([
                 html.Div(buttons, style={"marginBottom": "8px"}),
                 html.Div("Click a pitch row to load video.", id=f"{prefix}-video-hint",
                          style={"color": "#555", "marginBottom": "6px"}),
                 player,
+                reload_sink,
             ], style={"flex": "1", "minWidth": "360px"}),
         ], style={"display": "flex", "gap": "16px", "alignItems": "flex-start"}),
     ])
@@ -104,7 +106,7 @@ def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind")
         return _resolve_default(pitch, default_angle)
 
     @dash_app.callback(
-        Output(f"{prefix}-video-player", "src"),
+        Output(f"{prefix}-video-source", "src"),
         Output(f"{prefix}-video-hint", "children"),
         Input(f"{prefix}-video-pitch", "data"),
         Input(f"{prefix}-video-angle", "data"),
@@ -131,3 +133,18 @@ def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind")
             disabled.append(not has)
             styles.append(_btn_style(has, key == angle and has))
         return disabled, styles
+
+    dash_app.clientside_callback(
+        f"""
+        function(src) {{
+            var v = document.getElementById('{prefix}-video-player');
+            if (v) {{
+                v.load();
+                if (src) {{ var p = v.play(); if (p && p.catch) {{ p.catch(function() {{}}); }} }}
+            }}
+            return '';
+        }}
+        """,
+        Output(f"{prefix}-video-reload", "children"),
+        Input(f"{prefix}-video-source", "src"),
+    )
