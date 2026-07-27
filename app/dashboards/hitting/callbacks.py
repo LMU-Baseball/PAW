@@ -9,10 +9,12 @@ from flask_login import current_user
 
 from app.data import hitting_wh
 from app.data import video as videodata
+from app.data import dev_plans
 from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import (game_level, plate_appearances as pa,
-                                         zone_location as zl, balls_in_play, last_27)
+                                         zone_location as zl, balls_in_play, last_27,
+                                         dev_plan)
 
 
 def _resolve_gids(sel):
@@ -116,6 +118,10 @@ def register_callbacks(dash_app) -> None:
         State("selection", "data"),
     )
     def _render_tab(tab, data_json, sel):
+        if tab == "devplan":
+            sel = sel or {}
+            is_coach = bool(getattr(current_user, "is_coach", False))
+            return dev_plan.render(sel.get("batter_id"), is_coach)
         if tab == "bip":
             sel = sel or {}
             bid = sel.get("batter_id")
@@ -233,6 +239,37 @@ def register_callbacks(dash_app) -> None:
             on = ht in active
             out.append(balls_in_play._chip_style(col, on))
         return out
+
+    @dash_app.callback(
+        Output("devplan-status", "children"),
+        Input("devplan-save", "n_clicks"),
+        State("devplan-text", "value"), State("selection", "data"),
+        prevent_initial_call=True,
+    )
+    def _devplan_save(_n, text, sel):
+        if not getattr(current_user, "is_coach", False):
+            return "Coaches only."
+        sel = sel or {}
+        bid = sel.get("batter_id")
+        if bid is None:
+            return ""
+        dev_plans.upsert_plan("hitting", bid, text, getattr(current_user, "id", None))
+        return "Saved." if (text or "").strip() else "Deleted."
+
+    @dash_app.callback(
+        Output("devplan-text", "value"),
+        Output("devplan-status", "children", allow_duplicate=True),
+        Input("devplan-delete", "n_clicks"), State("selection", "data"),
+        prevent_initial_call=True,
+    )
+    def _devplan_delete(_n, sel):
+        if not getattr(current_user, "is_coach", False):
+            return "", "Coaches only."
+        sel = sel or {}
+        bid = sel.get("batter_id")
+        if bid is not None:
+            dev_plans.delete_plan("hitting", bid)
+        return "", "Deleted."
 
     videotab.register_callbacks(dash_app, "hit", default_angle="batter_side")
     notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")

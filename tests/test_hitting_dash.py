@@ -467,3 +467,16 @@ def test_hitting_tabs_include_bip_and_last27():
     src = inspect.getsource(layout.serve_layout)
     assert '"bip"' in src and "Balls in Play" in src
     assert '"last27"' in src and "Last 27 PA" in src
+
+
+def test_dev_plan_render_prompt_coach_player():
+    from app.dashboards.hitting.tabs import dev_plan
+    # no hitter selected -> prompt
+    assert "Select a hitter" in str(dev_plan.render(None, True))
+
+
+def test_hitting_tabs_include_dev_plan():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"devplan"' in src and "Dev Plan" in src

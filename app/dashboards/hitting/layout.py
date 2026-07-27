@@ -113,6 +113,7 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="Video", value="video"),
         dcc.Tab(label="Balls in Play", value="bip"),
         dcc.Tab(label="Last 27 PA", value="last27"),
+        dcc.Tab(label="Dev Plan", value="devplan"),
     ])
 
     return html.Div([
