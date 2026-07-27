@@ -62,6 +62,16 @@ def test_empty_game_returns_full_columns(sample):
     assert "Pitch" in df.columns and "url_homebehind" in df.columns
 
 
+def test_missing_angle_urls_are_none_not_nan(sample):
+    df = video.pitch_video_df(sample["game_id"], pitcher_id=sample["pitcher_id"])
+    import math
+    for col in video.URL_COL.values():
+        for v in df[col]:
+            # every cell is either a real string url or exactly None (never NaN)
+            assert v is None or isinstance(v, str)
+            assert not (isinstance(v, float) and math.isnan(v))
+
+
 def test_requires_exactly_one_subject(sample):
     with pytest.raises(ValueError):
         video.pitch_video_df(sample["game_id"])

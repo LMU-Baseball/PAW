@@ -104,7 +104,7 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
         "Date": out["game_date"].astype(str),
     })
     for a in URL_COL.values():
-        df[a] = out[a].where(out[a].notna(), None).values
+        df[a] = [None if pd.isna(v) else v for v in out[a]]
     df["batter_side"] = out["batter_side"].values
     df["pitch_uid"] = out.index.values
     df = df.sort_values(["Date", "Pitch"], ascending=[False, True]).reset_index(drop=True)
