@@ -108,6 +108,8 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="RHH v. LHH", value="splits"),
         dcc.Tab(label="Last Outings", value="outings"),
         dcc.Tab(label="Pitch Level", value="pitchlevel"),
+        dcc.Tab(label="Counts", value="counts"),
+        dcc.Tab(label="Heatmaps", value="heatmaps"),
     ])
 
     return html.Div([

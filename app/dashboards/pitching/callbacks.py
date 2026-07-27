@@ -11,7 +11,8 @@ from app.data import pitching as P
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.pitching import layout, selectors
-from app.dashboards.pitching.tabs import last_outings, location_movement, pitch_breakdown, rhh_lhh
+from app.dashboards.pitching.tabs import (last_outings, location_movement,
+                                          pitch_breakdown, rhh_lhh, counts, heatmaps)
 
 
 def _read_game_df(data_json):
@@ -132,6 +133,10 @@ def register_callbacks(dash_app) -> None:
             return location_movement.render(df)
         if tab == "splits":
             return rhh_lhh.render(df)
+        if tab == "counts":
+            return counts.render(df)
+        if tab == "heatmaps":
+            return heatmaps.render(df)
         return html.Div()
 
     @dash_app.callback(
@@ -227,6 +232,39 @@ def register_callbacks(dash_app) -> None:
                         "cursor": "pointer", "opacity": "1" if on else ".55",
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
+
+    @dash_app.callback(
+        Output("counts-body", "children"),
+        Input("counts-dd", "value"), State("game-data", "data"),
+    )
+    def _counts_body(sel_counts, data_json):
+        df = _read_game_df(data_json)
+        if df.empty:
+            return html.Div("No pitch data.")
+        if sel_counts is not None:
+            cs = (df["balls"].astype("Int64").astype(str) + "-"
+                  + df["strikes"].astype("Int64").astype(str))
+            df = df[cs.isin(sel_counts)]
+        return counts.body(df)
+
+    @dash_app.callback(
+        Output("hm-body", "children"),
+        Input("hm-pt", "value"), Input("hm-side", "value"), Input("hm-count", "value"),
+        State("game-data", "data"),
+    )
+    def _hm_body(pts, side, sel_counts, data_json):
+        df = _read_game_df(data_json)
+        if df.empty:
+            return html.Div("No pitch data.")
+        if pts is not None:
+            df = df[P.pitch_type(df).isin(pts)]
+        if side and side != "All":
+            df = df[df["batter_side"] == side]
+        if sel_counts is not None:
+            cs = (df["balls"].astype("Int64").astype(str) + "-"
+                  + df["strikes"].astype("Int64").astype(str))
+            df = df[cs.isin(sel_counts)]
+        return heatmaps.body(df)
 
     videotab.register_callbacks(dash_app, "pit", default_angle="HomeBehind")
     notes_ui.register_note_callbacks(dash_app, "pitching", "pitcher_id")

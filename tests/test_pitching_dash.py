@@ -229,3 +229,11 @@ def test_heatmaps_tab_render_has_controls_and_body():
     out = heatmaps.render(_pitch_df())
     s = str(out)
     assert "hm-pt" in s and "hm-side" in s and "hm-count" in s and "hm-body" in s
+
+
+def test_pitching_tabs_include_counts_and_heatmaps():
+    import inspect
+    from app.dashboards.pitching import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"counts"' in src and "Counts" in src
+    assert '"heatmaps"' in src and "Heatmaps" in src
