@@ -439,3 +439,23 @@ def test_bip_figs_empty_and_nonempty():
         "la": [12.0, 30.0], "distance": [300.0, 280.0]})
     assert len(charts.radial_fig(df).data) >= 2
     assert len(charts.spray_fig(df).data) >= 2
+
+
+def test_bip_tab_render_has_chip_store_and_graph():
+    import pandas as pd
+    from app.dashboards.hitting.tabs import balls_in_play
+    df = pd.DataFrame({
+        "hit_type": ["LineDrive"], "x": [50.0], "y": [200.0], "rx": [0.6], "ry": [0.2],
+        "exit_speed": [95.0], "la": [12.0], "distance": [300.0],
+        "Count": ["1-1"], "Result": ["LineDrive - Single"], "PitchType": ["Fastball"],
+        "Pitcher": ["X"]})
+    out = balls_in_play.render(df)
+    s = str(out)
+    assert "bip-active" in s and "bip-body" in s and "bip-chip" in s
+
+
+def test_last27_render_empty_ok():
+    import pandas as pd
+    from app.dashboards.hitting.tabs import last_27
+    out = last_27.render(pd.DataFrame(), pd.DataFrame())
+    assert "No recent plate appearances" in str(out)
