@@ -808,6 +808,31 @@ def fig_outings_velo_trend(recent_df: pd.DataFrame) -> go.Figure:
     return _base_layout(fig, "Velocity Trend (Selected Outings)")
 
 
+def count_states(df: pd.DataFrame) -> list[str]:
+    """Sorted distinct '{balls}-{strikes}' count states present in df."""
+    if df is None or df.empty:
+        return []
+    cs = (df["balls"].astype("Int64").astype(str) + "-"
+          + df["strikes"].astype("Int64").astype(str))
+    return sorted(c for c in cs.dropna().unique() if "<NA>" not in c)
+
+
+def fig_heatmap(df: pd.DataFrame) -> go.Figure:
+    """White->yellow->red 2-D density heatmap of plate locations, over the zone."""
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]) if df is not None else None
+    fig = go.Figure()
+    if d is not None and not d.empty:
+        fig.add_trace(go.Histogram2dContour(
+            x=d["plate_loc_side"], y=d["plate_loc_height"],
+            colorscale=[[0.0, "white"], [0.5, "yellow"], [1.0, "red"]],
+            contours=dict(coloring="fill"), line=dict(width=0),
+            showscale=False, ncontours=18, hoverinfo="skip"))
+    _add_zone(fig)
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    return _base_layout(fig, "Location Heatmap (Catcher View)")
+
+
 # ============================ TABLE ASSEMBLERS ============================
 
 def _r1(x) -> float | None:

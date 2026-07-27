@@ -338,3 +338,18 @@ def test_fig_movement_has_one_ellipse_per_pitch_type():
     ellipses = [t for t in fig.data if getattr(t, "fill", None) == "toself"]
     assert len(ellipses) == 2  # one per pitch type
     assert any(t.mode == "markers" for t in fig.data)
+
+
+def test_count_states_and_heatmap():
+    import pandas as pd
+    import plotly.graph_objects as go
+    from app.data import pitching as P
+    df = pd.DataFrame({
+        "balls": [0, 1, 0], "strikes": [0, 2, 0],
+        "plate_loc_side": [0.1, -0.4, 0.2], "plate_loc_height": [2.5, 3.0, 2.2],
+        "pitch_call": ["StrikeCalled", "BallCalled", "InPlay"],
+        "tagged_pitch_type": ["Fastball", "Slider", "Fastball"]})
+    assert P.count_states(df) == ["0-0", "1-2"]
+    assert isinstance(P.fig_heatmap(df), go.Figure)
+    # empty-safe
+    assert isinstance(P.fig_heatmap(df.iloc[0:0]), go.Figure)
