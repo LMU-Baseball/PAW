@@ -424,3 +424,18 @@ def test_hitting_tabs_include_video():
     from app.dashboards.hitting import layout
     src = inspect.getsource(layout.serve_layout)
     assert '"video"' in src and "Video" in src
+
+
+def test_bip_figs_empty_and_nonempty():
+    import pandas as pd
+    import plotly.graph_objects as go
+    from app.dashboards.hitting import charts
+    empty = pd.DataFrame(columns=["hit_type", "x", "y", "rx", "ry", "exit_speed", "la", "distance"])
+    assert isinstance(charts.radial_fig(empty), go.Figure)
+    assert isinstance(charts.spray_fig(empty), go.Figure)
+    df = pd.DataFrame({
+        "hit_type": ["LineDrive", "FlyBall"], "x": [50.0, -60.0], "y": [200.0, 180.0],
+        "rx": [0.6, 0.5], "ry": [0.2, 0.5], "exit_speed": [95.0, 88.0],
+        "la": [12.0, 30.0], "distance": [300.0, 280.0]})
+    assert len(charts.radial_fig(df).data) >= 2
+    assert len(charts.spray_fig(df).data) >= 2

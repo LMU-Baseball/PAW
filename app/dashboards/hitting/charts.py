@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -175,4 +176,96 @@ def all_pas_figure(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(height=300 * nrows, width=360 * ncols,
                       margin=dict(l=10, r=10, t=40, b=10),
                       paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+    return fig
+
+
+_HIT_COLORS = {"FlyBall": "#c0392b", "GroundBall": "#4a7fb5", "LineDrive": "#e08a1e",
+               "PopUp": "#6b8e23", "Undefined": "#888888"}
+
+
+def _empty_bip_fig(title: str) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        title=title, height=440, margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"),
+        annotations=[dict(text="No balls in play for this selection.",
+                          showarrow=False, font=dict(size=18, family="Teko, sans-serif"))])
+    return fig
+
+
+def radial_fig(bip_df) -> go.Figure:
+    """Launch-angle radial: EV rings (40/90/120 mph) + LA guide lines, points at
+    (rx, ry) colored by hit type."""
+    d = None
+    if bip_df is not None and not bip_df.empty:
+        d = bip_df[bip_df["rx"].notna() & bip_df["ry"].notna()]
+    if d is None or d.empty:
+        return _empty_bip_fig("Launch Angle / Exit Velo")
+    fig = go.Figure()
+    th = np.linspace(-np.pi / 2, np.pi / 2, 200)
+    for r, fill in [(1.0, "#e8e8e8"), (2 / 3, "#c8c8c8"), (1 / 3, "#9a9a9a")]:
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([r * np.cos(th), [0.0]]),
+            y=np.concatenate([r * np.sin(th), [-r]]),
+            fill="toself", fillcolor=fill, line=dict(width=0),
+            hoverinfo="skip", showlegend=False))
+    for ang, color in [(8, "green"), (25, "green"), (45, "#777"), (90, "#777")]:
+        a = np.radians(ang)
+        fig.add_trace(go.Scatter(x=[0, np.cos(a)], y=[0, np.sin(a)], mode="lines",
+                                 line=dict(color=color, width=1), hoverinfo="skip",
+                                 showlegend=False))
+    for ht, sub in d.groupby("hit_type"):
+        fig.add_trace(go.Scatter(
+            x=sub["rx"], y=sub["ry"], mode="markers", name=str(ht), showlegend=False,
+            marker=dict(size=9, color=_HIT_COLORS.get(str(ht), "#888"),
+                        line=dict(width=0.5, color="#555")),
+            customdata=sub[["exit_speed", "la"]].to_numpy(),
+            hovertemplate=(f"{ht}<br>EV: %{{customdata[0]:.1f}} mph"
+                           "<br>LA: %{customdata[1]:.0f}°<extra></extra>")))
+    fig.update_layout(
+        title="Launch Angle / Exit Velo", height=440, margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(range=[0, 1.15], visible=False),
+        yaxis=dict(range=[-1.15, 1.15], visible=False, scaleanchor="x", scaleratio=1),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
+    return fig
+
+
+def spray_fig(bip_df) -> go.Figure:
+    """Spray chart: foul lines + outfield arc + infield diamond, points at (x, y)
+    colored by hit type."""
+    d = None
+    if bip_df is not None and not bip_df.empty:
+        d = bip_df[bip_df["x"].notna() & bip_df["y"].notna()]
+    if d is None or d.empty:
+        return _empty_bip_fig("Spray Chart")
+    fig = go.Figure()
+    L = 400.0
+    for sgn in (-1, 1):
+        t = np.radians(45.0) * sgn
+        fig.add_shape(type="line", x0=0, y0=0, x1=L * np.sin(t), y1=L * np.cos(t),
+                      line=dict(color="#888", width=1))
+    arc = np.radians(np.linspace(-45, 45, 80))
+    fig.add_trace(go.Scatter(x=L * np.sin(arc), y=L * np.cos(arc), mode="lines",
+                             line=dict(color="#888", width=1), hoverinfo="skip",
+                             showlegend=False))
+    b = 63.6
+    fig.add_shape(type="path", path=f"M 0,0 L {b},{b} L 0,{2 * b} L {-b},{b} Z",
+                  line=dict(color="#bbb", width=1), fillcolor="rgba(0,0,0,0)")
+    for ht, sub in d.groupby("hit_type"):
+        fig.add_trace(go.Scatter(
+            x=sub["x"], y=sub["y"], mode="markers", name=str(ht), showlegend=False,
+            marker=dict(size=9, color=_HIT_COLORS.get(str(ht), "#888"),
+                        line=dict(width=0.5, color="#555")),
+            customdata=sub[["distance", "exit_speed"]].to_numpy(),
+            hovertemplate=(f"{ht}<br>Dist: %{{customdata[0]:.0f}} ft"
+                           "<br>EV: %{customdata[1]:.1f} mph<extra></extra>")))
+    fig.update_layout(
+        title="Spray Chart", height=440, margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(range=[-250, 250], visible=False),
+        yaxis=dict(range=[-20, 430], visible=False, scaleanchor="x", scaleratio=1),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
     return fig
