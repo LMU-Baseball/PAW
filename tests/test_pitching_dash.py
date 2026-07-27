@@ -200,3 +200,32 @@ def test_pitching_tabs_include_pitch_level():
     import inspect
     src = inspect.getsource(layout.serve_layout)
     assert '"pitchlevel"' in src and "Pitch Level" in src
+
+
+def _pitch_df():
+    import pandas as pd
+    return pd.DataFrame({
+        "balls": [0, 1], "strikes": [0, 2],
+        "plate_loc_side": [0.1, -0.3], "plate_loc_height": [2.5, 3.0],
+        "pitch_call": ["StrikeCalled", "BallCalled"], "batter_side": ["Right", "Left"],
+        "tagged_pitch_type": ["Fastball", "Slider"], "auto_pitch_type": ["Fastball", "Slider"],
+        "rel_speed": [92.0, 84.0]})
+
+
+def test_counts_tab_render_has_dropdown_and_body():
+    from app.dashboards.pitching.tabs import counts
+    out = counts.render(_pitch_df())
+    s = str(out)
+    assert "counts-dd" in s and "counts-body" in s
+    # empty df -> empty state, no exception
+    import pandas as pd
+    assert "No pitches" in str(counts.body(pd.DataFrame(
+        {"balls": [], "strikes": [], "plate_loc_side": [], "plate_loc_height": [],
+         "pitch_call": [], "tagged_pitch_type": []})))
+
+
+def test_heatmaps_tab_render_has_controls_and_body():
+    from app.dashboards.pitching.tabs import heatmaps
+    out = heatmaps.render(_pitch_df())
+    s = str(out)
+    assert "hm-pt" in s and "hm-side" in s and "hm-count" in s and "hm-body" in s
