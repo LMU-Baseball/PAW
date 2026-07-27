@@ -425,3 +425,10 @@ def test_catching_callbacks_have_static_call():
     from app.dashboards.catching import callbacks
     src = inspect.getsource(callbacks)
     assert "static-call-active" in src and "static-body" in src
+
+
+def test_catching_tabs_include_pitch_level():
+    import inspect
+    from app.dashboards.catching import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"pitchlevel"' in src and "Pitch Level" in src

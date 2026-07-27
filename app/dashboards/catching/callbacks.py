@@ -8,7 +8,8 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import catching as C
-from app.dashboards import date_range as dr, notes_ui
+from app.data import video as videodata
+from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.catching import charts, layout, selectors
 from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
 
@@ -86,8 +87,24 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("tab-content", "children"),
         Input("tabs", "value"), Input("game-data", "data"),
+        State("selection", "data"),
     )
-    def _render_tab(tab, data_json):
+    def _render_tab(tab, data_json, sel):
+        if tab == "pitchlevel":
+            sel = sel or {}
+            cid = sel.get("catcher_id")
+            if cid is None:
+                return html.Div("Select a catcher.", style={"padding": "12px", "color": "#555"})
+            gid = sel.get("game_id")
+            if gid == dr.ALL_IN_RANGE:
+                g = C.games_for_catcher(int(cid), start=sel.get("start"), end=sel.get("end"))
+                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+            elif gid is None:
+                return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})
+            else:
+                gids = [int(gid)]
+            vdf = videodata.pitch_video_df(gids, catcher_id=int(cid))
+            return videotab.render(vdf, prefix="cat", default_angle="HomeBehind")
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",
@@ -191,4 +208,5 @@ def register_callbacks(dash_app) -> None:
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
 
+    videotab.register_callbacks(dash_app, "cat", default_angle="HomeBehind")
     notes_ui.register_note_callbacks(dash_app, "catching", "catcher_id")

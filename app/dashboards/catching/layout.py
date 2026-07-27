@@ -106,6 +106,7 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="Overall Framing", value="framing"),
         dcc.Tab(label="Static Framing", value="static"),
         dcc.Tab(label="Caught Stealing", value="caught"),
+        dcc.Tab(label="Pitch Level", value="pitchlevel"),
     ])
 
     return html.Div([
