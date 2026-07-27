@@ -135,3 +135,50 @@ def test_hitting_games_date_filter_and_range():
     pooled = H.wh_range_pitches(bid, lo, hi)
     single = sum(len(H.wh_game_pitches(int(g), bid)) for g in allg["game_id"])
     assert len(pooled) == single
+
+
+def _a_hitting_bip_batter():
+    from app.db import query_df
+    r = query_df(
+        """
+        SELECT batter_tm_id, game_id FROM fact_tm_game_pitch
+         WHERE batter_team='LOY_LIO' AND pitch_call='InPlay'
+           AND bearing IS NOT NULL AND distance IS NOT NULL
+           AND exit_speed IS NOT NULL AND la IS NOT NULL
+         LIMIT 1
+        """
+    ).iloc[0]
+    return int(r["batter_tm_id"]), int(r["game_id"])
+
+
+def test_wh_bip_points_shape_and_coords():
+    import math
+    from app.data import hitting_wh
+    bid, gid = _a_hitting_bip_batter()
+    df = hitting_wh.wh_bip_points(bid, gid)
+    assert not df.empty
+    for c in ["hit_type", "x", "y", "rx", "ry", "exit_speed", "la"]:
+        assert c in df.columns
+    # coords match the legacy formula for the first fully-populated row
+    row = df.dropna(subset=["bearing", "distance"]).iloc[0]
+    exp_x = math.sin(math.radians(row["bearing"])) * row["distance"]
+    assert abs(row["x"] - exp_x) < 1e-6
+
+
+def test_wh_bip_points_empty_game_list():
+    from app.data import hitting_wh
+    bid, _ = _a_hitting_bip_batter()
+    df = hitting_wh.wh_bip_points(bid, [])
+    assert df.empty and "hit_type" in df.columns
+
+
+def test_wh_last_n_pas_shape():
+    from app.data import hitting_wh
+    bid, _ = _a_hitting_bip_batter()
+    df = hitting_wh.wh_last_n_pas(bid, 27)
+    # same column shape as a game df (goes through _finish)
+    assert "PlateLocSide" in df.columns and "PAofInning" in df.columns
+    # at most 27 distinct PAs
+    if not df.empty:
+        pas = df[["GameID", "Inning", "PAofInning"]].drop_duplicates()
+        assert len(pas) <= 27

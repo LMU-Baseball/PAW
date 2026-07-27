@@ -322,3 +322,78 @@ def wh_scoreboard(game_id) -> dict:
             "loc": "vs" if r["home_team_id"] == LMU_TEAM_ID else "@",
             "opp": "" if pd.isna(r["opp"]) else str(r["opp"]),
             "game_type": "" if pd.isna(r["game_type"]) else str(r["game_type"])}
+
+
+_BIP_COLS = ["hit_type", "exit_speed", "la", "bearing", "distance",
+             "x", "y", "rx", "ry", "Count", "Result", "PitchType", "Pitcher"]
+
+
+def wh_bip_points(batter_tm_id, game_id) -> pd.DataFrame:
+    """Balls-in-play landing (x,y) + launch-radial (rx,ry) for a batter and
+    game(s). `game_id` is an int or a list. Empty full-column frame when none."""
+    gids = [int(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
+    if not gids:
+        return pd.DataFrame(columns=_BIP_COLS)
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
+    gph = ", ".join(f":g{i}" for i in range(len(gids)))
+    idp.update({f"g{i}": g for i, g in enumerate(gids)})
+    df = query_df(
+        f"""
+        SELECT tagged_hit_type AS hit_type, exit_speed, la, bearing, distance,
+               play_result AS PlayResult, pitch_call AS PitchCall,
+               tagged_pitch_type AS PitchType, pitcher_name AS Pitcher,
+               balls AS Balls, strikes AS Strikes
+          FROM fact_tm_game_pitch
+         WHERE game_id IN ({gph}) AND batter_tm_id IN ({ph})
+           AND pitch_call = 'InPlay'
+         ORDER BY game_id, pitch_no
+        """,
+        idp,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=_BIP_COLS)
+    df["hit_type"] = df["hit_type"].fillna("Undefined").replace("", "Undefined")
+    br = np.radians(df["bearing"].astype(float))
+    df["x"] = np.sin(br) * df["distance"].astype(float)
+    df["y"] = np.cos(br) * df["distance"].astype(float)
+    la = np.radians(df["la"].astype(float))
+    ev = df["exit_speed"].astype(float)
+    df["rx"] = ev / 120.0 * np.cos(la)
+    df["ry"] = ev / 120.0 * np.sin(la)
+    df["Count"] = (df["Balls"].astype("Int64").astype(str) + "-"
+                   + df["Strikes"].astype("Int64").astype(str))
+    undefined = df["PlayResult"].isna() | df["PlayResult"].isin(["Undefined"])
+    df["Result"] = np.where(undefined, df["PitchCall"],
+                            df["hit_type"] + " - " + df["PlayResult"].astype(str))
+    return df[_BIP_COLS]
+
+
+def wh_last_n_pas(batter_tm_id, n: int = 27) -> pd.DataFrame:
+    """The batter's most recent `n` plate appearances (across all games),
+    returned through _finish so the shared hitting transforms apply."""
+    ph, idp = _in_clause(_sibling_ids(batter_tm_id))
+    pas = query_df(
+        f"""
+        SELECT d.game_id, d.inning, d.pa_of_inning FROM (
+          SELECT DISTINCT f.game_id, f.inning, f.pa_of_inning, g.game_date
+            FROM fact_tm_game_pitch f
+            JOIN dim_tm_game g ON g.game_id = f.game_id
+           WHERE f.batter_tm_id IN ({ph})
+        ) d
+        ORDER BY d.game_date DESC, d.inning DESC, d.pa_of_inning DESC
+        LIMIT {int(n)}
+        """,
+        idp,
+    )
+    all_df = _finish(query_df(
+        f"SELECT {_PITCH_SELECT} FROM fact_tm_game_pitch "
+        f"WHERE batter_tm_id IN ({ph}) ORDER BY game_id, pitch_no",
+        idp,
+    ))
+    if all_df.empty or pas.empty:
+        return all_df
+    keys = set(zip(pas["game_id"].astype(int), pas["inning"].astype(int),
+                   pas["pa_of_inning"].astype(int)))
+    mask = [(int(g), int(i), int(p)) in keys
+            for g, i, p in zip(all_df["GameID"], all_df["Inning"], all_df["PAofInning"])]
+    return all_df[mask].reset_index(drop=True)
