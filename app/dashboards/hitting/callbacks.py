@@ -4,14 +4,30 @@ from __future__ import annotations
 import io
 
 import pandas as pd
-from dash import Input, Output, State, dcc, html
+from dash import ALL, Input, Output, State, ctx, dcc, html
 from flask_login import current_user
 
 from app.data import hitting_wh
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.hitting import layout, selectors
-from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
+from app.dashboards.hitting.tabs import (game_level, plate_appearances as pa,
+                                         zone_location as zl, balls_in_play, last_27)
+
+
+def _resolve_gids(sel):
+    """Selection -> list of game_ids (single game, or all games in range)."""
+    sel = sel or {}
+    bid = sel.get("batter_id")
+    gid = sel.get("game_id")
+    if bid is None:
+        return []
+    if gid == dr.ALL_IN_RANGE:
+        g = hitting_wh.wh_games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
+        return [int(x) for x in g["game_id"]] if not g.empty else []
+    if gid is None:
+        return []
+    return [int(gid)]
 
 
 def _load_game_df(store) -> pd.DataFrame:
@@ -100,6 +116,22 @@ def register_callbacks(dash_app) -> None:
         State("selection", "data"),
     )
     def _render_tab(tab, data_json, sel):
+        if tab == "bip":
+            sel = sel or {}
+            bid = sel.get("batter_id")
+            if bid is None:
+                return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
+            bip = hitting_wh.wh_bip_points(int(bid), _resolve_gids(sel))
+            return balls_in_play.render(bip)
+        if tab == "last27":
+            sel = sel or {}
+            bid = sel.get("batter_id")
+            if bid is None:
+                return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
+            last = hitting_wh.wh_last_n_pas(int(bid), 27)
+            gids = sorted({int(g) for g in last["GameID"]}) if not last.empty else []
+            bip = hitting_wh.wh_bip_points(int(bid), gids)
+            return last_27.render(last, bip)
         if tab == "video":
             sel = sel or {}
             bid = sel.get("batter_id")
@@ -154,6 +186,46 @@ def register_callbacks(dash_app) -> None:
     def _zone_body(zone_choice, data_json):
         df = _read_game_df(data_json)
         return zl.render(df, zone_choice or "All Swings")
+
+    @dash_app.callback(
+        Output("bip-active", "data"),
+        Input({"type": "bip-chip", "index": ALL}, "n_clicks"),
+        State("bip-active", "data"), prevent_initial_call=True,
+    )
+    def _bip_toggle(_clicks, active):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        ht = tid["index"]; active = list(active or [])
+        return [c for c in active if c != ht] if ht in active else active + [ht]
+
+    @dash_app.callback(
+        Output("bip-body", "children"),
+        Input("bip-active", "data"), State("selection", "data"),
+    )
+    def _bip_body(active, sel):
+        sel = sel or {}
+        bid = sel.get("batter_id")
+        if bid is None:
+            return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
+        bip = hitting_wh.wh_bip_points(int(bid), _resolve_gids(sel))
+        if active is not None and not bip.empty:
+            bip = bip[bip["hit_type"].isin(active)]
+        return balls_in_play.body(bip)
+
+    @dash_app.callback(
+        Output({"type": "bip-chip", "index": ALL}, "style"),
+        Input("bip-active", "data"),
+        State({"type": "bip-chip", "index": ALL}, "id"),
+    )
+    def _bip_chip_styles(active, ids):
+        active = set(active or [])
+        out = []
+        for i in ids:
+            ht = i["index"]; col = balls_in_play.charts._HIT_COLORS.get(ht, "#888")
+            on = ht in active
+            out.append(balls_in_play._chip_style(col, on))
+        return out
 
     videotab.register_callbacks(dash_app, "hit", default_angle="batter_side")
     notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")

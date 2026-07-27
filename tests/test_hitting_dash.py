@@ -459,3 +459,11 @@ def test_last27_render_empty_ok():
     from app.dashboards.hitting.tabs import last_27
     out = last_27.render(pd.DataFrame(), pd.DataFrame())
     assert "No recent plate appearances" in str(out)
+
+
+def test_hitting_tabs_include_bip_and_last27():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"bip"' in src and "Balls in Play" in src
+    assert '"last27"' in src and "Last 27 PA" in src
