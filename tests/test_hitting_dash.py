@@ -417,3 +417,10 @@ def test_stat_table_colors_tagged_pitch_type():
     plain = tables.stat_table(pd.DataFrame({"PA": [1]}), id="t2")
     assert not any(c.get("if", {}).get("column_id") == "TaggedPitchType"
                    for c in (plain.style_data_conditional or []))
+
+
+def test_hitting_tabs_include_video():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"video"' in src and "Video" in src

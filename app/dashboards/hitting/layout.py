@@ -110,6 +110,7 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="Game Level", value="game"),
         dcc.Tab(label="Plate Appearances", value="pa"),
         dcc.Tab(label="Zone Location", value="zone"),
+        dcc.Tab(label="Video", value="video"),
     ])
 
     return html.Div([

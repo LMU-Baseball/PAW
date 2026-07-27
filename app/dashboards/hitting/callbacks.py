@@ -8,7 +8,8 @@ from dash import Input, Output, State, dcc, html
 from flask_login import current_user
 
 from app.data import hitting_wh
-from app.dashboards import date_range as dr, notes_ui
+from app.data import video as videodata
+from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
 
@@ -99,6 +100,21 @@ def register_callbacks(dash_app) -> None:
         State("selection", "data"),
     )
     def _render_tab(tab, data_json, sel):
+        if tab == "video":
+            sel = sel or {}
+            bid = sel.get("batter_id")
+            if bid is None:
+                return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
+            gid = sel.get("game_id")
+            if gid == dr.ALL_IN_RANGE:
+                g = hitting_wh.wh_games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
+                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+            elif gid is None:
+                return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})
+            else:
+                gids = [int(gid)]
+            vdf = videodata.pitch_video_df(gids, batter_id=int(bid))
+            return videotab.render(vdf, prefix="hit", default_angle="batter_side")
         df = _read_game_df(data_json)
         if tab == "game":
             return game_level.render(df)
@@ -139,4 +155,5 @@ def register_callbacks(dash_app) -> None:
         df = _read_game_df(data_json)
         return zl.render(df, zone_choice or "All Swings")
 
+    videotab.register_callbacks(dash_app, "hit", default_angle="batter_side")
     notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")
