@@ -240,7 +240,7 @@ def register_callbacks(dash_app) -> None:
     def _counts_body(sel_counts, data_json):
         df = _read_game_df(data_json)
         if df.empty:
-            return html.Div("No pitch data.")
+            return html.Div("No pitch data.", style={"padding": "12px", "color": "#555"})
         if sel_counts is not None:
             cs = (df["balls"].astype("Int64").astype(str) + "-"
                   + df["strikes"].astype("Int64").astype(str))
@@ -255,7 +255,7 @@ def register_callbacks(dash_app) -> None:
     def _hm_body(pts, side, sel_counts, data_json):
         df = _read_game_df(data_json)
         if df.empty:
-            return html.Div("No pitch data.")
+            return html.Div("No pitch data.", style={"padding": "12px", "color": "#555"})
         if pts is not None:
             df = df[P.pitch_type(df).isin(pts)]
         if side and side != "All":

@@ -830,7 +830,9 @@ def fig_heatmap(df: pd.DataFrame) -> go.Figure:
     _add_zone(fig)
     fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
     fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
-    return _base_layout(fig, "Location Heatmap (Catcher View)")
+    _base_layout(fig, "Location Heatmap (Catcher View)")
+    fig.update_layout(showlegend=False)
+    return fig
 
 
 # ============================ TABLE ASSEMBLERS ============================
