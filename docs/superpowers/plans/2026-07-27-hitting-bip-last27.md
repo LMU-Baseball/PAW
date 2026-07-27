@@ -19,7 +19,7 @@
 
 ---
 
-### Task H1: Data helpers `wh_bip_points` + `wh_last_n_pas`
+### Task 1: Data helpers `wh_bip_points` + `wh_last_n_pas`
 
 **Files:**
 - Modify: `app/data/hitting_wh.py` (append two functions; `numpy as np` is already imported)
@@ -172,7 +172,7 @@ git commit -m "feat(hitting): wh_bip_points + wh_last_n_pas warehouse helpers"
 
 ---
 
-### Task H2: Charts `radial_fig` + `spray_fig`
+### Task 2: Charts `radial_fig` + `spray_fig`
 
 **Files:**
 - Modify: `app/dashboards/hitting/charts.py` (append; `plotly.graph_objects as go` is imported — add `import numpy as np` at the top if absent)
@@ -305,7 +305,7 @@ git commit -m "feat(hitting): radial + spray Plotly figures for balls in play"
 
 ---
 
-### Task H3: Tab modules `balls_in_play` + `last_27`
+### Task 3: Tab modules `balls_in_play` + `last_27`
 
 **Files:**
 - Create: `app/dashboards/hitting/tabs/balls_in_play.py`
@@ -429,14 +429,14 @@ git commit -m "feat(hitting): Balls in Play + Last 27 PA tab modules"
 
 ---
 
-### Task H4: Wire tabs into the hitting dashboard
+### Task 4: Wire tabs into the hitting dashboard
 
 **Files:**
 - Modify: `app/dashboards/hitting/layout.py` (tabs list ~line 109)
 - Modify: `app/dashboards/hitting/callbacks.py` (imports; `_render_tab`; new chip trio; a `_resolve_gids` helper)
 - Test: `tests/test_hitting_dash.py` (append)
 
-**Interfaces — Consumes:** Task H1 (`wh_bip_points`, `wh_last_n_pas`), Task H3 tabs.
+**Interfaces — Consumes:** Task 1 (`wh_bip_points`, `wh_last_n_pas`), Task 3 tabs.
 
 - [ ] **Step 1: Write the failing test** (append to `tests/test_hitting_dash.py`)
 
@@ -569,7 +569,7 @@ git commit -m "feat(hitting): wire Balls in Play + Last 27 PA tabs with hit-type
 
 ---
 
-### Task H5: Full-suite + live smoke
+### Task 5: Full-suite + live smoke
 
 - [ ] **Step 1:** `python -m pytest -q` → all green.
 - [ ] **Step 2: In-process smoke** (do not disturb any running server):
