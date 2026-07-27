@@ -26,6 +26,7 @@ def create_app(config_object=Config) -> Flask:
     # Import models so they register with SQLAlchemy + the login user_loader.
     from app.auth import models  # noqa: F401
     from app.data import notes  # noqa: F401  (registers GameNote for create_all)
+    from app.data import dev_plans  # noqa: F401  (registers DevPlan for create_all)
 
     from app.auth.routes import auth_bp
     from app.main.routes import main_bp
