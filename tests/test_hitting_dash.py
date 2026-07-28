@@ -480,3 +480,24 @@ def test_hitting_tabs_include_dev_plan():
     from app.dashboards.hitting import layout
     src = inspect.getsource(layout.serve_layout)
     assert '"devplan"' in src and "Dev Plan" in src
+
+
+def test_dev_plan_coach_editable_player_readonly(tmp_path):
+    from app import create_app
+    from config import Config
+
+    class TestConfig(Config):
+        TESTING = True
+        SECRET_KEY = "test-secret"
+        SQLALCHEMY_DATABASE_URI = f"sqlite:///{tmp_path / 'dp.db'}"
+
+    app = create_app(TestConfig)
+    from app.dashboards.hitting.tabs import dev_plan
+    with app.app_context():
+        from app.data import dev_plans
+        dev_plans.upsert_plan("hitting", 806253, "drive the ball", author_id=1)
+        coach = str(dev_plan.render(806253, True))
+        player = str(dev_plan.render(806253, False))
+        assert "devplan-text" in coach and "devplan-save" in coach
+        assert "devplan-text" not in player          # player is read-only
+        assert "drive the ball" in player             # but sees the plan text

@@ -269,7 +269,8 @@ def register_callbacks(dash_app) -> None:
         bid = sel.get("batter_id")
         if bid is not None:
             dev_plans.delete_plan("hitting", bid)
-        return "", "Deleted."
+            return "", "Deleted."
+        return "", ""
 
     videotab.register_callbacks(dash_app, "hit", default_angle="batter_side")
     notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")
