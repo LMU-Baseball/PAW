@@ -39,6 +39,19 @@ def test_render_has_table_player_and_angle_buttons():
     assert len(btns) == 4
 
 
+def test_resolve_default_prefers_broadcast_then_falls_back():
+    from app.dashboards.video import component as comp
+    angles = [a for a, _ in vdata.ANGLES]
+    # pitch WITH a broadcast clip -> broadcast is chosen
+    p_all = {"urls": {a: f"http://x/{a}.mp4" for a in angles}, "side": "Right"}
+    assert comp._resolve_default(p_all, "Broadcast") == "Broadcast"
+    # pitch WITHOUT broadcast -> falls back to an available angle (not empty)
+    p_nob = {"urls": {a: (None if a == "Broadcast" else f"http://x/{a}.mp4")
+                      for a in angles}, "side": "Right"}
+    got = comp._resolve_default(p_nob, "Broadcast")
+    assert got != "Broadcast" and p_nob["urls"][got]
+
+
 def test_table_hides_url_columns_but_keeps_them_in_data():
     out = vc.render(_df(), prefix="hit", default_angle="batter_side")
     table = next(n for n in _walk(out)

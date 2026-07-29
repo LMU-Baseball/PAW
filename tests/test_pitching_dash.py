@@ -275,6 +275,15 @@ def test_pitching_tabs_include_counts_and_heatmaps():
     assert '"heatmaps"' in src and "Zone Frequency" in src
 
 
+def test_pitching_video_defaults_to_broadcast():
+    """Coach wants the center-field (Broadcast) camera as the default angle."""
+    import inspect
+    from app.dashboards.pitching import callbacks
+    src = inspect.getsource(callbacks.register_callbacks)
+    assert 'default_angle="Broadcast"' in src
+    assert 'default_angle="HomeBehind"' not in src   # pitching no longer defaults to HomeBehind
+
+
 def test_register_callbacks_adds_callbacks(server):
     """Registering the (churned) pitching callback graph must not error and must
     wire callbacks — guards the deleted splits callbacks + new lm-* Inputs."""

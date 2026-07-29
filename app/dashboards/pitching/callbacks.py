@@ -122,7 +122,9 @@ def register_callbacks(dash_app) -> None:
             else:
                 gids = [int(gid)]
             vdf = videodata.pitch_video_df(gids, pitcher_id=int(pid))
-            return videotab.render(vdf, prefix="pit", default_angle="HomeBehind")
+            # Coach prefers the center-field (Broadcast) camera; the component
+            # falls back to another angle when a pitch has no broadcast clip.
+            return videotab.render(vdf, prefix="pit", default_angle="Broadcast")
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",
@@ -227,5 +229,5 @@ def register_callbacks(dash_app) -> None:
             df = df[cs.isin(sel_counts)]
         return heatmaps.body(df)
 
-    videotab.register_callbacks(dash_app, "pit", default_angle="HomeBehind")
+    videotab.register_callbacks(dash_app, "pit", default_angle="Broadcast")
     notes_ui.register_note_callbacks(dash_app, "pitching", "pitcher_id")
