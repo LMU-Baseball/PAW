@@ -952,10 +952,6 @@ def movement_summary(df: pd.DataFrame) -> list[dict]:
     for pt, sub in d.groupby("_pt"):
         rhh = sub[sub["batter_side"] == "Right"]
         lhh = sub[sub["batter_side"] == "Left"]
-        # PROVISIONAL "Spread": std dev of total break magnitude (movement
-        # consistency), in inches.
-        mag = np.sqrt(sub["induced_vert_break"] ** 2 + sub["horz_break"] ** 2)
-        spread = float(mag.std(ddof=0)) if len(sub) > 1 else 0.0
         rows.append({
             "pitch": pt,
             "velo_avg": _r1(sub["rel_speed"].mean()),
@@ -966,7 +962,8 @@ def movement_summary(df: pd.DataFrame) -> list[dict]:
             "hb_avg": _r1(sub["horz_break"].mean()),
             "hb_rhh": _r1(rhh["horz_break"].mean()) if len(rhh) else None,
             "hb_lhh": _r1(lhh["horz_break"].mean()) if len(lhh) else None,
-            "spread": _r1(spread),
+            # VAA — average vertical approach angle (deg); replaces old "Spread".
+            "vaa": _r1(sub["vert_appr_angle"].mean()),
             "_count": len(sub),
         })
     rows.sort(key=lambda r: r["_count"], reverse=True)

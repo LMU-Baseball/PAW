@@ -57,13 +57,13 @@
     <div class="panel">
       <div class="panel-t">Movement Summary</div>
       <table>
-        <tr><th class="l">Pitch</th><th>Velo</th><th>Vert Break</th><th>Horiz Break</th><th>Spread</th></tr>
+        <tr><th class="l">Pitch</th><th>Velo</th><th>Vert Break</th><th>Horiz Break</th><th>VAA</th></tr>
         {% for r in movement %}
         <tr><td class="l pt" style="color: {{ pitch_colors.get(r.pitch, '#111') }};">{{ r.pitch }}</td>
             <td>{{ r.velo_avg if r.velo_avg is not none else '—' }} ({{ r.velo_max if r.velo_max is not none else '—' }})</td>
             <td>{{ r.ivb_avg if r.ivb_avg is not none else '—' }} ({{ r.ivb_rhh if r.ivb_rhh is not none else '—' }}/{{ r.ivb_lhh if r.ivb_lhh is not none else '—' }})</td>
             <td>{{ r.hb_avg if r.hb_avg is not none else '—' }} ({{ r.hb_rhh if r.hb_rhh is not none else '—' }}/{{ r.hb_lhh if r.hb_lhh is not none else '—' }})</td>
-            <td>{{ r.spread if r.spread is not none else '—' }}</td></tr>
+            <td>{{ r.vaa if r.vaa is not none else '—' }}</td></tr>
         {% endfor %}
       </table>
     </div>

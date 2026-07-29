@@ -88,7 +88,8 @@ def test_movement_summary_shape():
     assert len(rows) >= 1
     for r in rows:
         assert set(r) >= {"pitch", "velo_avg", "velo_max", "ivb_avg", "ivb_rhh",
-                          "ivb_lhh", "hb_avg", "hb_rhh", "hb_lhh", "spread"}
+                          "ivb_lhh", "hb_avg", "hb_rhh", "hb_lhh", "vaa"}
+        assert "spread" not in r
         assert r["velo_max"] is None or r["velo_avg"] is None or \
             r["velo_max"] >= r["velo_avg"]
 
