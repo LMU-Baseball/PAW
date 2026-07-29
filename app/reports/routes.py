@@ -122,12 +122,20 @@ def pitching_all_zip(game_id: int):
 @report_bp.route("/bullpen")
 @login_required
 def bullpen_landing():
-    """Pick an LMU pitcher, then download a bullpen session report."""
+    """Pick an LMU pitcher, then download a bullpen session report.
+
+    Coaches see all LMU pitchers; a player sees only their own (self-only,
+    matching the PDF gate) — no roster/session enumeration for players.
+    """
     pitchers = BULL.lmu_bullpen_pitchers()
+    if getattr(current_user, "role", None) != "coach":
+        tm = current_user.trackman_id
+        pitchers = (pitchers[pitchers["pitcher_id"].astype(str) == str(tm)]
+                    if tm is not None else pitchers.iloc[0:0])
     pid = request.args.get("pitcher_id", type=int)
     sessions = None
     selected = None
-    if pid is not None:
+    if pid is not None and can_view_bullpen(current_user, pid):
         match = pitchers[pitchers["pitcher_id"] == pid]
         if not match.empty:
             selected = match.iloc[0].to_dict()

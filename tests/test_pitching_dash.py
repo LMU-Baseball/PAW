@@ -273,3 +273,16 @@ def test_pitching_tabs_include_counts_and_heatmaps():
     src = inspect.getsource(layout.serve_layout)
     assert '"counts"' in src and "Count Performance" in src
     assert '"heatmaps"' in src and "Zone Frequency" in src
+
+
+def test_register_callbacks_adds_callbacks(server):
+    """Registering the (churned) pitching callback graph must not error and must
+    wire callbacks — guards the deleted splits callbacks + new lm-* Inputs."""
+    from dash import Dash
+    from app.dashboards.pitching import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/ptest/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    before = len(app.callback_map)
+    callbacks.register_callbacks(app)
+    assert len(app.callback_map) > before

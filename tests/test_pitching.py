@@ -386,3 +386,7 @@ def test_range_summary_shape_and_date_bounding(real_pitcher_id_and_game):
     assert full["k_pct"].endswith("%") and full["ip"]
     one = P.range_summary(pid, start, start)
     assert int(one["appearances"]) <= int(full["appearances"])
+    # no-date fallback path (career-wide) returns the same key set + display strings
+    nodate = P.range_summary(pid)
+    assert set(nodate) == {"appearances", "ip", "k_pct", "bb_pct", "barrel_pct"}
+    assert nodate["k_pct"].endswith("%")
