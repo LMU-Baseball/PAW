@@ -82,6 +82,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
         "zone_rhh": plots.zone_chart_uri(df, "Right", "vRHH Zone"),
         "movement": plots.movement_map_uri(df, "Movement Map"),
         "zone_lhh": plots.zone_chart_uri(df, "Left", "vLHH Zone"),
+        "pitch_usage_donuts": plots.pitch_usage_donuts_uri(df),
     }
 
     usage = P.pitch_usage_table(df)

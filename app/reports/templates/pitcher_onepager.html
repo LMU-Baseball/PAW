@@ -46,13 +46,7 @@
   <div class="grid2">
     <div class="panel">
       <div class="panel-t">Pitch Usage</div>
-      <table>
-        <tr><th class="l">Pitch Type</th><th>Strike%</th><th>Usage</th><th>2K Usage</th><th>vRHH</th><th>vLHH</th></tr>
-        {% for r in usage %}
-        <tr><td class="l pt" style="color: {{ pitch_colors.get(r.pitch, '#111') }};">{{ r.pitch }}</td><td>{{ r.strike_pct }}%</td><td>{{ r.usage_pct }}%</td>
-            <td>{{ r.twok_usage_pct }}%</td><td>{{ r.vrhh }}%</td><td>{{ r.vlhh }}%</td></tr>
-        {% endfor %}
-      </table>
+      <img class="usage-donuts" src="{{ charts.pitch_usage_donuts }}" alt="Pitch Usage">
     </div>
     <div class="panel">
       <div class="panel-t">Movement Summary</div>

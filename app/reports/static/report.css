@@ -42,3 +42,4 @@ td.l, th.l { text-align: left; }
 td.pt { font-weight: 700; }
 .plot { display: flex; align-items: center; justify-content: center; padding: 4px; }
 .plot img { width: 100%; height: auto; }
+.usage-donuts { width: 100%; height: auto; display: block; }

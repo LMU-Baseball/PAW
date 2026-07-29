@@ -27,6 +27,14 @@ def test_plots_empty_input_safe():
     _is_png_uri(plots.movement_map_uri(empty))
 
 
+def test_pitch_usage_donuts_returns_png():
+    _is_png_uri(plots.pitch_usage_donuts_uri(_df()))
+
+
+def test_pitch_usage_donuts_empty_safe():
+    _is_png_uri(plots.pitch_usage_donuts_uri(_df().iloc[0:0]))
+
+
 def test_pitch_colors_stable_per_name():
     assert plots._color_for("Fastball") == plots._color_for("Fastball")
     # an unknown name is deterministic across calls

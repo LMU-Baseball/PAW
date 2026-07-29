@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Ellipse
+from matplotlib.patches import Ellipse, Wedge
 
 from app.data.pitching import pitch_type
 
@@ -151,4 +151,61 @@ def movement_map_uri(df, title: str = "Movement Map") -> str:
     ax.set_ylabel("IVB (in)", fontsize=8)
     ax.tick_params(labelsize=7)
     ax.set_title(title, fontsize=11, color="#9A0021", fontweight="bold")
+    return _fig_to_uri(fig)
+
+
+def _donut(ax, values, colors, center_label) -> None:
+    pairs = [(v, c) for v, c in zip(values, colors) if v and v > 0]
+    ax.set_aspect("equal")
+    if pairs:
+        vals, cols = [p[0] for p in pairs], [p[1] for p in pairs]
+        ax.pie(vals, colors=cols, startangle=90, counterclock=False,
+               wedgeprops=dict(width=0.42, edgecolor="white", linewidth=1),
+               autopct=lambda p: f"{p:.0f}%" if p >= 6 else "",
+               pctdistance=0.78, textprops=dict(fontsize=7, color="#222"))
+    else:
+        ax.text(0.5, 0.5, "—", ha="center", va="center", transform=ax.transAxes)
+    ax.text(0, 0, center_label, ha="center", va="center",
+            fontsize=10, fontweight="bold", color="#0076A5")
+
+
+def _split_donut(ax, vlhh, vrhh, colors) -> None:
+    ax.set_xlim(-1.25, 1.25)
+    ax.set_ylim(-1.25, 1.25)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    r_out, r_in = 1.0, 0.58
+
+    def _half(vals, start, end):
+        tot = sum(v for v in vals if v) or 1
+        a = start
+        for v, c in zip(vals, colors):
+            if not v:
+                continue
+            sweep = (end - start) * v / tot
+            ax.add_patch(Wedge((0, 0), r_out, a, a + sweep, width=r_out - r_in,
+                               facecolor=c, edgecolor="white", linewidth=1))
+            a += sweep
+    _half(vlhh, 90, 270)    # left half = vLHH
+    _half(vrhh, -90, 90)    # right half = vRHH
+    ax.text(0, 0.05, "Splits", ha="center", va="center",
+            fontsize=10, fontweight="bold", color="#0076A5")
+    ax.text(0, -0.16, "vLHH | vRHH", ha="center", va="center",
+            fontsize=6, color="#555")
+
+
+def pitch_usage_donuts_uri(df) -> str:
+    """Overall / 2K / Splits(vLHH|vRHH) usage donuts as one PNG data URI."""
+    from app.data.pitching import pitch_usage_table
+    rows = pitch_usage_table(df)
+    fig, axes = plt.subplots(1, 3, figsize=(9.2, 3.2))
+    if not rows:
+        for ax, lbl in zip(axes, ("Overall", "2K", "Splits")):
+            ax.axis("off")
+            ax.text(0.5, 0.5, "—", ha="center", va="center", transform=ax.transAxes)
+        return _fig_to_uri(fig)
+    colors = [_color_for(r["pitch"]) for r in rows]
+    _donut(axes[0], [r["usage_pct"] for r in rows], colors, "Overall")
+    _donut(axes[1], [r["twok_usage_pct"] for r in rows], colors, "2K")
+    _split_donut(axes[2], [r["vlhh"] for r in rows], [r["vrhh"] for r in rows], colors)
     return _fig_to_uri(fig)
