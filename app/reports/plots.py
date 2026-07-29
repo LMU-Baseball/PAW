@@ -14,6 +14,7 @@ matplotlib.use("Agg")  # headless; must precede pyplot import
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Ellipse, Wedge
+from matplotlib.lines import Line2D
 
 from app.data.pitching import pitch_type
 
@@ -76,6 +77,25 @@ def _draw_zone(ax) -> None:
             [0.2, 0.2, 0.5, 0.75, 0.5, 0.2], color="#888", lw=1)
 
 
+# Contact-result shape key (color still encodes pitch type):
+#   Whiff = circle, Barrel (InPlay & 95+ EV) = X, In Play = square.
+_CONTACT_MARKERS = [("Whiff", "o"), ("Barrel", "X"), ("In Play", "s")]
+
+
+def _contact_classes(df):
+    """Per-pitch contact class Series: Whiff / Barrel / In Play / NaN (take)."""
+    import pandas as pd
+    call = df["pitch_call"]
+    ev = (df["exit_speed"] if "exit_speed" in df.columns
+          else pd.Series(index=df.index, dtype=float))
+    cc = pd.Series(index=df.index, dtype=object)
+    cc[call == "StrikeSwinging"] = "Whiff"
+    inplay = call == "InPlay"
+    cc[inplay & (ev >= 95)] = "Barrel"
+    cc[inplay & ~(ev >= 95)] = "In Play"
+    return cc
+
+
 def zone_chart_uri(df, batter_side: str, title: str) -> str:
     d = df[df["batter_side"] == batter_side].dropna(
         subset=["plate_loc_side", "plate_loc_height"]).copy()
@@ -83,12 +103,27 @@ def zone_chart_uri(df, batter_side: str, title: str) -> str:
     _draw_zone(ax)
     if not d.empty:
         d["_pt"] = pitch_type(d)
-        for pt, sub in d.groupby("_pt"):
-            ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"],
-                       s=46, color=_color_for(pt), edgecolor="white", linewidth=0.5,
-                       alpha=0.9, zorder=3)
-        # No legend — the colored pitch names in the Pitch Usage table are the key
-        # (a legend here overlapped and hid data points).
+        d["_cc"] = _contact_classes(d)
+        # plain small dots for non-contact pitches (takes/balls/called/foul)
+        base = d[d["_cc"].isna()]
+        for pt, sub in base.groupby("_pt"):
+            ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"], s=20,
+                       color=_color_for(pt), edgecolor="white", linewidth=0.3,
+                       alpha=0.5, zorder=2, marker=".")
+        # shaped markers for contact events (color = pitch type)
+        for cc, marker in _CONTACT_MARKERS:
+            ev_sub = d[d["_cc"] == cc]
+            for pt, sub in ev_sub.groupby("_pt"):
+                ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"], s=52,
+                           color=_color_for(pt), edgecolor="white", linewidth=0.5,
+                           alpha=0.95, zorder=3, marker=marker)
+    # shape-only key below the plot (color = pitch type; shape = contact result)
+    handles = [Line2D([0], [0], marker=m, color="none", markerfacecolor="#444",
+                      markeredgecolor="#444", markersize=6, label=lbl)
+               for lbl, m in _CONTACT_MARKERS]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.02),
+              ncol=3, frameon=False, fontsize=6, handletextpad=0.2,
+              columnspacing=0.8)
     ax.set_xlim(-2.5, 2.5)
     ax.set_ylim(0, 5)
     ax.set_aspect("equal")

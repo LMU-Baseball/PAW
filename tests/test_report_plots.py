@@ -27,6 +27,18 @@ def test_plots_empty_input_safe():
     _is_png_uri(plots.movement_map_uri(empty))
 
 
+def test_contact_classes_mapping():
+    import pandas as pd
+    df = pd.DataFrame({
+        "pitch_call": ["StrikeSwinging", "InPlay", "InPlay", "BallCalled"],
+        "exit_speed": [None, 97.0, 80.0, None]})
+    cc = list(plots._contact_classes(df))
+    assert cc[0] == "Whiff"
+    assert cc[1] == "Barrel"     # InPlay & 95+
+    assert cc[2] == "In Play"    # InPlay & <95
+    assert pd.isna(cc[3])        # take -> plain dot
+
+
 def test_pitch_usage_donuts_returns_png():
     _is_png_uri(plots.pitch_usage_donuts_uri(_df()))
 
