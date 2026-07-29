@@ -364,6 +364,34 @@ def season_summary(pitcher_id: int) -> dict:
             "k": _s(r["k"]), "bb": _s(r["bb"])}
 
 
+def range_summary(pitcher_id, start=None, end=None) -> dict:
+    """Date-range-scoped sidebar tiles: Appearances / IP / K% / Walk% / Barrel%.
+
+    Loads the date-bounded pitch df (whole-career when start/end missing) and
+    computes via the shared transforms. PROVISIONAL metric defs (Barrel% uses
+    the simplified 95+ EV def, see `barrel_pct_ev`)."""
+    pid = int(pitcher_id)
+    if start and end:
+        df = range_pitches_for(pid, start, end)
+    else:
+        ids = _sibling_pitcher_ids(pid)
+        marks = ", ".join(f":id{i}" for i in range(len(ids)))
+        params = {f"id{i}": v for i, v in enumerate(ids)}
+        df = query_df(
+            f"SELECT * FROM fact_tm_game_pitch WHERE pitcher_id IN ({marks})",
+            params)
+    if df is None or df.empty:
+        return {"appearances": "—", "ip": "—", "k_pct": "—",
+                "bb_pct": "—", "barrel_pct": "—"}
+    return {
+        "appearances": str(int(df["game_id"].nunique())),
+        "ip": format_ip(int(df["outs_on_play"].sum())),
+        "k_pct": f"{k_pct(df)[0]:.1f}%",
+        "bb_pct": f"{bb_pct(df)[0]:.1f}%",
+        "barrel_pct": f"{barrel_pct_ev(df)[0]:.1f}%",
+    }
+
+
 def report_data_version(pitcher_id: int) -> str:
     """A token that changes when a pitcher gets new data, for report caching.
 
@@ -486,6 +514,21 @@ def barrel_pct(df: pd.DataFrame) -> tuple[float, int]:
     bip = df[df["pitch_call"] == "InPlay"]
     barrels = int(((bip["exit_speed"] >= 95)
                    & (bip["tagged_hit_type"].isin({"LineDrive", "FlyBall"}))).sum())
+    return _pct(barrels, len(bip)), barrels
+
+
+def format_ip(outs: int) -> str:
+    """Baseball innings-pitched from total outs: whole innings . trailing outs."""
+    outs = int(outs or 0)
+    return f"{outs // 3}.{outs % 3}"
+
+
+def barrel_pct_ev(df: pd.DataFrame) -> tuple[float, int]:
+    """Barrel% — coaches' SIMPLIFIED def: balls-in-play with exit_speed >= 95,
+    over balls-in-play. Intentionally DROPS the LineDrive/FlyBall qualifier that
+    `barrel_pct` keeps (the two therefore differ by design). PROVISIONAL."""
+    bip = df[df["pitch_call"] == "InPlay"]
+    barrels = int((bip["exit_speed"] >= 95).sum())
     return _pct(barrels, len(bip)), barrels
 
 

@@ -353,3 +353,36 @@ def test_count_states_and_heatmap():
     assert isinstance(P.fig_heatmap(df), go.Figure)
     # empty-safe
     assert isinstance(P.fig_heatmap(df.iloc[0:0]), go.Figure)
+
+
+def test_format_ip():
+    from app.data import pitching as P
+    assert P.format_ip(0) == "0.0"
+    assert P.format_ip(1) == "0.1"
+    assert P.format_ip(3) == "1.0"
+    assert P.format_ip(8) == "2.2"
+
+
+def test_barrel_pct_ev_drops_la_qualifier():
+    import pandas as pd
+    from app.data import pitching as P
+    # 3 balls in play: two at 95+ (one GroundBall — excluded by the report's
+    # LD/FB def but INCLUDED here), one under 95.
+    df = pd.DataFrame({
+        "pitch_call": ["InPlay", "InPlay", "InPlay", "StrikeCalled"],
+        "exit_speed": [98.0, 96.0, 80.0, None],
+        "tagged_hit_type": ["GroundBall", "LineDrive", "FlyBall", None]})
+    pct, n = P.barrel_pct_ev(df)
+    assert n == 2 and pct == round(100 * 2 / 3, 1)
+
+
+def test_range_summary_shape_and_date_bounding(real_pitcher_id_and_game):
+    from app.data import pitching as P
+    pid, _ = real_pitcher_id_and_game
+    g = P.games_for_pitcher(pid)
+    start, end = str(g["game_date"].min()), str(g["game_date"].max())
+    full = P.range_summary(pid, start, end)
+    assert set(full) == {"appearances", "ip", "k_pct", "bb_pct", "barrel_pct"}
+    assert full["k_pct"].endswith("%") and full["ip"]
+    one = P.range_summary(pid, start, start)
+    assert int(one["appearances"]) <= int(full["appearances"])
