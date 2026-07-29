@@ -1,0 +1,62 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>{{ css|safe }}</style></head>
+<body>
+<div class="pg">
+  <div class="hdr">
+    <img class="hdr-lmu" src="{{ assets.lmu_png }}" alt="LMU">
+    <div class="hdr-id">
+      <div class="hdr-name">{{ pitcher }}</div>
+      <div class="hdr-game">Bullpen &nbsp;|&nbsp; {{ date }}</div>
+    </div>
+    <div class="hdr-line"><span><b>{{ total }}</b><i>PITCHES</i></span></div>
+    <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
+  </div>
+
+  <div class="grid3">
+    <div class="panel plot"><img src="{{ charts.velo }}" alt="Velocity"></div>
+    <div class="panel plot"><img src="{{ charts.movement }}" alt="Movement"></div>
+    <div class="panel plot"><img src="{{ charts.location }}" alt="Location"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel plot"><img src="{{ charts.release }}" alt="Release"></div>
+    <div class="panel">
+      <div class="panel-t">Stats by pitch type</div>
+      <table>
+        <tr><th class="l">Pitch</th><th>Qty</th><th>Velo (avg)</th><th>Spin (avg)</th>
+            <th>IVB</th><th>HB</th><th>Ext</th></tr>
+        {% for r in summary %}
+        <tr><td class="l pt" style="color: {{ pitch_colors.get(r.pitch, '#111') }};">{{ r.pitch }}</td>
+            <td>{{ r.qty }}</td>
+            <td>{{ r.velo_avg if r.velo_avg is not none else '—' }}</td>
+            <td>{{ r.spin_avg if r.spin_avg is not none else '—' }}</td>
+            <td>{{ r.ivb_avg if r.ivb_avg is not none else '—' }}</td>
+            <td>{{ r.hb_avg if r.hb_avg is not none else '—' }}</td>
+            <td>{{ r.ext_avg if r.ext_avg is not none else '—' }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="pg pg-break">
+  <div class="panel-t">Pitches in session</div>
+  <table class="detail">
+    <tr><th class="l">#</th><th>Type</th><th>Velo</th><th>Spin</th><th>Tilt</th>
+        <th>IVB</th><th>HB</th><th>Ext</th><th>Rel H</th><th>Rel Side</th><th>Spin Eff</th></tr>
+    {% for p in pitches %}
+    <tr><td class="l">{{ p.pitch_no }}</td>
+        <td class="pt" style="color: {{ pitch_colors.get(p.tagged_pitch_type, '#111') }};">{{ p.tagged_pitch_type }}</td>
+        <td>{{ '%.1f'|format(p.rel_speed) if p.rel_speed is not none else '—' }}</td>
+        <td>{{ '%.0f'|format(p.spin_rate) if p.spin_rate is not none else '—' }}</td>
+        <td>{{ p.tilt if p.tilt is not none else '—' }}</td>
+        <td>{{ '%.1f'|format(p.ind_vert_break) if p.ind_vert_break is not none else '—' }}</td>
+        <td>{{ '%.1f'|format(p.horz_break) if p.horz_break is not none else '—' }}</td>
+        <td>{{ '%.1f'|format(p.extension) if p.extension is not none else '—' }}</td>
+        <td>{{ '%.1f'|format(p.rel_height) if p.rel_height is not none else '—' }}</td>
+        <td>{{ '%.1f'|format(p.rel_side) if p.rel_side is not none else '—' }}</td>
+        <td>{{ '%.0f'|format(p.spin_eff) if p.spin_eff is not none else '—' }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+</body></html>
