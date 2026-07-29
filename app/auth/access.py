@@ -35,3 +35,13 @@ def can_view_pitcher_report(user, pitcher_id) -> bool:
     from app.data.pitching import pitcher_tm_id_for
     tm_id = pitcher_tm_id_for(pitcher_id)
     return tm_id is not None and str(user.trackman_id) == str(tm_id)
+
+
+def can_view_bullpen(user, pitcher_trackman_id) -> bool:
+    """Coaches see all bullpens; a player sees only their own (raw Trackman id)."""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if user.role == "coach":
+        return True
+    return (user.trackman_id is not None
+            and str(user.trackman_id) == str(pitcher_trackman_id))

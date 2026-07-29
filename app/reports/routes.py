@@ -6,9 +6,11 @@ import zipfile
 from flask import Blueprint, Response, abort, render_template, request
 from flask_login import current_user, login_required
 
-from app.auth.access import can_view_pitcher_report
+from app.auth.access import can_view_pitcher_report, can_view_bullpen
 from app.data import pitching as P
+from app.data import bullpen as BULL
 from app.reports.pitcher_postgame import ReportDataError, build_pitcher_postgame
+from app.reports.bullpen_report import build_bullpen_report
 
 report_bp = Blueprint("reports", __name__, url_prefix="/reports")
 
@@ -114,4 +116,41 @@ def pitching_all_zip(game_id: int):
     return Response(
         buf.getvalue(), mimetype="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
+@report_bp.route("/bullpen")
+@login_required
+def bullpen_landing():
+    """Pick an LMU pitcher, then download a bullpen session report."""
+    pitchers = BULL.lmu_bullpen_pitchers()
+    pid = request.args.get("pitcher_id", type=int)
+    sessions = None
+    selected = None
+    if pid is not None:
+        match = pitchers[pitchers["pitcher_id"] == pid]
+        if not match.empty:
+            selected = match.iloc[0].to_dict()
+        sessions = BULL.sessions_for(pid).to_dict("records")
+    return render_template(
+        "reports/bullpen_landing.html",
+        pitchers=pitchers.to_dict("records"), pitcher_id=pid,
+        selected=selected, sessions=sessions,
+        data_max_date=BULL.bullpen_data_max_date(),
+    )
+
+
+@report_bp.route("/bullpen/<int:pitcher_id>/<date>.pdf")
+@login_required
+def bullpen_pdf(pitcher_id: int, date: str):
+    if not can_view_bullpen(current_user, pitcher_id):
+        abort(403)
+    try:
+        pdf = build_bullpen_report(pitcher_id, date)
+    except ReportDataError:
+        abort(404)
+    return Response(
+        pdf, mimetype="application/pdf",
+        headers={"Content-Disposition":
+                 f'attachment; filename="bullpen_{pitcher_id}_{_safe(date)}.pdf"'},
     )
