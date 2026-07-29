@@ -48,8 +48,48 @@ def body(df: pd.DataFrame) -> html.Div:
     ])
 
 
+def apply_filters(df: pd.DataFrame, *, pitch_types=None, counts=None,
+                  results=None, hand="All") -> pd.DataFrame:
+    """Compose the Movement Profile filters (all AND-ed together). Pure."""
+    if df is None or df.empty:
+        return df
+    d = df
+    if pitch_types is not None:
+        d = d[P.pitch_type(d).isin(pitch_types)]
+    if counts is not None:
+        cs = (d["balls"].astype("Int64").astype(str) + "-"
+              + d["strikes"].astype("Int64").astype(str))
+        d = d[cs.isin(counts)]
+    if results is not None:
+        d = d[d["pitch_call"].map(P.pretty_result).isin(results)]
+    if hand and hand != "All":
+        d = d[d["batter_side"] == hand]
+    return d
+
+
+def _filter_row(df: pd.DataFrame) -> html.Div:
+    counts = P.count_states(df)
+    results = sorted({P.pretty_result(c) for c in df["pitch_call"].dropna().unique()})
+    ctl = {"minWidth": "180px"}
+    return html.Div([
+        dcc.Dropdown(id="lm-count", multi=True, placeholder="Count(s)",
+                     options=[{"label": c, "value": c} for c in counts],
+                     value=counts, style=ctl),
+        dcc.Dropdown(id="lm-result", multi=True, placeholder="Result(s)",
+                     options=[{"label": r, "value": r} for r in results],
+                     value=results, style=ctl),
+        dcc.RadioItems(id="lm-hand", inline=True, value="All",
+                       options=[{"label": "All", "value": "All"},
+                                {"label": "vs RHH", "value": "Right"},
+                                {"label": "vs LHH", "value": "Left"}],
+                       style={"display": "inline-flex", "gap": "10px",
+                              "alignItems": "center"}),
+    ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap",
+              "alignItems": "center", "margin": "6px 0"})
+
+
 def render(df: pd.DataFrame) -> html.Div:
     if df.empty:
         return html.Div("No pitch data.")
-    return html.Div([chip_row(df, "lm"),
+    return html.Div([chip_row(df, "lm"), _filter_row(df),
                      html.Div(id="lm-body", children=body(df))])

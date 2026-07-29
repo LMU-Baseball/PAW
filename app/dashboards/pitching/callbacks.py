@@ -160,15 +160,18 @@ def register_callbacks(dash_app) -> None:
         active = list(active or [])
         return [p for p in active if p != pt] if pt in active else active + [pt]
 
-    # Active-set (or new data) -> re-render movement + location + table, filtered.
+    # Active-set / filters (or new data) -> re-render movement + location + table.
     @dash_app.callback(
         Output("lm-body", "children"),
-        Input("lm-active", "data"), State("game-data", "data"),
+        Input("lm-active", "data"), Input("lm-count", "value"),
+        Input("lm-result", "value"), Input("lm-hand", "value"),
+        State("game-data", "data"),
     )
-    def _lm_body(active, data_json):
+    def _lm_body(active, counts_sel, results_sel, hand, data_json):
         df = _read_game_df(data_json)
-        if not df.empty and active is not None:
-            df = df[P.pitch_type(df).isin(active)]
+        df = location_movement.apply_filters(
+            df, pitch_types=active, counts=counts_sel,
+            results=results_sel, hand=hand or "All")
         return location_movement.body(df)
 
     # Give the active chips a visual "off" state: dim deselected chips.

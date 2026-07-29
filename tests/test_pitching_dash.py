@@ -201,6 +201,32 @@ def test_splits_tab_removed():
     assert not hasattr(callbacks, "rhh_lhh")
 
 
+def test_movement_profile_apply_filters():
+    import pandas as pd
+    from app.dashboards.pitching.tabs import location_movement as lm
+    df = pd.DataFrame({
+        "balls": [0, 1, 0], "strikes": [0, 2, 0],
+        "pitch_call": ["StrikeSwinging", "BallCalled", "InPlay"],
+        "batter_side": ["Right", "Left", "Right"],
+        "tagged_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "auto_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "rel_speed": [92.0, 84.0, 91.0]})
+    # handedness toggle keeps only Right
+    assert set(lm.apply_filters(df, hand="Right")["batter_side"]) == {"Right"}
+    # result filter (pretty labels) keeps only In Play
+    assert list(lm.apply_filters(df, results=["In Play"])["pitch_call"]) == ["InPlay"]
+    # count filter keeps only 1-2
+    assert list(lm.apply_filters(df, counts=["1-2"])["balls"]) == [1]
+    # pitch-type filter
+    assert set(lm.apply_filters(df, pitch_types=["Slider"])["tagged_pitch_type"]) == {"Slider"}
+
+
+def test_movement_profile_render_has_filters(outing_df):
+    from app.dashboards.pitching.tabs import location_movement as lm
+    s = str(lm.render(outing_df))
+    assert "lm-count" in s and "lm-result" in s and "lm-hand" in s
+
+
 def _pitch_df():
     import pandas as pd
     return pd.DataFrame({
