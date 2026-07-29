@@ -5,7 +5,7 @@
 <p><a href="{{ url_for('main.index') }}">← Back to home</a></p>
 <h2 style="color: var(--crimson); font-family: var(--font-display);">Pitching</h2>
 {{ card_grid([
-  {"title": "Stats Dashboard", "desc": "Pitch breakdown, location/movement, splits, last outings.", "href": "/dash/pitching/"},
+  {"title": "Player Dashboard", "desc": "Personal breakdown, movement profile, count performance, zone frequency.", "href": "/dash/pitching/"},
   {"title": "Postgame Reports (PDF)", "desc": "One-page pitcher reports for a game.", "href": url_for('reports.pitching_landing')}
 ]) }}
 {% endblock %}

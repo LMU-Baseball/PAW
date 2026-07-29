@@ -431,4 +431,4 @@ def test_catching_tabs_include_pitch_level():
     import inspect
     from app.dashboards.catching import layout
     src = inspect.getsource(layout.serve_layout)
-    assert '"pitchlevel"' in src and "Pitch Level" in src
+    assert '"pitchlevel"' in src and "Outing Video" in src

@@ -103,13 +103,12 @@ def serve_layout() -> html.Div:
               "padding": "12px 16px", "backgroundColor": BANNER})
 
     tabs = dcc.Tabs(id="tabs", value="breakdown", children=[
-        dcc.Tab(label="Pitch Breakdown", value="breakdown"),
-        dcc.Tab(label="Location / Movement", value="location"),
-        dcc.Tab(label="RHH v. LHH", value="splits"),
-        dcc.Tab(label="Last Outings", value="outings"),
-        dcc.Tab(label="Pitch Level", value="pitchlevel"),
-        dcc.Tab(label="Counts", value="counts"),
-        dcc.Tab(label="Heatmaps", value="heatmaps"),
+        dcc.Tab(label="Personal Breakdown", value="breakdown"),
+        dcc.Tab(label="Movement Profile", value="location"),
+        dcc.Tab(label="Outing Overview", value="outings"),
+        dcc.Tab(label="Outing Video", value="pitchlevel"),
+        dcc.Tab(label="Count Performance", value="counts"),
+        dcc.Tab(label="Zone Frequency", value="heatmaps"),
     ])
 
     return html.Div([

@@ -199,7 +199,7 @@ def test_pitching_tabs_include_pitch_level():
     # assert the tab value string is wired in the module source.
     import inspect
     src = inspect.getsource(layout.serve_layout)
-    assert '"pitchlevel"' in src and "Pitch Level" in src
+    assert '"pitchlevel"' in src and "Outing Video" in src
 
 
 def _pitch_df():
@@ -235,5 +235,5 @@ def test_pitching_tabs_include_counts_and_heatmaps():
     import inspect
     from app.dashboards.pitching import layout
     src = inspect.getsource(layout.serve_layout)
-    assert '"counts"' in src and "Counts" in src
-    assert '"heatmaps"' in src and "Heatmaps" in src
+    assert '"counts"' in src and "Count Performance" in src
+    assert '"heatmaps"' in src and "Zone Frequency" in src
