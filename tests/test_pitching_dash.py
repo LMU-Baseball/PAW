@@ -84,16 +84,6 @@ def test_location_movement_render_has_chip_filter(outing_df):
     assert comp is not None  # renders chip row + body without raising
 
 
-def test_rhh_lhh_render(outing_df):
-    from app.dashboards.pitching.tabs import rhh_lhh
-    assert rhh_lhh.render(outing_df) is not None
-
-
-def test_rhh_lhh_render_has_chip_filter(outing_df):
-    from app.dashboards.pitching.tabs import rhh_lhh
-    assert rhh_lhh.render(outing_df) is not None
-
-
 def test_last_outings_render(real_pitcher):
     from app.data import pitching as P
     from app.dashboards.pitching.tabs import last_outings
@@ -200,6 +190,15 @@ def test_pitching_tabs_include_pitch_level():
     import inspect
     src = inspect.getsource(layout.serve_layout)
     assert '"pitchlevel"' in src and "Outing Video" in src
+
+
+def test_splits_tab_removed():
+    import inspect
+    from app.dashboards.pitching import layout, callbacks
+    src = inspect.getsource(layout.serve_layout)
+    assert '"splits"' not in src and "RHH v. LHH" not in src
+    # callbacks module no longer imports the deleted rhh_lhh tab module
+    assert not hasattr(callbacks, "rhh_lhh")
 
 
 def _pitch_df():
