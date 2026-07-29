@@ -81,7 +81,7 @@ def register_callbacks(dash_app) -> None:
         else:
             sb = layout.scoreboard(game_id)
         return ({"pitcher_id": pid, "game_id": game_id, "start": start, "end": end},
-                layout.sidebar(pid), sb)
+                layout.sidebar(pid, start, end), sb)
 
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))
     def _on_load_data(sel):

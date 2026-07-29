@@ -18,11 +18,11 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
-def sidebar(pitcher_id) -> html.Div:
+def sidebar(pitcher_id, start=None, end=None) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style={"padding": "12px"})
     prof = P.pitcher_profile(int(pitcher_id))
-    summ = P.season_summary(int(pitcher_id))
+    summ = P.range_summary(int(pitcher_id), start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"],
@@ -34,11 +34,12 @@ def sidebar(pitcher_id) -> html.Div:
         html.Div(f"{jersey}{prof['name'] or '—'}",
                  style={"fontSize": "26px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div(meta, style={"fontSize": "16px", "color": "#555"}),
-        html.Div([_tile("APP", summ["appearances"]), _tile("PITCHES", summ["pitches"]),
-                  _tile("K", summ["k"]), _tile("BB", summ["bb"])],
+        html.Div([_tile("APP", summ["appearances"]), _tile("IP", summ["ip"]),
+                  _tile("K%", summ["k_pct"]), _tile("BB%", summ["bb_pct"]),
+                  _tile("Barrel%", summ["barrel_pct"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Season totals = warehouse (provisional).",
+        html.Div("Stats reflect the selected date range · Barrel = 95+ mph EV (provisional).",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
@@ -118,7 +119,7 @@ def serve_layout() -> html.Div:
         dcc.Store(id="game-data"),
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div([
-            html.Div(id="sidebar", children=sidebar(default_pitcher),
+            html.Div(id="sidebar", children=sidebar(default_pitcher, start_d, end_d),
                      style={"width": "240px", "flexShrink": "0"}),
             html.Div([selector_row, tabs, notes_ui.note_card("pitching"),
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],

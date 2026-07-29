@@ -192,6 +192,16 @@ def test_pitching_tabs_include_pitch_level():
     assert '"pitchlevel"' in src and "Outing Video" in src
 
 
+def test_sidebar_shows_five_range_tiles(real_pitcher):
+    from app.dashboards.pitching import layout
+    from app.data import pitching as P
+    g = P.games_for_pitcher(real_pitcher)
+    start, end = str(g["game_date"].min()), str(g["game_date"].max())
+    s = str(layout.sidebar(real_pitcher, start, end))
+    for label in ("APP", "IP", "K%", "BB%", "Barrel%"):
+        assert label in s
+
+
 def test_splits_tab_removed():
     import inspect
     from app.dashboards.pitching import layout, callbacks
