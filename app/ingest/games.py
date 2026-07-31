@@ -10,10 +10,26 @@ the 175-column GAMES table; GAMES's other 8 columns (AreaNum/InZone/Zone/
 AreaOfZone/Stuff/Runners/QC/PathQ) are derived/loader-set and simply absent
 from this parser's output (NULL on insert). ``PitchUID`` is preserved
 unchanged so a later loader can dedup on it.
+
+The loader (``iter_game_files`` / ``load_games``) walks the Trackman SFTP
+``/v3`` tree, parses each game-export CSV, dedups against already-loaded
+PitchUIDs, and inserts the rest (insert-only; never DELETE/DROP).
+``existing_keys``/``chunked_insert`` are imported as module attributes (not
+called via ``common.``) so tests can monkeypatch them.
 """
 from __future__ import annotations
 
+import posixpath
+import re
+import stat
+
 import pandas as pd
+
+from app.ingest.common import LoadResult, chunked_insert, existing_keys
+
+# Game CSV basenames look like "20260416-CypressCollege-1.csv": 8 digits
+# (the game date) then a dash.
+_GAME_FILENAME_RE = re.compile(r"^\d{8}-.*\.csv$")
 
 # Maps each of the 167 raw Trackman game-CSV column names to its GAMES DB
 # column name. Identity for every column except the one known difference.
@@ -252,3 +268,81 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
     renamed = df.rename(columns=CSV_TO_GAMES)
     cols = [c for c in GAMES_COLS if c in renamed.columns]
     return renamed[cols].copy()
+
+
+def iter_game_files(sftp, root: str = "/v3") -> list[str]:
+    """Recursively walk `root` on `sftp`, returning full paths of files whose
+    basename matches a game-export CSV name (8 digits, a dash, then anything,
+    e.g. ``20260416-CypressCollege-1.csv``).
+
+    Sorted for deterministic ordering (helps `date_min`/`date_max` reasoning
+    and makes tests reproducible).
+    """
+    found: list[str] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        for entry in sftp.listdir_attr(current):
+            path = posixpath.join(current, entry.filename)
+            if stat.S_ISDIR(entry.st_mode):
+                stack.append(path)
+            elif _GAME_FILENAME_RE.match(entry.filename):
+                found.append(path)
+    return sorted(found)
+
+
+def _read_csv_from_sftp(sftp, path: str) -> pd.DataFrame:
+    """Open `path` on `sftp` and parse it as CSV via pandas.
+
+    Kept as a small internal seam so tests can monkeypatch the read step
+    (avoiding real network I/O) without faking a full SFTP file object.
+    """
+    with sftp.open(path) as f:
+        return pd.read_csv(f)
+
+
+def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None) -> LoadResult:
+    """Walk the Trackman `/v3` tree for game-export CSV files, parse each with
+    `parse_game_csv`, dedup rows against GAMES.PitchUID (both already-loaded
+    rows and within-run duplicates), and insert the new rows via
+    `chunked_insert` (skipped entirely when `dry_run`).
+
+    Insert-only: never DELETEs or DROPs existing rows. `date_min`/`date_max`
+    are computed from the `Date` column of the rows selected for insert.
+    """
+    files = iter_game_files(sftp)
+    if limit is not None:
+        files = files[:limit]
+
+    already_loaded = existing_keys(engine, "GAMES", "PitchUID")
+    seen: set[str] = set()
+    rows_to_insert: list[dict] = []
+    skipped = 0
+
+    for path in files:
+        raw_df = _read_csv_from_sftp(sftp, path)
+        parsed = parse_game_csv(raw_df, source_file=path)
+        for row in parsed.to_dict(orient="records"):
+            key = str(row.get("PitchUID"))
+            if key in already_loaded or key in seen:
+                skipped += 1
+                continue
+            seen.add(key)
+            rows_to_insert.append(row)
+
+    inserted = len(rows_to_insert)
+    if not dry_run and rows_to_insert:
+        chunked_insert(engine, "GAMES", rows_to_insert)
+
+    dates = [r.get("Date") for r in rows_to_insert if pd.notna(r.get("Date")) and r.get("Date") != ""]
+    date_min = min(dates) if dates else None
+    date_max = max(dates) if dates else None
+
+    return LoadResult(
+        inserted=inserted,
+        skipped=skipped,
+        files=len(files),
+        date_min=date_min,
+        date_max=date_max,
+        dry_run=dry_run,
+    )

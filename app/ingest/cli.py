@@ -11,6 +11,7 @@ from app.db import get_engine
 from app.ingest.bullpen import load_bullpen
 from app.ingest.config import trackman_cfg
 from app.ingest.connections import open_sftp
+from app.ingest.games import load_games
 
 ingest_cli = click.Group("ingest", help="Data ingestion loaders (Trackman SFTP / HitTrax FTPS).")
 
@@ -28,6 +29,24 @@ def bullpen_command(dry_run: bool, limit: int | None):
         result = load_bullpen(engine, sftp, dry_run=dry_run, limit=limit)
     click.echo(
         f"BULLPEN load: files={result.files} inserted={result.inserted} "
+        f"skipped={result.skipped} date_min={result.date_min} date_max={result.date_max} "
+        f"dry_run={result.dry_run}"
+    )
+
+
+@ingest_cli.command("games")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually insert.",
+)
+@click.option("--limit", type=int, default=None, help="Limit the number of game CSV files processed.")
+def games_command(dry_run: bool, limit: int | None):
+    """Load GAMES (Trackman regular/scrimmage games) from the SFTP /v3 tree."""
+    engine = get_engine()
+    with open_sftp(trackman_cfg()) as sftp:
+        result = load_games(engine, sftp, dry_run=dry_run, limit=limit)
+    click.echo(
+        f"GAMES load: files={result.files} inserted={result.inserted} "
         f"skipped={result.skipped} date_min={result.date_min} date_max={result.date_max} "
         f"dry_run={result.dry_run}"
     )
