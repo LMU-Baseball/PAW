@@ -3,6 +3,13 @@ transform_plays. PURE only -- no network, no DB. Builds an in-memory
 raw-table-shaped DataFrame (`source_file`, `payload`=json per CSV row) from
 the two fixture CSVs, exactly as the real `raw_practice_csv` table would
 hold them, and feeds that straight into the pure transforms.
+
+One additional test (`test_transform_uses_delete_not_truncate_for_rebuild`)
+exercises `transform()`'s DB-write path against a FAKE engine/connection
+(no real DB) solely to assert it issues transactional `DELETE FROM`
+statements, never DDL `TRUNCATE TABLE` -- MySQL `TRUNCATE` causes an
+implicit commit and is not rollback-able, which would break the "atomic
+rebuild" guarantee `transform()` exists to provide.
 """
 import json
 from pathlib import Path
@@ -13,6 +20,7 @@ import pytest
 from app.ingest.hittrax import (
     PLAYS_FIELD_MAP,
     SESSION_FIELD_MAP,
+    transform,
     transform_plays,
     transform_sessions,
 )
@@ -290,3 +298,91 @@ def test_transform_plays_empty_raw_df_returns_empty_frame():
     out = transform_plays(empty, empty_sessions)
     assert len(out) == 0
     assert "exit_velocity" in out.columns
+
+
+# ---------------------------------------------------------------------------
+# transform(): DB-write path, exercised against a FAKE engine/connection
+# (no real DB) -- only to prove the destructive statements are DELETE, not
+# TRUNCATE. `raw_practice_csv` is faked as empty (via the fake connection's
+# `.execute(...).mappings().all()` returning `[]`), and `pd.read_sql` (used
+# to re-fetch practice_sessions' auto-generated session_ids) is monkeypatched
+# to a canned empty frame, so nothing here depends on real SQLAlchemy/pandas
+# DB-execution semantics.
+# ---------------------------------------------------------------------------
+
+class _FakeExecResult:
+    """Stands in for a SQLAlchemy `CursorResult`: supports the handful of
+    methods `transform()`/`_load_raw()` call on whatever `conn.execute(...)`
+    returns (`.scalar()`, and `.mappings().all()` for the raw-row fetch)."""
+
+    def scalar(self):
+        return 0
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class _FakeConn:
+    """Fake SQLAlchemy Connection: records every SQL statement's text (as a
+    plain string) in `executed`, usable both as `engine.begin()`'s context
+    manager and as `engine.connect()`'s (both are used by `transform()`)."""
+
+    def __init__(self, executed: list[str]):
+        self.executed = executed
+
+    def execute(self, sql, params=None):
+        self.executed.append(str(sql))
+        return _FakeExecResult()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeEngine:
+    """Fake engine whose `begin()`/`connect()` both hand back the SAME
+    `_FakeConn` (so every statement `transform()` issues lands in one
+    `executed` list, in call order)."""
+
+    def __init__(self):
+        self.executed: list[str] = []
+
+    def begin(self):
+        return _FakeConn(self.executed)
+
+    def connect(self):
+        return _FakeConn(self.executed)
+
+
+def test_transform_uses_delete_not_truncate_for_rebuild(monkeypatch):
+    import app.ingest.hittrax as hittrax_module
+
+    # transform() re-queries practice_sessions (via pd.read_sql) after
+    # inserting sessions, to get real auto-increment session_ids for the
+    # play merge -- faked here as an empty frame with the right columns.
+    monkeypatch.setattr(
+        hittrax_module.pd,
+        "read_sql",
+        lambda *a, **k: pd.DataFrame(columns=["session_id", "session_date", "player_id"]),
+    )
+
+    engine = _FakeEngine()
+    result = transform(engine, dry_run=False)
+
+    executed_upper = [s.upper() for s in engine.executed]
+    assert any("DELETE FROM PRACTICE_PLAYS" in s for s in executed_upper)
+    assert any("DELETE FROM PRACTICE_SESSIONS" in s for s in executed_upper)
+    assert any("DELETE FROM PLAYER_STATS_SUMMARY" in s for s in executed_upper)
+    assert not any("TRUNCATE" in s for s in executed_upper), (
+        "transform() must never issue TRUNCATE -- it's DDL with an implicit "
+        "commit in MySQL, breaking this transaction's atomic rebuild guarantee"
+    )
+    # FK checks toggled off then back on, around the deletes/inserts.
+    assert any("FOREIGN_KEY_CHECKS = 0" in s for s in executed_upper)
+    assert any("FOREIGN_KEY_CHECKS = 1" in s for s in executed_upper)
+    assert result == {"sessions": 0, "plays": 0, "players": 0}

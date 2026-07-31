@@ -706,14 +706,24 @@ def transform(engine, *, dry_run: bool = True) -> dict:
     Reads every SessionExport/PlaysExport row currently in
     `raw_practice_csv`, builds the three clean tables with
     `transform_sessions`/`transform_plays`, and -- inside ONE transaction --
-    `SET FOREIGN_KEY_CHECKS=0`, TRUNCATEs all three tables, loads sessions,
-    re-queries `practice_sessions` for its auto-generated `session_id`s,
-    loads plays (with `session_id` attached via the merge), fills in each
-    session's `total_plays` from its linked plays, aggregates
+    `SET FOREIGN_KEY_CHECKS=0`, DELETEs all rows from the three tables, loads
+    sessions, re-queries `practice_sessions` for its auto-generated
+    `session_id`s, loads plays (with `session_id` attached via the merge),
+    fills in each session's `total_plays` from its linked plays, aggregates
     `player_stats_summary` via `_PLAYER_STATS_SQL`, then re-enables FK
     checks. This is the ONLY destructive operation this module performs --
     safe because the raw layer is immutable/append-only and complete, so a
     full rebuild is always reproducible.
+
+    Deliberately `DELETE FROM`, not `TRUNCATE TABLE`: MySQL's `TRUNCATE` is
+    DDL and causes an implicit commit, so it is NOT rollback-able -- if any
+    later statement in this same block failed after a `TRUNCATE`, the tables
+    would be left permanently empty while everything else rolled back,
+    breaking the "atomic rebuild" guarantee this function exists to
+    provide. `DELETE` is ordinary DML and rolls back cleanly with the rest
+    of the transaction on any failure. These tables are small (~18k plays /
+    ~2.2k sessions), so `DELETE`'s lack of `TRUNCATE`'s fast-path is a
+    non-issue.
 
     `dry_run=True` (default) computes and returns the row counts WITHOUT
     writing anything: `session_id`s for the play-merge preview are simulated
@@ -749,9 +759,18 @@ def transform(engine, *, dry_run: bool = True) -> dict:
 
     with engine.begin() as conn:
         conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        conn.execute(text("TRUNCATE TABLE practice_plays"))
-        conn.execute(text("TRUNCATE TABLE practice_sessions"))
-        conn.execute(text("TRUNCATE TABLE player_stats_summary"))
+        # DELETE, not TRUNCATE: TRUNCATE is DDL in MySQL and causes an
+        # implicit commit (not rollback-able), which would defeat this
+        # transaction's all-or-nothing guarantee -- a failure in a later
+        # statement (e.g. the player_stats aggregation, a dropped
+        # connection, a deadlock) would leave these tables permanently
+        # empty instead of rolling back to their pre-transform state.
+        # DELETE is transactional DML in InnoDB, so the whole rebuild is
+        # genuinely atomic. Child-first order kept for clarity even though
+        # FK checks are off (order doesn't matter functionally here).
+        conn.execute(text("DELETE FROM practice_plays"))
+        conn.execute(text("DELETE FROM player_stats_summary"))
+        conn.execute(text("DELETE FROM practice_sessions"))
 
         session_rows = _rows(sessions_df)
         _insert_rows(conn, "practice_sessions", session_rows)
