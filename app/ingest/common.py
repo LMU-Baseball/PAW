@@ -7,6 +7,7 @@ engine.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -59,24 +60,59 @@ def existing_keys(engine: Engine, table: str, col: str) -> set[str]:
     return {str(r.k) for r in rows if r.k is not None}
 
 
+def _scrub_value(v):
+    """NaN (float) -> None; every other value passed through unchanged.
+
+    PyMySQL raises ``nan can not be used with MySQL`` if a bare float NaN
+    reaches a bound parameter -- every real Trackman export has blank
+    numeric cells that pandas represents as NaN, so this scrub is required
+    on every value before binding.
+    """
+    return None if isinstance(v, float) and math.isnan(v) else v
+
+
 def chunked_insert(engine: Engine, table: str, rows: list[dict], chunksize: int = 500) -> int:
     """Insert `rows` into `table` in chunks of `chunksize`, parameterized.
 
     Caller is responsible for pre-filtering out rows that already exist
     (e.g. via `existing_keys`). Returns the number of rows inserted.
+
+    Two safety nets applied per chunk (rows are built by concatenating many
+    parsed CSV files, so neither can be assumed):
+
+    - NaN scrub: every value is passed through `_scrub_value` so a bare
+      float NaN never reaches a bound parameter (PyMySQL raises `nan can
+      not be used with MySQL` otherwise).
+    - Column union: the INSERT's column list is the union of every row's
+      keys in the chunk (not just `rows[0].keys()`), with missing keys
+      filled `None`, so a chunk mixing rows from files with different
+      column subsets still produces one consistent INSERT rather than
+      silently dropping columns or raising mid-load.
     """
     if not rows:
         return 0
-
-    cols = list(rows[0].keys())
-    col_list = ", ".join(cols)
-    placeholders = ", ".join(f":{c}" for c in cols)
-    sql = text(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})")
 
     inserted = 0
     with engine.begin() as conn:
         for start in range(0, len(rows), chunksize):
             chunk = rows[start:start + chunksize]
-            conn.execute(sql, chunk)
+
+            cols: list[str] = []
+            seen = set()
+            for row in chunk:
+                for k in row.keys():
+                    if k not in seen:
+                        seen.add(k)
+                        cols.append(k)
+
+            col_list = ", ".join(cols)
+            placeholders = ", ".join(f":{c}" for c in cols)
+            sql = text(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})")
+
+            scrubbed_chunk = [
+                {c: _scrub_value(row.get(c)) for c in cols}
+                for row in chunk
+            ]
+            conn.execute(sql, scrubbed_chunk)
             inserted += len(chunk)
     return inserted

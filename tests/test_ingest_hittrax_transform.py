@@ -166,6 +166,41 @@ def test_transform_sessions_empty_raw_df_returns_empty_frame():
     assert "avg_exit_velocity" in out.columns
 
 
+def test_transform_sessions_drops_row_with_blank_ts():
+    # practice_sessions.session_date is NOT NULL; a blank TS can't produce
+    # a session_date, so the row must be excluded rather than passed
+    # through with a null session_date that would fail the DB constraint.
+    payload = {"Id": 1, "TS": "", "UsId": 5, "AEV": 30.0}
+    raw_df = pd.DataFrame({
+        "source_file": ["SessionExport_x.CSV"],
+        "payload": [json.dumps(payload)],
+    })
+    out = transform_sessions(raw_df)
+    assert len(out) == 0
+
+
+def test_transform_sessions_drops_row_with_unparseable_ts():
+    payload = {"Id": 1, "TS": "not-a-date", "UsId": 5, "AEV": 30.0}
+    raw_df = pd.DataFrame({
+        "source_file": ["SessionExport_x.CSV"],
+        "payload": [json.dumps(payload)],
+    })
+    out = transform_sessions(raw_df)
+    assert len(out) == 0
+
+
+def test_transform_sessions_keeps_good_rows_alongside_dropped_bad_ts_row():
+    good = {"Id": 1, "TS": "1/1/2026 1:00:00 PM", "UsId": 5, "AEV": 30.0}
+    bad = {"Id": 2, "TS": "", "UsId": 6, "AEV": 20.0}
+    raw_df = pd.DataFrame({
+        "source_file": ["SessionExport_x.CSV", "SessionExport_x.CSV"],
+        "payload": [json.dumps(good), json.dumps(bad)],
+    })
+    out = transform_sessions(raw_df)
+    assert len(out) == 1
+    assert out.loc[0, "hittrax_session_id"] == 1
+
+
 # ---------------------------------------------------------------------------
 # transform_plays
 # ---------------------------------------------------------------------------
@@ -325,6 +360,21 @@ class _FakeExecResult:
         return []
 
 
+class _FakeTrans:
+    """Stands in for a SQLAlchemy Transaction (`conn.begin()`'s return
+    value): records `commit()`/`rollback()` calls in the same `executed`
+    log as the connection's SQL statements, so tests can assert ordering."""
+
+    def __init__(self, executed: list[str]):
+        self.executed = executed
+
+    def commit(self):
+        self.executed.append("TRANS_COMMIT")
+
+    def rollback(self):
+        self.executed.append("TRANS_ROLLBACK")
+
+
 class _FakeConn:
     """Fake SQLAlchemy Connection: records every SQL statement's text (as a
     plain string) in `executed`, usable both as `engine.begin()`'s context
@@ -336,6 +386,12 @@ class _FakeConn:
     def execute(self, sql, params=None):
         self.executed.append(str(sql))
         return _FakeExecResult()
+
+    def begin(self):
+        return _FakeTrans(self.executed)
+
+    def close(self):
+        pass
 
     def __enter__(self):
         return self
@@ -386,3 +442,57 @@ def test_transform_uses_delete_not_truncate_for_rebuild(monkeypatch):
     assert any("FOREIGN_KEY_CHECKS = 0" in s for s in executed_upper)
     assert any("FOREIGN_KEY_CHECKS = 1" in s for s in executed_upper)
     assert result == {"sessions": 0, "plays": 0, "players": 0}
+
+
+def test_transform_reenables_fk_checks_after_failed_rebuild(monkeypatch):
+    """If any statement in the rebuild raises, `transform()` must still
+    re-enable FK checks on the SAME (pooled) connection before the
+    exception propagates -- `SET FOREIGN_KEY_CHECKS` is a per-connection
+    session variable, not transactional DML, so the transaction rollback
+    does NOT undo it. Without the `finally`, a failed rebuild would check a
+    connection with FK checks permanently off back into the pool.
+    """
+    import app.ingest.hittrax as hittrax_module
+
+    monkeypatch.setattr(
+        hittrax_module.pd,
+        "read_sql",
+        lambda *a, **k: pd.DataFrame(columns=["session_id", "session_date", "player_id"]),
+    )
+
+    class _BoomConn(_FakeConn):
+        def execute(self, sql, params=None):
+            s = str(sql)
+            if "INSERT INTO player_stats_summary" in s:
+                # Record it (as the real connection would, having received
+                # the statement) before raising, so the test can still
+                # assert on ordering relative to the failure.
+                self.executed.append(s)
+                raise RuntimeError("boom: aggregation step failed")
+            return super().execute(sql, params)
+
+    class _BoomEngine(_FakeEngine):
+        def connect(self):
+            return _BoomConn(self.executed)
+
+    engine = _BoomEngine()
+
+    with pytest.raises(RuntimeError, match="boom: aggregation step failed"):
+        hittrax_module.transform(engine, dry_run=False)
+
+    executed_upper = [s.upper() for s in engine.executed]
+    # Turned off once at the top of the rebuild...
+    assert executed_upper.count("SET FOREIGN_KEY_CHECKS = 0") == 1
+    # ...and turned back on in the `finally`, even though the rebuild raised
+    # (the happy-path `SET ... = 1` right before the failing statement never
+    # ran, so this can only be the `finally`'s safety net).
+    assert executed_upper.count("SET FOREIGN_KEY_CHECKS = 1") == 1
+    assert "TRANS_ROLLBACK" in engine.executed
+    assert "TRANS_COMMIT" not in engine.executed
+    # The FK-checks reset must come after the rollback, and the rollback
+    # must come after the failing statement -- i.e. cleanup order is
+    # (fail) -> rollback -> re-enable FK checks.
+    fail_idx = next(i for i, s in enumerate(engine.executed) if "INSERT INTO player_stats_summary" in s)
+    rollback_idx = engine.executed.index("TRANS_ROLLBACK")
+    fk_reenable_idx = executed_upper.index("SET FOREIGN_KEY_CHECKS = 1")
+    assert fail_idx < rollback_idx < fk_reenable_idx

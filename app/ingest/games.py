@@ -270,6 +270,32 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
     return renamed[cols].copy()
 
 
+def dedup_key(row: dict) -> str:
+    """Per-row dedup key: PitchUID if present, else a composite key.
+
+    ``str(row['PitchUID'])`` when PitchUID is truthy/non-empty; pandas NaN
+    and empty-string PitchUID count as "not present" (a missing PitchUID
+    must NOT become the literal string "nan"/"None" -- every such row would
+    otherwise collapse onto one dedup key and get dropped). Falls back to
+    ``f"{GameUID}|{PitchNo}"``, using GameID instead of GameUID when GameUID
+    is itself missing (mirrors `bullpen.dedup_key`'s PlayID/composite
+    pattern).
+    """
+    pitch_uid = row.get("PitchUID")
+    if isinstance(pitch_uid, float) and pd.isna(pitch_uid):
+        pitch_uid = None
+    if pitch_uid not in (None, ""):
+        return str(pitch_uid)
+
+    game_uid = row.get("GameUID")
+    if isinstance(game_uid, float) and pd.isna(game_uid):
+        game_uid = None
+    if game_uid in (None, ""):
+        game_uid = row.get("GameID")
+
+    return f"{game_uid}|{row.get('PitchNo')}"
+
+
 def iter_game_files(sftp, root: str = "/v3") -> list[str]:
     """Recursively walk `root` on `sftp`, returning full paths of files whose
     basename matches a game-export CSV name (8 digits, a dash, then anything,
@@ -330,7 +356,7 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None) 
         raw_df = _read_csv_from_sftp(sftp, path)
         parsed = parse_game_csv(raw_df, source_file=path)
         for row in parsed.to_dict(orient="records"):
-            key = str(row.get("PitchUID"))
+            key = dedup_key(row)
             if key in already_loaded or key in seen:
                 skipped += 1
                 continue

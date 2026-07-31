@@ -384,6 +384,13 @@ def transform_sessions(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     Never touches a DB; missing/blank source cells become `None` (never 0),
     per Task 1's `safe_numeric`/`mps_to_mph`/`meters_to_feet`.
+
+    `practice_sessions.session_date` is `NOT NULL` in the schema, but `TS`
+    is occasionally blank/unparseable in real exports (`pd.to_datetime` with
+    `errors="coerce"` yields `NaT` -> `None` for those). Rows whose derived
+    `session_date` is null are dropped here (before the caller ever builds
+    an insert dict) rather than left to fail the DB constraint -- they also
+    can't be keyed or joined against `practice_plays` without a date.
     """
     data = _payload_frame(raw_df)
     if data.empty:
@@ -410,7 +417,12 @@ def transform_sessions(raw_df: pd.DataFrame) -> pd.DataFrame:
 
     out["source_file"] = raw_df["source_file"].reset_index(drop=True)
 
-    return out.reset_index(drop=True)
+    out = out.reset_index(drop=True)
+    # session_date is NOT NULL downstream: a blank/unparseable TS can't be
+    # keyed or joined anyway, so drop it here rather than fail the whole
+    # atomic rebuild on one bad row.
+    out = out[out["session_date"].notna()].reset_index(drop=True)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -730,6 +742,13 @@ def transform(engine, *, dry_run: bool = True) -> dict:
     with a throwaway 0..n-1 index (the DB is never touched), so the returned
     counts are still an accurate preview of what a real run would produce.
 
+    `SET FOREIGN_KEY_CHECKS` is a per-connection session variable, NOT
+    transactional DML -- a `ROLLBACK` does not undo it. If any statement in
+    the rebuild raises, this function still re-enables FK checks on the same
+    (pooled) connection in a `finally` before re-raising, so a failed
+    rebuild can never leave a connection checked back into the pool with FK
+    checks permanently off for whatever unrelated query reuses it next.
+
     Returns ``{"sessions": n, "plays": n, "players": n}``.
     """
     raw_sessions = _load_raw(engine, "SessionExport")
@@ -757,47 +776,68 @@ def transform(engine, *, dry_run: bool = True) -> dict:
         subset=["session_date", "player_id", "hittrax_session_id"], keep="first"
     )
 
-    with engine.begin() as conn:
-        conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        # DELETE, not TRUNCATE: TRUNCATE is DDL in MySQL and causes an
-        # implicit commit (not rollback-able), which would defeat this
-        # transaction's all-or-nothing guarantee -- a failure in a later
-        # statement (e.g. the player_stats aggregation, a dropped
-        # connection, a deadlock) would leave these tables permanently
-        # empty instead of rolling back to their pre-transform state.
-        # DELETE is transactional DML in InnoDB, so the whole rebuild is
-        # genuinely atomic. Child-first order kept for clarity even though
-        # FK checks are off (order doesn't matter functionally here).
-        conn.execute(text("DELETE FROM practice_plays"))
-        conn.execute(text("DELETE FROM player_stats_summary"))
-        conn.execute(text("DELETE FROM practice_sessions"))
+    conn = engine.connect()
+    try:
+        trans = conn.begin()
+        try:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+            # DELETE, not TRUNCATE: TRUNCATE is DDL in MySQL and causes an
+            # implicit commit (not rollback-able), which would defeat this
+            # transaction's all-or-nothing guarantee -- a failure in a later
+            # statement (e.g. the player_stats aggregation, a dropped
+            # connection, a deadlock) would leave these tables permanently
+            # empty instead of rolling back to their pre-transform state.
+            # DELETE is transactional DML in InnoDB, so the whole rebuild is
+            # genuinely atomic. Child-first order kept for clarity even though
+            # FK checks are off (order doesn't matter functionally here).
+            conn.execute(text("DELETE FROM practice_plays"))
+            conn.execute(text("DELETE FROM player_stats_summary"))
+            conn.execute(text("DELETE FROM practice_sessions"))
 
-        session_rows = _rows(sessions_df)
-        _insert_rows(conn, "practice_sessions", session_rows)
+            session_rows = _rows(sessions_df)
+            _insert_rows(conn, "practice_sessions", session_rows)
 
-        sessions_with_ids = pd.read_sql(
-            text("SELECT session_id, session_date, player_id FROM practice_sessions"), conn
-        )
-        plays_df = transform_plays(raw_plays, sessions_with_ids)
-        play_rows = _rows(plays_df)
-        _insert_rows(conn, "practice_plays", play_rows)
+            sessions_with_ids = pd.read_sql(
+                text("SELECT session_id, session_date, player_id FROM practice_sessions"), conn
+            )
+            plays_df = transform_plays(raw_plays, sessions_with_ids)
+            play_rows = _rows(plays_df)
+            _insert_rows(conn, "practice_plays", play_rows)
 
-        # total_plays has no direct HitTrax source column -- computed here
-        # from the just-linked plays.
-        conn.execute(text(
-            "UPDATE practice_sessions ps "
-            "LEFT JOIN ("
-            "  SELECT session_id, COUNT(*) AS n FROM practice_plays "
-            "  WHERE session_id IS NOT NULL GROUP BY session_id"
-            ") c ON c.session_id = ps.session_id "
-            "SET ps.total_plays = COALESCE(c.n, 0)"
-        ))
+            # total_plays has no direct HitTrax source column -- computed here
+            # from the just-linked plays.
+            conn.execute(text(
+                "UPDATE practice_sessions ps "
+                "LEFT JOIN ("
+                "  SELECT session_id, COUNT(*) AS n FROM practice_plays "
+                "  WHERE session_id IS NOT NULL GROUP BY session_id"
+                ") c ON c.session_id = ps.session_id "
+                "SET ps.total_plays = COALESCE(c.n, 0)"
+            ))
 
-        conn.execute(text(_PLAYER_STATS_SQL))
+            conn.execute(text(_PLAYER_STATS_SQL))
 
-        conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
 
-        players = conn.execute(text("SELECT COUNT(*) FROM player_stats_summary")).scalar()
+            players = conn.execute(text("SELECT COUNT(*) FROM player_stats_summary")).scalar()
+
+            trans.commit()
+        except Exception:
+            trans.rollback()
+            raise
+    finally:
+        # Belt-and-suspenders: re-enable FK checks on THIS connection no
+        # matter what happened above. `SET FOREIGN_KEY_CHECKS` is a session
+        # variable, not transactional DML, so `trans.rollback()` above does
+        # NOT undo it -- without this, a rebuild that raises after the
+        # `SET ... = 0` would check the connection back into the pool with
+        # FK checks permanently off, silently poisoning whatever unrelated
+        # query reuses it next.
+        try:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+        except Exception:
+            pass
+        conn.close()
 
     return {
         "sessions": len(session_rows),

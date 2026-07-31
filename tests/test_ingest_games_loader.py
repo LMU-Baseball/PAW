@@ -94,6 +94,39 @@ def test_iter_game_files_empty_tree_returns_empty_list():
     assert iter_game_files(_FakeSFTP({})) == []
 
 
+# ---- dedup_key -----------------------------------------------------------
+
+def test_dedup_key_uses_pitchuid_when_present():
+    row = {"PitchUID": "abc-123", "GameUID": "g1", "GameID": "gid1", "PitchNo": 5}
+    assert games.dedup_key(row) == "abc-123"
+
+
+def test_dedup_key_falls_back_to_composite_when_pitchuid_is_nan():
+    row = {"PitchUID": float("nan"), "GameUID": "g1", "PitchNo": 5}
+    assert games.dedup_key(row) == "g1|5"
+
+
+def test_dedup_key_falls_back_to_composite_when_pitchuid_is_none():
+    row = {"PitchUID": None, "GameUID": "g1", "PitchNo": 7}
+    assert games.dedup_key(row) == "g1|7"
+
+
+def test_dedup_key_falls_back_to_composite_when_pitchuid_is_empty_string():
+    row = {"PitchUID": "", "GameUID": "g1", "PitchNo": 9}
+    assert games.dedup_key(row) == "g1|9"
+
+
+def test_dedup_key_uses_gameid_when_gameuid_missing():
+    row = {"PitchUID": None, "GameUID": None, "GameID": "game42", "PitchNo": 3}
+    assert games.dedup_key(row) == "game42|3"
+
+
+def test_dedup_key_distinct_composite_keys_for_distinct_pitchno_not_collapsed():
+    row_a = {"PitchUID": float("nan"), "GameUID": "g1", "PitchNo": 1}
+    row_b = {"PitchUID": float("nan"), "GameUID": "g1", "PitchNo": 2}
+    assert games.dedup_key(row_a) != games.dedup_key(row_b)
+
+
 # ---- load_games ---------------------------------------------------------
 
 @pytest.fixture
@@ -187,6 +220,31 @@ def test_load_games_within_run_duplicate_pitchuid_is_skipped_not_inserted_twice(
     assert result.files == 2
     assert result.inserted == 30
     assert result.skipped == 30
+
+
+def test_load_games_rows_with_blank_pitchuid_use_composite_key_not_collapsed(monkeypatch):
+    # Two rows sharing a GameUID but with distinct PitchNo, both missing
+    # PitchUID (as pandas reads a genuinely blank CSV cell -> NaN). Before
+    # the fix these both stringified to the literal "nan" and collapsed
+    # onto one dedup key, silently dropping one of the two real rows.
+    two_rows_df = pd.DataFrame({
+        "PitchNo": [1, 2],
+        "Date": ["2026-04-16", "2026-04-16"],
+        "GameUID": ["g1", "g1"],
+        "GameID": ["gid1", "gid1"],
+        "PitchUID": [float("nan"), float("nan")],
+    })
+    monkeypatch.setattr(games, "_read_csv_from_sftp", lambda sftp, path: two_rows_df.copy())
+    monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: set())
+    monkeypatch.setattr(
+        games, "chunked_insert",
+        lambda *a, **k: pytest.fail("chunked_insert must not be called under dry_run"),
+    )
+
+    result = load_games(engine=object(), sftp=object(), dry_run=True)
+
+    assert result.inserted == 2
+    assert result.skipped == 0
 
 
 def test_load_games_limit_caps_files_processed(monkeypatch):
