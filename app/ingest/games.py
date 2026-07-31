@@ -273,7 +273,11 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
 def iter_game_files(sftp, root: str = "/v3") -> list[str]:
     """Recursively walk `root` on `sftp`, returning full paths of files whose
     basename matches a game-export CSV name (8 digits, a dash, then anything,
-    e.g. ``20260416-CypressCollege-1.csv``).
+    e.g. ``20260416-CypressCollege-1.csv``) AND whose immediate parent
+    directory is named ``CSV`` (the real Trackman tree is
+    ``/v3/YYYY/MM/DD/CSV/YYYYMMDD-Opponent-N_unverified.csv``; sibling
+    directories at the ``DD`` level may hold other export formats with
+    similarly-named files, which must be excluded).
 
     Sorted for deterministic ordering (helps `date_min`/`date_max` reasoning
     and makes tests reproducible).
@@ -286,7 +290,10 @@ def iter_game_files(sftp, root: str = "/v3") -> list[str]:
             path = posixpath.join(current, entry.filename)
             if stat.S_ISDIR(entry.st_mode):
                 stack.append(path)
-            elif _GAME_FILENAME_RE.match(entry.filename):
+            elif (
+                _GAME_FILENAME_RE.match(entry.filename)
+                and posixpath.basename(current) == "CSV"
+            ):
                 found.append(path)
     return sorted(found)
 

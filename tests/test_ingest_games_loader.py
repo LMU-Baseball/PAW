@@ -35,19 +35,40 @@ class _FakeSFTP:
         return self.tree.get(path, [])
 
 
-def test_iter_game_files_walks_nested_tree():
+def test_iter_game_files_walks_nested_tree_finds_file_under_csv_leaf():
     tree = {
         "/v3": [_FakeAttr("2026", is_dir=True)],
         "/v3/2026": [_FakeAttr("04", is_dir=True)],
         "/v3/2026/04": [_FakeAttr("16", is_dir=True)],
-        "/v3/2026/04/16": [
+        "/v3/2026/04/16": [_FakeAttr("CSV", is_dir=True)],
+        "/v3/2026/04/16/CSV": [
             _FakeAttr("20260416-CypressCollege-1.csv", is_dir=False),
             _FakeAttr("notes.txt", is_dir=False),
             _FakeAttr("not-a-game.csv", is_dir=False),
         ],
     }
     files = iter_game_files(_FakeSFTP(tree))
-    assert files == ["/v3/2026/04/16/20260416-CypressCollege-1.csv"]
+    assert files == ["/v3/2026/04/16/CSV/20260416-CypressCollege-1.csv"]
+
+
+def test_iter_game_files_ignores_matching_filename_outside_csv_dir():
+    tree = {
+        "/v3": [_FakeAttr("2026", is_dir=True)],
+        "/v3/2026": [_FakeAttr("04", is_dir=True)],
+        "/v3/2026/04": [_FakeAttr("16", is_dir=True)],
+        "/v3/2026/04/16": [
+            _FakeAttr("CSV", is_dir=True),
+            _FakeAttr("OTHER", is_dir=True),
+        ],
+        "/v3/2026/04/16/CSV": [
+            _FakeAttr("20260416-CypressCollege-1.csv", is_dir=False),
+        ],
+        "/v3/2026/04/16/OTHER": [
+            _FakeAttr("20260416-x.csv", is_dir=False),
+        ],
+    }
+    files = iter_game_files(_FakeSFTP(tree))
+    assert files == ["/v3/2026/04/16/CSV/20260416-CypressCollege-1.csv"]
 
 
 def test_iter_game_files_finds_multiple_across_dirs():
@@ -57,13 +78,15 @@ def test_iter_game_files_finds_multiple_across_dirs():
             _FakeAttr("04", is_dir=True),
             _FakeAttr("05", is_dir=True),
         ],
-        "/v3/2026/04": [_FakeAttr("20260416-a.csv", is_dir=False)],
-        "/v3/2026/05": [_FakeAttr("20260501-b.csv", is_dir=False)],
+        "/v3/2026/04": [_FakeAttr("CSV", is_dir=True)],
+        "/v3/2026/04/CSV": [_FakeAttr("20260416-a.csv", is_dir=False)],
+        "/v3/2026/05": [_FakeAttr("CSV", is_dir=True)],
+        "/v3/2026/05/CSV": [_FakeAttr("20260501-b.csv", is_dir=False)],
     }
     files = iter_game_files(_FakeSFTP(tree))
     assert files == [
-        "/v3/2026/04/20260416-a.csv",
-        "/v3/2026/05/20260501-b.csv",
+        "/v3/2026/04/CSV/20260416-a.csv",
+        "/v3/2026/05/CSV/20260501-b.csv",
     ]
 
 
