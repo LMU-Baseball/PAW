@@ -14,7 +14,7 @@ from app.ingest.bullpen import load_bullpen
 from app.ingest.config import hittrax_cfg, trackman_cfg
 from app.ingest.connections import open_ftps, open_sftp
 from app.ingest.games import load_games
-from app.ingest.hittrax import extract_load_raw
+from app.ingest.hittrax import extract_load_raw, transform
 
 ingest_cli = click.Group("ingest", help="Data ingestion loaders (Trackman SFTP / HitTrax FTPS).")
 
@@ -70,4 +70,42 @@ def hittrax_raw_command(dry_run: bool, limit: int | None):
     click.echo(
         f"HitTrax raw load: files={result.files} inserted={result.inserted} "
         f"ignored={result.skipped} dry_run={result.dry_run}"
+    )
+
+
+@ingest_cli.command("hittrax-transform")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually rebuild.",
+)
+def hittrax_transform_command(dry_run: bool):
+    """Rebuild practice_sessions/practice_plays/player_stats_summary from raw_practice_csv."""
+    engine = get_engine()
+    result = transform(engine, dry_run=dry_run)
+    click.echo(
+        f"HitTrax transform: sessions={result['sessions']} plays={result['plays']} "
+        f"players={result['players']} dry_run={dry_run}"
+    )
+
+
+@ingest_cli.command("hittrax")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually load + transform.",
+)
+@click.option("--limit", type=int, default=None, help="Limit the number of HitTrax CSV files processed.")
+def hittrax_command(dry_run: bool, limit: int | None):
+    """Full HitTrax pipeline: extract+load raw (FTPS) THEN transform to practice_* tables."""
+    engine = get_engine()
+    ingested_at = datetime.now(timezone.utc)
+    with open_ftps(hittrax_cfg()) as ftps:
+        raw_result = extract_load_raw(engine, ftps, ingested_at=ingested_at, dry_run=dry_run, limit=limit)
+    click.echo(
+        f"HitTrax raw load: files={raw_result.files} inserted={raw_result.inserted} "
+        f"ignored={raw_result.skipped} dry_run={raw_result.dry_run}"
+    )
+    transform_result = transform(engine, dry_run=dry_run)
+    click.echo(
+        f"HitTrax transform: sessions={transform_result['sessions']} plays={transform_result['plays']} "
+        f"players={transform_result['players']} dry_run={dry_run}"
     )
