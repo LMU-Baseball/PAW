@@ -32,22 +32,50 @@ _MIN_FILE_BYTES = 10  # smaller than this = an offseason/empty export; skip it
 
 def row_hash(payload: dict) -> str:
     """SHA-256 hex digest of `payload`, stable across dict key order and
-    non-JSON-native values (dates, NaN, etc. via ``default=str``)."""
+    non-JSON-native values (dates, etc. via ``default=str``).
+
+    NOTE: this does NOT sanitize NaN/NaT -- Python's json encoder emits
+    those as bare (invalid-JSON) `NaN`/`Infinity` tokens without ever
+    consulting ``default``. Callers must scrub NaN/NaT to `None` in the
+    payload dict *before* calling this (see `csv_to_raw_rows`), so the hash
+    is computed over the same cleaned dict that gets stored as JSON.
+    """
     encoded = json.dumps(payload, sort_keys=True, default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _clean_record(record: dict) -> dict:
+    """Replace NaN/NaT values with `None` so JSON-encoding emits `null`
+    instead of the bare (invalid-JSON) `NaN` token.
+
+    pandas represents missing numeric/datetime cells as `float('nan')` /
+    `pandas.NaT`. Python's `json` module encodes `float('nan')` as the
+    literal `NaN` by default (a JSON5/JS extension, not valid per the JSON
+    RFC) -- `json.dumps`'s ``default`` hook is never even consulted for
+    floats, so this can't be fixed at serialization time. MySQL's
+    `CAST(... AS JSON)` rejects `NaN`, and every real HitTrax export has
+    blank cells, so this scrub is required before every row hash/payload.
+    """
+    # `v != v` is the classic NaN self-inequality check (IEEE 754); it also
+    # catches `pandas.NaT` (which implements the same not-equal-to-self
+    # semantics) without needing an `isinstance(v, float)` guard that would
+    # miss NaT.
+    return {k: (None if v != v else v) for k, v in record.items()}
 
 
 def csv_to_raw_rows(df: pd.DataFrame, *, source_file: str) -> list[dict]:
     """Convert every row of `df` into a `raw_practice_csv` insert-ready dict:
     ``{"source_file", "row_hash", "payload"}`` where ``payload`` is the row's
-    JSON string (the hash is computed from the same row dict, not the
-    string, so key order never affects it)."""
+    JSON string (the hash is computed from the same cleaned row dict as the
+    stored payload -- see `_clean_record` -- so key order never affects the
+    hash and NaN cells never produce invalid JSON)."""
     rows: list[dict] = []
     for record in df.to_dict(orient="records"):
+        cleaned = _clean_record(record)
         rows.append({
             "source_file": source_file,
-            "row_hash": row_hash(record),
-            "payload": json.dumps(record, default=str),
+            "row_hash": row_hash(cleaned),
+            "payload": json.dumps(cleaned, default=str),
         })
     return rows
 

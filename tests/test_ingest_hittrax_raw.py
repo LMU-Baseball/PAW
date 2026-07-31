@@ -6,6 +6,8 @@ engine (`begin` -> a fake connection whose `execute` returns a fake result
 with a settable `.rowcount`), so no real FTPS connection or SQL engine is
 ever touched.
 """
+import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +15,14 @@ import pandas as pd
 import pytest
 
 from app.ingest.hittrax import csv_to_raw_rows, extract_load_raw, row_hash
+
+
+def _reject_nonstrict_constants(_):
+    """`parse_constant` hook for `json.loads`: called only for the
+    non-standard `NaN`/`Infinity`/`-Infinity` tokens Python's json module
+    otherwise accepts leniently. Raising here makes `json.loads` behave
+    like a strict JSON RFC parser for the purposes of this test."""
+    raise ValueError("non-strict JSON: encountered NaN/Infinity token")
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ingest" / "hittrax_plays_sample.csv"
 FIXTURE_BYTES = FIXTURE.read_bytes()
@@ -67,6 +77,39 @@ def test_csv_to_raw_rows_hashes_differ_across_distinct_rows(fixture_df):
     rows = csv_to_raw_rows(fixture_df, source_file="PlaysExport_sample.CSV")
     hashes = {r["row_hash"] for r in rows}
     assert len(hashes) == 30  # fixture rows are all distinct
+
+
+def test_csv_to_raw_rows_blank_numeric_cells_become_strict_valid_json(fixture_df):
+    # Every fixture row has at least one blank cell (e.g. SUuid/SSUuid),
+    # which pandas reads as float('nan'). json.dumps(default=str) does NOT
+    # sanitize NaN -- the C encoder emits it natively as a bare `NaN` token,
+    # which is invalid per the JSON RFC (though Python's own json.loads
+    # accepts it leniently, masking the bug). Confirm the payload has no
+    # bare NaN/Infinity token and parses under a strict JSON reader.
+    assert fixture_df.isna().any().any(), "fixture must contain blank cells to exercise this path"
+
+    rows = csv_to_raw_rows(fixture_df, source_file="PlaysExport_sample.CSV")
+    for row in rows:
+        payload = row["payload"]
+        assert "NaN" not in payload
+        assert "Infinity" not in payload
+        # Would raise ValueError if a bare NaN/Infinity/-Infinity token were
+        # present; must NOT raise for a properly-scrubbed (null-using) payload.
+        parsed = json.loads(payload, parse_constant=_reject_nonstrict_constants)
+        assert isinstance(parsed, dict)
+        # Any originally-NaN cell must now be JSON null (Python None), never NaN.
+        assert not any(isinstance(v, float) and math.isnan(v) for v in parsed.values())
+
+
+def test_csv_to_raw_rows_hash_matches_cleaned_payload_not_raw_nan(fixture_df):
+    # The hash must be computed over the SAME cleaned (NaN->None) dict that
+    # gets serialized as payload, not over the raw NaN-containing record --
+    # otherwise row_hash(cleaned_dict) computed independently wouldn't match
+    # what's stored.
+    rows = csv_to_raw_rows(fixture_df, source_file="PlaysExport_sample.CSV")
+    row = rows[0]
+    cleaned = json.loads(row["payload"])
+    assert row["row_hash"] == row_hash(cleaned)
 
 
 # ---- extract_load_raw: fake FTPS + fake engine --------------------------
