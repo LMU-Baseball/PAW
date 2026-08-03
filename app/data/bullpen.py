@@ -116,3 +116,97 @@ def bullpen_data_max_date():
     df = query_df("SELECT MAX(DATE(Date)) AS d FROM BULLPEN")
     v = df.iloc[0]["d"] if not df.empty else None
     return None if v is None or pd.isna(v) else str(v)
+
+
+def pitcher_name(pitcher_id) -> str | None:
+    """Display name ('Last, First') for a BULLPEN PitcherId, or None."""
+    df = query_df("SELECT MAX(Pitcher) AS n FROM BULLPEN WHERE PitcherId = :pid",
+                  {"pid": int(pitcher_id)})
+    v = df.iloc[0]["n"] if not df.empty else None
+    return None if v is None or pd.isna(v) else str(v)
+
+
+def session_options(pitcher_id, start, end) -> pd.DataFrame:
+    """Session dates (newest first) with pitch counts, within [start, end]."""
+    df = query_df(
+        """
+        SELECT DATE(Date) AS date, COUNT(*) AS pitches
+          FROM BULLPEN
+         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+         GROUP BY DATE(Date)
+         ORDER BY date DESC
+        """,
+        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+    )
+    if not df.empty:
+        df["date"] = df["date"].astype(str)
+    return df
+
+
+def bullpen_session_summary(pitcher_id, start, end) -> dict:
+    """Sidebar tiles for a pitcher within [start, end]."""
+    df = query_df(
+        """
+        SELECT COUNT(DISTINCT DATE(Date)) AS sessions, COUNT(*) AS pitches,
+               COUNT(DISTINCT TaggedPitchType) AS pitch_types, MAX(DATE(Date)) AS last_date
+          FROM BULLPEN
+         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+        """,
+        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+    )
+    if df.empty:
+        return {"sessions": 0, "pitches": 0, "pitch_types": 0, "last_date": "—"}
+    r = df.iloc[0]
+    last = r["last_date"]
+    return {
+        "sessions": int(r["sessions"] or 0),
+        "pitches": int(r["pitches"] or 0),
+        "pitch_types": int(r["pitch_types"] or 0),
+        "last_date": "—" if last is None or pd.isna(last) else str(last),
+    }
+
+
+def trend_by_session(pitcher_id, start, end) -> pd.DataFrame:
+    """Per (date, pitch_type) trend aggregates within [start, end].
+
+    `loc_spread` = RMS distance of (PlateLocSide, PlateLocHeight) from the
+    group's mean location — a command-CONSISTENCY proxy (lower = tighter),
+    NOT true command (bullpens have no intended-target column). None when a
+    group has <2 located pitches.
+    """
+    cols = ["date", "tagged_pitch_type", "pitches", "velo_avg", "velo_max",
+            "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread"]
+    df = query_df(
+        """
+        SELECT DATE(Date) AS date, TaggedPitchType AS tagged_pitch_type,
+               RelSpeed AS rel_speed, SpinRate AS spin_rate,
+               SpinAxis3dSpinEfficiency AS spin_eff,
+               InducedVertBreak AS ind_vert_break, HorzBreak AS horz_break,
+               PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height
+          FROM BULLPEN
+         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+           AND TaggedPitchType IS NOT NULL
+        """,
+        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+    )
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df["date"] = df["date"].astype(str)
+    rows = []
+    for (d, pt), sub in df.groupby(["date", "tagged_pitch_type"]):
+        loc = sub[["plate_loc_side", "plate_loc_height"]].dropna()
+        if len(loc) >= 2:
+            cx, cy = loc["plate_loc_side"].mean(), loc["plate_loc_height"].mean()
+            spread = round(float((((loc["plate_loc_side"] - cx) ** 2 +
+                                   (loc["plate_loc_height"] - cy) ** 2).mean()) ** 0.5), 2)
+        else:
+            spread = None
+        rows.append({
+            "date": d, "tagged_pitch_type": pt, "pitches": int(len(sub)),
+            "velo_avg": _r1(sub["rel_speed"].mean()), "velo_max": _r1(sub["rel_speed"].max()),
+            "spin_avg": _r1(sub["spin_rate"].mean()), "eff_avg": _r1(sub["spin_eff"].mean()),
+            "ivb_avg": _r1(sub["ind_vert_break"].mean()), "hb_avg": _r1(sub["horz_break"].mean()),
+            "loc_spread": spread,
+        })
+    return (pd.DataFrame(rows, columns=cols)
+            .sort_values(["tagged_pitch_type", "date"]).reset_index(drop=True))
