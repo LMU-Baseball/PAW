@@ -141,3 +141,14 @@ def test_serve_layout_wires_tabs_and_window(server):
     assert '"session"' in src and '"trends"' in src
     assert "Session Detail" in src and "Development Trends" in src
     assert layout.WINDOW_MIN == "2025-09-01"
+
+
+def test_register_callbacks_adds_callbacks(server):
+    from dash import Dash
+    from app.dashboards.bullpen import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/bptest/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    before = len(app.callback_map)
+    callbacks.register_callbacks(app)
+    assert len(app.callback_map) > before
