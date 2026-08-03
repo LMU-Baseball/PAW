@@ -74,3 +74,30 @@ def test_trend_fig_all_metrics_render():
     # empty / one-type filter still returns a figure
     assert charts.trend_fig(df, "velocity", active_types=[]) is not None
     assert charts.trend_fig(pd.DataFrame(columns=df.columns), "velocity") is not None
+
+
+def test_df_table_colors_named_column():
+    from app.dashboards.bullpen import tables
+    from app.reports.plots import color_for
+    df = pd.DataFrame({"pitch": ["Fastball", "Slider"], "qty": [10, 5]})
+    tbl = tables.df_table(df, id_="t", color_col="pitch")
+    colored = {c.get("color") for c in (tbl.style_data_conditional or [])
+               if c.get("if", {}).get("column_id") == "pitch"}
+    assert color_for("Fastball") in colored and color_for("Slider") in colored
+
+
+def test_session_detail_render_live():
+    from app.dashboards.bullpen.tabs import session_detail
+    from app.data import bullpen as B
+    s = B.session_options(GEIS, "2025-09-01", "2026-05-13")
+    # GEIS has bullpen data in-window; render must not raise and must include charts.
+    if s.empty:
+        pytest.skip("no in-window sessions for anchor pitcher")
+    out = session_detail.render(GEIS, s.iloc[0]["date"])
+    assert out is not None
+
+
+def test_session_detail_empty_states():
+    from app.dashboards.bullpen.tabs import session_detail
+    assert "Select a pitcher" in str(session_detail.render(None, None))
+    assert "session" in str(session_detail.render(GEIS, None)).lower()
