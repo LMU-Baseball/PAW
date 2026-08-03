@@ -101,3 +101,27 @@ def test_session_detail_empty_states():
     from app.dashboards.bullpen.tabs import session_detail
     assert "Select a pitcher" in str(session_detail.render(None, None))
     assert "session" in str(session_detail.render(GEIS, None)).lower()
+
+
+def test_trends_render_has_controls_live():
+    from app.dashboards.bullpen.tabs import trends
+    s = str(trends.render(GEIS, "2025-09-01", "2026-05-13"))
+    assert "bp-trend-metric" in s and "bp-trend-active" in s and "bp-trend-body" in s
+
+
+def test_trends_render_empty_pitcher():
+    from app.dashboards.bullpen.tabs import trends
+    assert "Select a pitcher" in str(trends.render(None, "2025-09-01", "2026-05-13"))
+
+
+def test_trends_body_one_session_note():
+    from app.dashboards.bullpen.tabs import trends
+    one = _trend_df().iloc[[0, 2]].copy()   # both rows share date 2026-05-06
+    assert "2 session" in str(trends.body(one, "velocity", ["Fastball", "Slider"])).lower() \
+        or "one session" in str(trends.body(one, "velocity", ["Fastball", "Slider"])).lower()
+
+
+def test_trends_body_two_sessions_renders_graph():
+    from app.dashboards.bullpen.tabs import trends
+    out = trends.body(_trend_df(), "velocity", ["Fastball", "Slider"])
+    assert out is not None and "Graph" in str(type(out)) or "dcc.Graph" in str(out)
