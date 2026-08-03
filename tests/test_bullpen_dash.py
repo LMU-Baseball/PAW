@@ -125,3 +125,19 @@ def test_trends_body_two_sessions_renders_graph():
     from app.dashboards.bullpen.tabs import trends
     out = trends.body(_trend_df(), "velocity", ["Fastball", "Slider"])
     assert out is not None and "Graph" in str(type(out)) or "dcc.Graph" in str(out)
+
+
+def test_sidebar_shows_range_tiles_live():
+    from app.dashboards.bullpen import layout
+    s = str(layout.sidebar(GEIS, "2025-09-01", "2026-05-13"))
+    for label in ("SESSIONS", "PITCHES", "PITCH TYPES", "LAST"):
+        assert label in s
+
+
+def test_serve_layout_wires_tabs_and_window(server):
+    import inspect
+    from app.dashboards.bullpen import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"session"' in src and '"trends"' in src
+    assert "Session Detail" in src and "Development Trends" in src
+    assert layout.WINDOW_MIN == "2025-09-01"
