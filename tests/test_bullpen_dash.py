@@ -36,3 +36,41 @@ def test_session_dropdown_options_labels():
     opts = selectors.session_dropdown_options(df)
     assert opts[0] == {"label": "2026-05-13 (18)", "value": "2026-05-13"}
     assert selectors.session_dropdown_options(pd.DataFrame(columns=["date", "pitches"])) == []
+
+
+def _session_df():
+    return pd.DataFrame({
+        "tagged_pitch_type": ["Fastball", "Fastball", "Slider"],
+        "rel_speed": [90.1, 91.0, 82.4], "ind_vert_break": [15.0, 16.1, 2.0],
+        "horz_break": [8.0, 9.2, -5.0], "rel_side": [1.9, 2.0, 1.8],
+        "rel_height": [6.0, 6.1, 5.9], "plate_loc_side": [0.1, -0.2, 0.3],
+        "plate_loc_height": [2.5, 3.0, 1.8]})
+
+
+def _trend_df():
+    return pd.DataFrame({
+        "date": ["2026-05-06", "2026-05-13", "2026-05-06", "2026-05-13"],
+        "tagged_pitch_type": ["Fastball", "Fastball", "Slider", "Slider"],
+        "pitches": [10, 12, 6, 7], "velo_avg": [90.0, 91.0, 82.0, 83.0],
+        "velo_max": [92.0, 93.0, 84.0, 85.0], "spin_avg": [2200.0, 2250.0, 2400.0, 2450.0],
+        "eff_avg": [95.0, 96.0, 40.0, 42.0], "ivb_avg": [15.0, 16.0, 2.0, 1.0],
+        "hb_avg": [8.0, 9.0, -5.0, -6.0], "loc_spread": [0.9, 0.7, 1.2, 1.0]})
+
+
+def test_session_charts_render():
+    from app.dashboards.bullpen import charts
+    df = _session_df()
+    for fn in (charts.velo_fig, charts.movement_fig, charts.release_fig, charts.location_fig):
+        assert fn(df) is not None
+        assert fn(pd.DataFrame(columns=df.columns)) is not None  # empty -> empty fig, no raise
+
+
+def test_trend_fig_all_metrics_render():
+    from app.dashboards.bullpen import charts
+    df = _trend_df()
+    for metric in ("velocity", "spin", "movement", "command"):
+        fig = charts.trend_fig(df, metric, active_types=["Fastball", "Slider"])
+        assert fig is not None and len(fig.data) >= 1
+    # empty / one-type filter still returns a figure
+    assert charts.trend_fig(df, "velocity", active_types=[]) is not None
+    assert charts.trend_fig(pd.DataFrame(columns=df.columns), "velocity") is not None
