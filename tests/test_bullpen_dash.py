@@ -143,6 +143,24 @@ def test_serve_layout_wires_tabs_and_window(server):
     assert layout.WINDOW_MIN == "2025-09-01"
 
 
+def test_serve_layout_renders_for_logged_in_coach(server):
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import html
+    from app.dashboards.bullpen import layout
+    with server.app_context():
+        coach = User(email="bpc@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/bullpen/"):
+            login_user(coach)
+            out = layout.serve_layout()
+    assert isinstance(out, html.Div)
+    assert "Please log in" not in str(out)
+
+
 def test_register_callbacks_adds_callbacks(server):
     from dash import Dash
     from app.dashboards.bullpen import layout, callbacks

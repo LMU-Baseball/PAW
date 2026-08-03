@@ -37,7 +37,7 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("bp-selection", "data"), Output("bp-sidebar", "children"),
         Input("bp-pitcher-dd", "value"), Input("bp-session-dd", "value"),
-        State("bp-daterange", "start_date"), State("bp-daterange", "end_date"),
+        Input("bp-daterange", "start_date"), Input("bp-daterange", "end_date"),
     )
     def _on_selection(pitcher_id, session_date, start, end):
         pid = _resolve(pitcher_id)
@@ -51,7 +51,7 @@ def register_callbacks(dash_app) -> None:
     )
     def _render_tab(tab, sel):
         sel = sel or {}
-        pid = sel.get("pitcher_id")
+        pid = _resolve(sel.get("pitcher_id"))
         if tab == "trends":
             return trends.render(pid, sel.get("start"), sel.get("end"))
         return session_detail.render(pid, sel.get("session_date"))
