@@ -152,3 +152,23 @@ def test_register_callbacks_adds_callbacks(server):
     before = len(app.callback_map)
     callbacks.register_callbacks(app)
     assert len(app.callback_map) > before
+
+
+def test_build_bullpen_dash_mounts(server):
+    rules = {r.rule for r in server.url_map.iter_rules()}
+    assert any(r.startswith("/dash/bullpen/") for r in rules)
+
+
+def test_pitching_hub_has_bullpen_dashboard_card(server):
+    server.config["WTF_CSRF_ENABLED"] = False
+    from app.auth.models import User
+    from app.extensions import db
+    with server.app_context():
+        u = User(email="c@lmu.edu", name="Coach", role="coach"); u.set_password("x")
+        db.session.add(u); db.session.commit()
+    client = server.test_client()
+    with client.session_transaction() as s:
+        pass
+    client.post("/login", data={"email": "c@lmu.edu", "password": "x"})
+    html_body = client.get("/pitching").get_data(as_text=True)
+    assert "Bullpen Dashboard" in html_body and "/dash/bullpen/" in html_body
