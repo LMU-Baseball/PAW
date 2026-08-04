@@ -64,7 +64,7 @@
         {% endfor %}
       </table>
       {% if fastball.avg_velo is not none %}
-      <div class="fb-callout"><b>Fastball</b> — Avg Velo {{ fastball.avg_velo }} · Max {{ fastball.max_velo }} · Avg Spin {{ fastball.avg_spin }}</div>
+      <div class="fb-callout"><b>Fastball</b> — Avg Velo {{ fastball.avg_velo }} · Max {{ fastball.max_velo }} · Avg Spin {{ fastball.avg_spin if fastball.avg_spin is not none else '—' }}</div>
       {% endif %}
     </div>
   </div>

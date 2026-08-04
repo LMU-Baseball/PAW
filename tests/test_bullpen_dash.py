@@ -65,17 +65,6 @@ def test_session_charts_render():
         assert fn(pd.DataFrame(columns=df.columns)) is not None  # empty -> empty fig, no raise
 
 
-def test_trend_fig_all_metrics_render():
-    from app.dashboards.bullpen import charts
-    df = _trend_df()
-    for metric in ("velocity", "spin", "movement", "command"):
-        fig = charts.trend_fig(df, metric, active_types=["Fastball", "Slider"])
-        assert fig is not None and len(fig.data) >= 1
-    # empty / one-type filter still returns a figure
-    assert charts.trend_fig(df, "velocity", active_types=[]) is not None
-    assert charts.trend_fig(pd.DataFrame(columns=df.columns), "velocity") is not None
-
-
 def test_df_table_colors_named_column():
     from app.dashboards.bullpen import tables
     from app.reports.plots import color_for
@@ -110,7 +99,7 @@ def test_session_detail_has_fastball_callout_live():
     if s.empty:
         pytest.skip("no sessions")
     out = str(session_detail.render(GEIS, s.iloc[0]["date"]))
-    assert "Fastball" in out and ("Avg Velo" in out or "Avg" in out)
+    assert "Avg Spin" in out  # unique to the fastball callout div (summary table uses "Spin Avg")
 
 
 def test_session_detail_tables_condensed_live():
@@ -120,7 +109,7 @@ def test_session_detail_tables_condensed_live():
     if s.empty:
         pytest.skip("no sessions")
     out = str(session_detail.render(GEIS, s.iloc[0]["date"]))
-    assert "Pitch #" in out or "Pitch" in out  # renumbered header
+    assert "Pitch #" in out  # renumbered header (real contract from _display_pitches)
     # raw session-global pitch numbers (e.g. 33) should NOT appear as the first pitch label
     # (can't assert exact text here; covered by the helper unit test below)
 
@@ -306,9 +295,16 @@ def test_velo_lollipop_and_release_dispersion():
     v = charts.velo_fig(df)
     # a text label with the avg value present on the avg-dot trace
     assert any(getattr(t, "text", None) for t in v.data)
-    r = charts.release_fig(df)
+    # ellipse needs >=3 points of the same pitch type; build a fixture with 3+ Fastballs
+    df3 = pd.DataFrame({
+        "tagged_pitch_type": ["Fastball", "Fastball", "Fastball"],
+        "rel_speed": [90.1, 91.0, 90.5], "ind_vert_break": [15.0, 16.1, 15.5],
+        "horz_break": [8.0, 9.2, 8.5], "rel_side": [1.9, 2.0, 1.95],
+        "rel_height": [6.0, 6.1, 6.05], "plate_loc_side": [0.1, -0.2, 0.0],
+        "plate_loc_height": [2.5, 3.0, 2.7]})
+    r = charts.release_fig(df3)
     # dispersion: has a filled ellipse trace (fill='toself') for a multi-pitch type
-    assert any(getattr(t, "fill", None) == "toself" for t in r.data) or len(r.data) >= 1
+    assert any(getattr(t, "fill", None) == "toself" for t in r.data)
     # equal aspect on release
     assert r.layout.yaxis.scaleanchor == "x"
 

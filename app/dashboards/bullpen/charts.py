@@ -182,49 +182,6 @@ def location_fig(df):
     return fig
 
 
-_TREND_TITLES = {
-    "velocity": "Velocity trend — avg (solid) / max (dashed)",
-    "spin": "Spin trend — rate (solid) / efficiency % (dotted, right axis)",
-    "movement": "Movement trend — IVB (solid) / HB (dashed)",
-    "command": "Location spread — lower = tighter (consistency proxy)",
-}
-
-
-def trend_fig(df, metric, active_types=None):
-    if df is None or df.empty:
-        return _empty("Need at least 2 sessions to show a trend.")
-    types = active_types if active_types else sorted(df["tagged_pitch_type"].unique())
-    fig = go.Figure()
-    for pt in types:
-        sub = df[df["tagged_pitch_type"] == pt].sort_values("date")
-        if sub.empty:
-            continue
-        col = color_for(pt)
-        if metric == "velocity":
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["velo_avg"], mode="lines+markers",
-                                     name=f"{pt} avg", line=dict(color=col)))
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["velo_max"], mode="lines+markers",
-                                     name=f"{pt} max", line=dict(color=col, dash="dash")))
-        elif metric == "spin":
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["spin_avg"], mode="lines+markers",
-                                     name=f"{pt} spin", line=dict(color=col)))
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["eff_avg"], mode="lines+markers",
-                                     name=f"{pt} eff%", line=dict(color=col, dash="dot"),
-                                     yaxis="y2"))
-        elif metric == "movement":
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["ivb_avg"], mode="lines+markers",
-                                     name=f"{pt} IVB", line=dict(color=col)))
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["hb_avg"], mode="lines+markers",
-                                     name=f"{pt} HB", line=dict(color=col, dash="dash")))
-        else:  # command
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub["loc_spread"], mode="lines+markers",
-                                     name=str(pt), line=dict(color=col)))
-    fig.update_layout(title=_TREND_TITLES.get(metric, ""), xaxis_title="Session date", **_BASE)
-    if metric == "spin":
-        fig.update_layout(yaxis2=dict(overlaying="y", side="right", title="eff %"))
-    return fig
-
-
 def trend_small_multiples(df, metric):
     if df is None or df.empty:
         return _empty("Need at least 2 sessions to show a trend.")

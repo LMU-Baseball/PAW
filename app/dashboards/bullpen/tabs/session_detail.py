@@ -72,8 +72,9 @@ def render(pitcher_id, date) -> html.Div:
     fb = P.fastball_callout(df, pt_col="tagged_pitch_type")
     callout = html.Div()
     if fb["avg_velo"] is not None:
+        avg_spin = fb["avg_spin"] if fb["avg_spin"] is not None else "—"
         callout = html.Div([html.B("Fastball"),
-            f" — Avg Velo {fb['avg_velo']} · Max {fb['max_velo']} · Avg Spin {fb['avg_spin']}"],
+            f" — Avg Velo {fb['avg_velo']} · Max {fb['max_velo']} · Avg Spin {avg_spin}"],
             style={"padding": "6px 4px", "color": "#555", "fontSize": "15px"})
 
     return html.Div([

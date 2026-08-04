@@ -34,7 +34,7 @@ def register_callbacks(dash_app) -> None:
         pid = _resolve(pitcher_id)
         anchor = layout._bullpen_anchor(pid)
         s, e = dr.preset_range(preset, anchor)
-        return str(s), str(e), show
+        return max(str(s), layout.WINDOW_MIN), str(e), show
 
     # Pitcher or date-range change -> refresh session dropdown (default most-recent).
     @dash_app.callback(
