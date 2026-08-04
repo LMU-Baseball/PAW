@@ -231,6 +231,24 @@ def _split_donut(ax, vlhh, vrhh, colors) -> None:
             fontsize=6, color="#555")
 
 
+def pitch_freq_bar_uri(counts) -> str:
+    """Horizontal stacked bar of pitch-type mix (width proportional to count), labeled."""
+    fig, ax = plt.subplots(figsize=(6.4, 0.7))
+    total = sum(n for _, n in counts) or 1
+    left = 0
+    for pt, n in counts:
+        w = n / total
+        ax.barh(0, w, left=left, color=_color_for(pt), edgecolor="white")
+        if w > 0.06:
+            ax.text(left + w / 2, 0, str(n), ha="center", va="center",
+                    fontsize=8, color="white", fontweight="bold")
+        left += w
+    ax.set_xlim(0, 1); ax.set_ylim(-0.5, 0.5); ax.axis("off")
+    ax.set_title(f"Pitch Frequency (Total {total if counts else 0})",
+                 fontsize=9, color="#9A0021", fontweight="bold", loc="left")
+    return _fig_to_uri(fig)
+
+
 def pitch_usage_donuts_uri(df) -> str:
     """Overall / 2K / Splits(vLHH|vRHH) usage donuts as one PNG data URI."""
     from app.data.pitching import pitch_usage_table

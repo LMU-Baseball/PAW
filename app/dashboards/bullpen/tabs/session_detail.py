@@ -80,6 +80,8 @@ def render(pitcher_id, date) -> html.Div:
         tables.df_table(_display_summary(summ_df), id_="bp-summary", color_col="Pitch"),
         callout,
         html.Div(style={"height": "12px"}),
+        dcc.Graph(figure=charts.pitch_freq_bar(df), style={"height": "140px"}),
+        html.Div(style={"height": "12px"}),
         charts_grid,
         html.H4("All pitches", style={"color": "#9A0021", "marginTop": "14px"}),
         tables.df_table(_display_pitches(df), id_="bp-pitches", color_col="Pitch"),

@@ -82,3 +82,9 @@ def test_pitch_colors_stable_per_name():
     assert plots._color_for("Fastball") == plots._color_for("Fastball")
     # an unknown name is deterministic across calls
     assert plots._color_for("Gyroball") == plots._color_for("Gyroball")
+
+
+def test_pitch_freq_bar_uri():
+    uri = plots.pitch_freq_bar_uri([("Fastball", 6), ("Slider", 3), ("ChangeUp", 2)])
+    assert uri.startswith("data:image/png")
+    assert plots.pitch_freq_bar_uri([]).startswith("data:image/png")

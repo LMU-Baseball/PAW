@@ -60,6 +60,23 @@ def _types(df):
     return list(df.groupby("tagged_pitch_type").groups)
 
 
+def pitch_freq_bar(df):
+    """Horizontal stacked bar of pitch-type mix for a session (width = count)."""
+    if df is None or df.empty:
+        return _empty()
+    vc = df["tagged_pitch_type"].value_counts()
+    total = int(vc.sum())
+    fig = go.Figure()
+    for pt, n in vc.items():
+        fig.add_trace(go.Bar(y=["mix"], x=[int(n)], name=str(pt), orientation="h",
+            marker_color=color_for(pt), text=[int(n)], textposition="inside",
+            hovertemplate=f"{pt}: {int(n)}<extra></extra>"))
+    fig.update_layout(barmode="stack", **_BASE)
+    fig.update_layout(title=f"Pitch Frequency (Total {total})", showlegend=True,
+                      height=140, yaxis_visible=False)
+    return fig
+
+
 def velo_fig(df):
     """Horizontal range-lollipop per pitch type: min-max bar + avg dot + label."""
     if df is None or df.empty:

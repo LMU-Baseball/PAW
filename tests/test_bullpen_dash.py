@@ -313,6 +313,13 @@ def test_velo_lollipop_and_release_dispersion():
     assert r.layout.yaxis.scaleanchor == "x"
 
 
+def test_pitch_freq_bar_plotly():
+    from app.dashboards.bullpen import charts
+    df = pd.DataFrame({"tagged_pitch_type": ["Fastball", "Fastball", "Slider"]})
+    fig = charts.pitch_freq_bar(df)
+    assert fig is not None and len(fig.data) >= 1
+
+
 def test_pitching_hub_has_bullpen_dashboard_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User

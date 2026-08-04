@@ -90,6 +90,8 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     df = df.copy()
     df["_pt"] = P.pitch_type(df)
     fastball = P.fastball_callout(df, pt_col="_pt")
+    counts = list(df["_pt"].value_counts().items())
+    charts["pitch_freq"] = plots.pitch_freq_bar_uri(counts)
     # Color key for the tables. The charts dropped their legends (they hid data),
     # so the colored pitch-type names in the tables ARE the legend.
     pitch_colors = {r["pitch"]: plots.color_for(r["pitch"])
