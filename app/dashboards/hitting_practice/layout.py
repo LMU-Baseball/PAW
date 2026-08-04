@@ -69,30 +69,19 @@ def serve_layout() -> html.Div:
     except Exception:
         pitch_all = pd.DataFrame()
 
-    start, end = P.preset_date_range("Custom")
     min_d, max_d = P.date_bounds()
+    anchor = str(max_d)
+    s0, e0 = dr.preset_range("season", anchor)
+    start_d = max(str(s0), str(min_d))
+    end_d = anchor
     players = selectors.player_options(pitch_all, is_coach=is_coach, own_name=own_name)
     default_player = players[0]["value"] if players else "All Players"
 
     filters = html.Div([
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dcc.Dropdown(
-                id="prac-date-preset",
-                options=[
-                    {"label": "Custom (Swing Decision → today)", "value": "Custom"},
-                    {"label": "Past Week", "value": "Past Week"},
-                    {"label": "Past Month", "value": "Past Month"},
-                    {"label": "Past 3 Months", "value": "Past 3 Months"},
-                    {"label": "Past Year", "value": "Past Year"},
-                ],
-                value="Custom", clearable=False, style={"minWidth": "220px"},
-            ),
-        ]),
-        html.Div([
-            html.Label("Calendar", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_picker("prac", start.isoformat(), end.isoformat(),
-                           min_date=str(min_d), max_date=str(max_d)),
+            dr.date_control("prac", anchor, min_date=str(min_d), max_date=str(max_d),
+                            preset="season"),
         ]),
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),
@@ -112,9 +101,9 @@ def serve_layout() -> html.Div:
 
     return html.Div([
         dcc.Store(id="prac-filters", data={
-            "player": default_player, "preset": "Custom",
+            "player": default_player,
             "session": "All session types", "exclude_test": True,
-            "start": start.isoformat(), "end": end.isoformat(),
+            "start": start_d, "end": end_d,
         }),
         dcc.Store(id="prac-pitch-data"),
         header(back_href="/hitting", back_label="← Hitting"),

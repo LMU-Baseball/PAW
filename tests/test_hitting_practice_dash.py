@@ -105,9 +105,39 @@ def test_practice_layout_has_daterange():
         # serve_layout requires auth; assert the picker id is wired in the module
         import inspect
         src = inspect.getsource(layout)
-        # date_range.date_picker builds id=f"{id_prefix}-daterange" dynamically,
-        # so assert the call site that wires "prac" as the prefix.
-        assert 'dr.date_picker("prac"' in src
+        # date_range.date_control builds the "prac-daterange" calendar (and the
+        # "prac-date-preset" dropdown) dynamically, so assert the call site that
+        # wires "prac" as the prefix onto the shared control.
+        assert 'dr.date_control("prac"' in src
+
+
+def test_practice_layout_uses_shared_preset_control_not_ad_hoc_dropdown():
+    """Task 6: practice must adopt the shared date_control (This Season default +
+    Past 6 Months + Custom Range) instead of its own today-anchored dropdown."""
+    import inspect
+    from app.dashboards.hitting_practice import layout
+    src = inspect.getsource(layout)
+    assert "dr.date_control(" in src
+    # the old ad-hoc dropdown (with its own option set) must be gone
+    assert 'id="prac-date-preset"' not in src
+    assert "Past 3 Months" not in src
+    assert "Custom (Swing Decision" not in src
+    # layout no longer resolves the initial range via the old today-anchored helper
+    assert "P.preset_date_range" not in src
+
+
+def test_practice_preset_callback_writes_daterange_via_shared_preset_range():
+    """The practice preset dropdown must resolve through dr.preset_range (anchored
+    to the latest practice session date) and toggle prac-cal-wrap, matching the
+    shared `_on_preset` shape used by the other dashboards."""
+    import inspect
+    from app.dashboards.hitting_practice import callbacks
+    src = inspect.getsource(callbacks)
+    assert "dr.preset_range(" in src
+    assert 'Input("prac-date-preset", "value")' in src
+    assert 'Output("prac-daterange", "start_date")' in src
+    assert 'Output("prac-daterange", "end_date")' in src
+    assert 'Output("prac-cal-wrap", "style")' in src
 
 
 def test_pitch_zone_heatmap_black_box_and_metric():

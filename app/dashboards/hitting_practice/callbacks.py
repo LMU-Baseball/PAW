@@ -9,6 +9,7 @@ from dash import ALL, Input, Output, State, ctx, dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
+from app.dashboards import date_range as dr
 from app.dashboards.hitting_practice import layout, selectors
 from app.dashboards.hitting_practice.tabs import (
     batted_ball, pitch_zones, session_tables, swing_frequency,
@@ -44,25 +45,36 @@ def _load_all(exclude_test: bool):
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
+        Output("prac-daterange", "start_date"), Output("prac-daterange", "end_date"),
+        Output("prac-cal-wrap", "style"),
+        Input("prac-date-preset", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_preset(preset):
+        from dash import no_update
+        show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
+        if preset == "custom":
+            return no_update, no_update, show
+        min_d, max_d = P.date_bounds()
+        anchor = str(max_d)
+        s, e = dr.preset_range(preset, anchor)
+        s = max(str(s), str(min_d))
+        return s, str(e), show
+
+    @dash_app.callback(
         Output("prac-filters", "data"),
         Output("prac-player", "options"),
-        Output("prac-daterange", "start_date"),
-        Output("prac-daterange", "end_date"),
-        Input("prac-date-preset", "value"),
         Input("prac-player", "value"),
         Input("prac-daterange", "start_date"),
         Input("prac-daterange", "end_date"),
     )
-    def _on_filters(preset, player, ds, de):
+    def _on_filters(player, ds, de):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own_name = getattr(current_user, "name", None)
         exclude_test = True
         pitch, _, _, _ = _load_all(exclude_test)
-        if ctx.triggered_id == "prac-daterange" and ds and de:
-            start = date.fromisoformat(ds[:10])
-            end = date.fromisoformat(de[:10])
-        else:
-            start, end = P.preset_date_range(preset or "Custom")
+        start = date.fromisoformat(ds[:10]) if ds else None
+        end = date.fromisoformat(de[:10]) if de else None
         windowed = P.apply_filters(pitch, player=None, start=start, end=end, session=None)
         base = windowed if not windowed.empty else pitch
         popts = selectors.player_options(base, is_coach=is_coach, own_name=own_name)
@@ -70,10 +82,11 @@ def register_callbacks(dash_app) -> None:
         if player not in {o["value"] for o in popts} and popts:
             player = popts[0]["value"]
         return (
-            {"player": player, "preset": preset or "Custom",
+            {"player": player,
              "session": "All session types", "exclude_test": True,
-             "start": start.isoformat(), "end": end.isoformat()},
-            popts, start.isoformat(), end.isoformat(),
+             "start": start.isoformat() if start else None,
+             "end": end.isoformat() if end else None},
+            popts,
         )
 
     @dash_app.callback(
