@@ -390,3 +390,18 @@ def test_range_summary_shape_and_date_bounding(real_pitcher_id_and_game):
     nodate = P.range_summary(pid)
     assert set(nodate) == {"appearances", "ip", "k_pct", "bb_pct", "barrel_pct"}
     assert nodate["k_pct"].endswith("%")
+
+
+def test_header_stat_line_has_strike_and_maxvelo():
+    import pandas as pd
+    from app.data import pitching as P
+    df = pd.DataFrame({
+        "batter_side": ["Right", "Left"], "outs_on_play": [0, 1],
+        "play_result": ["Out", "Single"], "runs_scored": [0, 0],
+        "korbb": ["Undefined", "Undefined"], "pitch_of_pa": [1, 1],
+        "pitch_call": ["StrikeCalled", "BallCalled"], "rel_speed": [90.0, 94.4],
+        "balls": [0, 1], "strikes": [1, 0], "inning": [1, 1], "pa_of_inning": [1, 2]})
+    line = P.header_stat_line(df)
+    assert "strike_pct" in line and "max_velo" in line
+    assert line["max_velo"] == 94.4
+    assert 0 <= line["strike_pct"] <= 100

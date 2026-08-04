@@ -18,6 +18,8 @@
       <span><b>{{ line.bb }}</b><i>BB</i></span>
       <span><b>{{ line.so }}</b><i>SO</i></span>
       <span><b>{{ line.pitches }}</b><i>PITCHES</i></span>
+      <span><b>{{ line.strike_pct|round(0)|int }}%</b><i>STRIKE%</i></span>
+      <span><b>{{ line.max_velo if line.max_velo is not none else '—' }}</b><i>MAX MPH</i></span>
     </div>
     <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
   </div>

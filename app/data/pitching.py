@@ -533,7 +533,11 @@ def barrel_pct_ev(df: pd.DataFrame) -> tuple[float, int]:
 
 
 def header_stat_line(df: pd.DataFrame) -> dict:
-    """The header line: batters faced (R/L), outs, hits, runs, BB, SO, pitches."""
+    """The header line: batters faced (R/L), outs, hits, runs, BB, SO, pitches,
+    strike%, and max velo."""
+    n = len(df)
+    strikes = int(df["pitch_call"].isin(_STRIKE_CALLS).sum()) if n else 0
+    mv = df["rel_speed"].dropna().max() if n and "rel_speed" in df.columns else None
     return {
         "bf": _pa_count(df),
         "bf_r": _pa_count(df[df["batter_side"] == "Right"]),
@@ -544,6 +548,8 @@ def header_stat_line(df: pd.DataFrame) -> dict:
         "bb": int((df["korbb"] == "Walk").sum()) if len(df) else 0,
         "so": int((df["korbb"] == "Strikeout").sum()) if len(df) else 0,
         "pitches": len(df),
+        "strike_pct": round(100.0 * strikes / n, 1) if n else 0.0,
+        "max_velo": None if mv is None or pd.isna(mv) else round(float(mv), 1),
     }
 
 

@@ -20,19 +20,23 @@ def test_pa_count_matches_distinct_inning_pa():
 
 def test_header_stat_line_shape_and_values():
     h = P.header_stat_line(_df())
-    assert set(h) == {"bf", "bf_r", "bf_l", "outs", "h", "r", "bb", "so", "pitches"}
+    assert set(h) == {"bf", "bf_r", "bf_l", "outs", "h", "r", "bb", "so",
+                       "pitches", "strike_pct", "max_velo"}
     df = _df()
     assert h["pitches"] == len(df)
     assert h["bf_r"] + h["bf_l"] == h["bf"]
     assert h["h"] == int(df["play_result"].isin(
         {"Single", "Double", "Triple", "HomeRun"}).sum())
     assert h["so"] == int((df["korbb"] == "Strikeout").sum())
-    assert all(isinstance(v, int) for v in h.values())
+    int_keys = {"bf", "bf_r", "bf_l", "outs", "h", "r", "bb", "so", "pitches"}
+    assert all(isinstance(h[k], int) for k in int_keys)
+    assert 0 <= h["strike_pct"] <= 100
+    assert h["max_velo"] is None or isinstance(h["max_velo"], float)
 
 
 def test_header_stat_line_empty_safe():
     h = P.header_stat_line(_df().iloc[0:0])
-    assert h == {k: 0 for k in h}
+    assert h == {k: (None if k == "max_velo" else 0) for k in h}
 
 
 def test_strike_and_fps_pct_consistent():
