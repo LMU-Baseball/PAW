@@ -127,11 +127,12 @@ def test_trends_body_two_sessions_renders_graph():
     assert out is not None and "Graph" in str(type(out)) or "dcc.Graph" in str(out)
 
 
-def test_sidebar_shows_range_tiles_live():
+def test_sidebar_shows_new_tiles_live():
     from app.dashboards.bullpen import layout
     s = str(layout.sidebar(GEIS, "2025-09-01", "2026-05-13"))
-    for label in ("SESSIONS", "PITCHES", "PITCH TYPES", "LAST"):
+    for label in ("SESSIONS", "PITCHES", "STRIKE %", "AVG FB VELO"):
         assert label in s
+    assert "PITCH TYPES" not in s and "LAST" not in s
 
 
 def test_serve_layout_wires_tabs_and_window(server):
