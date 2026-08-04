@@ -1,4 +1,5 @@
 import base64
+import matplotlib.pyplot as plt
 from app.data import pitching as P
 from app.reports import plots
 
@@ -19,6 +20,36 @@ def test_zone_chart_returns_png():
 
 def test_movement_map_returns_png():
     _is_png_uri(plots.movement_map_uri(_df()))
+
+
+def test_movement_map_has_light_gridlines_behind_data(monkeypatch):
+    """Gridlines should aid reading the movement map, drawn behind the points."""
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "horz_break": [5.0, -3.0, 8.0],
+        "induced_vert_break": [12.0, 15.0, 9.0],
+        "tagged_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "auto_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "rel_speed": [92.0, 84.0, 91.5],
+    })
+
+    captured = {}
+    orig_subplots = plt.subplots
+
+    def spy_subplots(*a, **k):
+        fig, ax = orig_subplots(*a, **k)
+        captured["ax"] = ax
+        return fig, ax
+
+    monkeypatch.setattr(plt, "subplots", spy_subplots)
+    _is_png_uri(plots.movement_map_uri(df))
+
+    ax = captured["ax"]
+    assert ax.get_axisbelow() is True
+    gridlines = list(ax.xaxis.get_gridlines()) + list(ax.yaxis.get_gridlines())
+    assert gridlines
+    assert all(gl.get_visible() for gl in gridlines)
 
 
 def test_plots_empty_input_safe():

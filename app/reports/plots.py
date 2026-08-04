@@ -152,6 +152,8 @@ def _add_ellipse(ax, xs, ys, color) -> None:
 def movement_map_uri(df, title: str = "Movement Map") -> str:
     d = df.dropna(subset=["horz_break", "induced_vert_break"]).copy()
     fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    ax.set_axisbelow(True)
+    ax.grid(True, color="#eee", lw=0.6)
     ax.axhline(0, color="#ccc", lw=0.8)
     ax.axvline(0, color="#ccc", lw=0.8)
     if not d.empty:
