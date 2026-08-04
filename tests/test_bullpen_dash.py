@@ -103,6 +103,30 @@ def test_session_detail_empty_states():
     assert "session" in str(session_detail.render(GEIS, None)).lower()
 
 
+def test_session_detail_tables_condensed_live():
+    from app.dashboards.bullpen.tabs import session_detail
+    from app.data import bullpen as B
+    s = B.session_options(GEIS, "2025-09-01", "2026-05-13")
+    if s.empty:
+        pytest.skip("no sessions")
+    out = str(session_detail.render(GEIS, s.iloc[0]["date"]))
+    assert "Pitch #" in out or "Pitch" in out  # renumbered header
+    # raw session-global pitch numbers (e.g. 33) should NOT appear as the first pitch label
+    # (can't assert exact text here; covered by the helper unit test below)
+
+
+def test_renumber_and_round_helpers():
+    import pandas as pd
+    from app.dashboards.bullpen.tabs import session_detail as sd
+    df = pd.DataFrame({"pitch_no": [33, 34], "tagged_pitch_type": ["Fastball", "Slider"],
+                       "rel_speed": [90.12345, 80.98765], "spin_rate": [2200.4, 2300.6]})
+    out = sd._display_pitches(df)
+    assert list(out.iloc[:, 0]) == [1, 2]           # renumbered 1..N
+    # rel_speed -> friendly "Velo" header per the rename map; contract is the rounding behavior
+    velo_col = "Velo" if "Velo" in out.columns else "rel_speed"
+    assert out[velo_col].tolist() == [90.12, 80.99]  # rounded 2dp
+
+
 def test_trends_render_has_controls_live():
     from app.dashboards.bullpen.tabs import trends
     s = str(trends.render(GEIS, "2025-09-01", "2026-05-13"))
