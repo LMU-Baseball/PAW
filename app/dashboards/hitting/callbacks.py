@@ -55,19 +55,29 @@ def _read_game_df(data_json):
 
 def register_callbacks(dash_app) -> None:
 
-    # Coach picks a hitter -> refresh the date range to that hitter's season span.
+    # Preset dropdown (or a new hitter) -> refresh the date range; 'custom' just
+    # reveals the calendar and leaves the current dates untouched.
     @dash_app.callback(
         Output("hit-daterange", "start_date"), Output("hit-daterange", "end_date"),
-        Input("hitter-dd", "value"), prevent_initial_call=True,
+        Output("hit-cal-wrap", "style"),
+        Input("hit-date-preset", "value"), Input("hitter-dd", "value"),
+        prevent_initial_call=True,
     )
-    def _on_hitter_range(batter_id):
+    def _on_preset(preset, batter_id):
+        from dash import no_update
+        show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
+        if preset == "custom":
+            return no_update, no_update, show
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
         g = hitting_wh.wh_games_for_batter(bid) if bid else None
         if g is None or g.empty:
-            return None, None
-        return str(g["game_date"].min()), str(g["game_date"].max())
+            return no_update, no_update, show
+        anchor = str(g["game_date"].max())
+        s, e = dr.preset_range(preset, anchor)
+        s = max(str(s), str(g["game_date"].min()))
+        return s, str(e), show
 
     # Date range change -> refresh the game options within that range (players locked).
     @dash_app.callback(

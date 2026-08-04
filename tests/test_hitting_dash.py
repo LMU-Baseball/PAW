@@ -482,6 +482,24 @@ def test_hitting_tabs_include_dev_plan():
     assert '"devplan"' in src and "Dev Plan" in src
 
 
+def test_hitting_uses_preset_control():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "date_control" in src and "date_picker(" not in src
+
+
+def test_hitting_preset_callback_writes_range(server):
+    from dash import Dash
+    from app.dashboards.hitting import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/hittest2/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    assert any("hit-daterange" in str(k) for k in app.callback_map)
+    assert any("hit-date-preset" in str(v) for v in app.callback_map.values())
+
+
 def test_dev_plan_coach_editable_player_readonly(tmp_path):
     from app import create_app
     from config import Config
