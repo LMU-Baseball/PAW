@@ -151,6 +151,29 @@ def test_pitch_zone_heatmap_black_box_and_metric():
     assert rects and any(s.line.color == "black" for s in rects)
 
 
+def test_pitch_zone_heatmap_has_nine_pocket_grid():
+    """Task 2 (Polish Wave C): the plate-location box on the practice pitch-zone
+    heatmap must show the 3x3 nine-pocket interior grid (2 vertical + 2
+    horizontal lines at thirds), matching the bullpen `_add_zone` look."""
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    from app.data import practice as P
+    df = pd.DataFrame([{"px": 0.0, "py": 2.5, "result": 1,
+                        "exit_velocity": 90.0, "distance_feet": 300.0}])
+    fig = charts.pitch_zone_heatmap(df, metric="ev")
+    # outer rect + 2 vertical + 2 horizontal interior gridlines == 5 shapes min
+    assert len(fig.layout.shapes) >= 5
+    lines = [s for s in fig.layout.shapes if s.type == "line"]
+    assert len(lines) >= 4
+    xs = [l.x0 for l in lines if abs(l.x0 - l.x1) < 1e-9]
+    ys = [l.y0 for l in lines if abs(l.y0 - l.y1) < 1e-9]
+    third_x = (P.SZ_X1 - P.SZ_X0) / 3
+    third_y = (P.SZ_Y1 - P.SZ_Y0) / 3
+    assert any(abs(x - (P.SZ_X0 + third_x)) < 1e-6 for x in xs)
+    assert any(abs(y - (P.SZ_Y0 + third_y)) < 1e-6 for y in ys)
+    assert all(l.line.color == "#bbb" for l in lines)
+
+
 def test_new_practice_figs_build():
     import pandas as pd
     from app.dashboards.hitting_practice import charts

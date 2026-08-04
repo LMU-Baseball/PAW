@@ -20,6 +20,21 @@ _METRIC_CFG = {
 }
 
 
+def _zone_grid(fig: go.Figure, x0: float, x1: float, y0: float, y1: float) -> None:
+    """Nine-pocket 3x3 interior gridlines spanning the given strike-zone box.
+
+    Matches the bullpen `charts._add_zone` look (2 vertical + 2 horizontal
+    lines at thirds, color #bbb, width ~0.8).
+    """
+    for i in (1, 2):
+        xi = x0 + (x1 - x0) * i / 3
+        yi = y0 + (y1 - y0) * i / 3
+        fig.add_shape(type="line", x0=xi, x1=xi, y0=y0, y1=y1,
+                      line=dict(color="#bbb", width=0.8))
+        fig.add_shape(type="line", x0=x0, x1=x1, y0=yi, y1=yi,
+                      line=dict(color="#bbb", width=0.8))
+
+
 def pitch_zone_heatmap(df: pd.DataFrame, metric: str = "contact") -> go.Figure:
     label, scale, (zmin, zmax), title = _METRIC_CFG.get(metric, _METRIC_CFG["contact"])
     z, xedges, yedges = P.heatmap_metric(df, metric)
@@ -33,6 +48,7 @@ def pitch_zone_heatmap(df: pd.DataFrame, metric: str = "contact") -> go.Figure:
     ))
     fig.add_shape(type="rect", x0=P.SZ_X0, y0=P.SZ_Y0, x1=P.SZ_X1, y1=P.SZ_Y1,
                   line=dict(color="black", width=2), fillcolor="rgba(0,0,0,0)")
+    _zone_grid(fig, P.SZ_X0, P.SZ_X1, P.SZ_Y0, P.SZ_Y1)
     fig.update_layout(
         title=f"Pitch Zones — {title} (Catcher's View)",
         xaxis_title="Horizontal (ft)", yaxis_title="Height (ft)",
