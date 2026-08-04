@@ -1,6 +1,8 @@
 """The pitching dashboard shell: sidebar + selector row + tab frame."""
 from __future__ import annotations
 
+from datetime import date
+
 from dash import dcc, html
 from flask_login import current_user
 
@@ -78,6 +80,11 @@ def serve_layout() -> html.Div:
         end_d = str(games_df["game_date"].max())
         outings = dr.game_options(games_df)
         default_game = int(games_df.iloc[0]["game_id"])  # most recent single game
+        anchor = str(games_df["game_date"].max())
+        s0, e0 = dr.preset_range("season", anchor)
+        # clamp to available bounds
+        start_d = max(str(s0), str(games_df["game_date"].min()))
+        end_d = anchor
     else:
         start_d = end_d = None
         outings = []
@@ -92,7 +99,8 @@ def serve_layout() -> html.Div:
         ]),
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_picker("pit", start_d, end_d),
+            dr.date_control("pit", (end_d or date.today().isoformat()),
+                            min_date=start_d, max_date=end_d, preset="season"),
         ]),
         html.Div([
             html.Label("Outing", style={"color": "white", "fontWeight": "bold"}),

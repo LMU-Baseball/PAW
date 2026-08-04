@@ -38,16 +38,25 @@ def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
         Output("pit-daterange", "start_date"), Output("pit-daterange", "end_date"),
-        Input("pitcher-dd", "value"), prevent_initial_call=True,
+        Output("pit-cal-wrap", "style"),
+        Input("pit-date-preset", "value"), Input("pitcher-dd", "value"),
+        prevent_initial_call=True,
     )
-    def _on_pitcher_range(pitcher_id):
+    def _on_preset(preset, pitcher_id):
+        from dash import no_update
+        show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
+        if preset == "custom":
+            return no_update, no_update, show
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
         g = P.games_for_pitcher(pid) if pid else None
         if g is None or g.empty:
-            return None, None
-        return str(g["game_date"].min()), str(g["game_date"].max())
+            return no_update, no_update, show
+        anchor = str(g["game_date"].max())
+        s, e = dr.preset_range(preset, anchor)
+        s = max(str(s), str(g["game_date"].min()))
+        return s, str(e), show
 
     @dash_app.callback(
         Output("outing-dd", "options"), Output("outing-dd", "value"),
