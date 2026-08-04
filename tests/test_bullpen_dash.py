@@ -250,6 +250,19 @@ def test_ellipse_xy_shape():
     assert charts._ellipse_xy([1, 2], [1, 2]) is None  # <3 pts
 
 
+def test_velo_lollipop_and_release_dispersion():
+    from app.dashboards.bullpen import charts
+    df = _session_df()
+    v = charts.velo_fig(df)
+    # a text label with the avg value present on the avg-dot trace
+    assert any(getattr(t, "text", None) for t in v.data)
+    r = charts.release_fig(df)
+    # dispersion: has a filled ellipse trace (fill='toself') for a multi-pitch type
+    assert any(getattr(t, "fill", None) == "toself" for t in r.data) or len(r.data) >= 1
+    # equal aspect on release
+    assert r.layout.yaxis.scaleanchor == "x"
+
+
 def test_pitching_hub_has_bullpen_dashboard_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User

@@ -60,20 +60,35 @@ def _types(df):
 
 
 def velo_fig(df):
+    """Horizontal range-lollipop per pitch type: min-max bar + avg dot + label."""
     if df is None or df.empty:
         return _empty()
+    rows = []
+    for pt, sub in df.groupby("tagged_pitch_type"):
+        v = sub["rel_speed"].dropna()
+        if v.empty:
+            continue
+        rows.append((str(pt), float(v.min()), float(v.max()), float(v.mean())))
+    if not rows:
+        return _empty()
+    rows.sort(key=lambda r: r[3])  # slowest at bottom, fastest on top
     fig = go.Figure()
-    types = _types(df)
-    for i, pt in enumerate(types):
-        sub = df[df["tagged_pitch_type"] == pt]
-        y = len(types) - i
-        fig.add_trace(go.Scatter(
-            x=sub["rel_speed"], y=[y] * len(sub), mode="markers", name=str(pt),
-            marker=dict(size=11, color=color_for(pt), line=dict(width=0.5, color="white")),
-            customdata=[[str(pt)]] * len(sub),
-            hovertemplate="%{customdata[0]}<br>Velo: %{x:.1f} mph<extra></extra>"))
-    fig.update_layout(title="Velocity by pitch type", xaxis_title="mph", **_BASE)
-    fig.update_yaxes(tickvals=list(range(1, len(types) + 1)), ticktext=list(reversed(types)))
+    for i, (pt, vmin, vmax, vavg) in enumerate(rows):
+        y = i + 1
+        col = color_for(pt)
+        fig.add_trace(go.Scatter(x=[vmin, vmax], y=[y, y], mode="lines",
+            line=dict(color=col, width=6), opacity=0.35, showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=[vavg], y=[y], mode="markers+text",
+            marker=dict(size=15, color=col, line=dict(width=1, color="white")),
+            text=[f"{vavg:.1f}"], textposition="middle right",
+            textfont=dict(size=12, color="#222"), showlegend=False,
+            customdata=[[pt, vmin, vmax]],
+            hovertemplate="%{customdata[0]}<br>Velo: %{x:.1f} mph<br>"
+                          "Range: %{customdata[1]:.1f}–%{customdata[2]:.1f}<extra></extra>"))
+    fig.update_layout(**_BASE)
+    fig.update_layout(title="Velocity by pitch type", xaxis_title="mph", showlegend=False)
+    fig.update_yaxes(tickvals=list(range(1, len(rows) + 1)),
+                     ticktext=[r[0] for r in rows], range=[0.4, len(rows) + 0.7])
     return fig
 
 
@@ -103,18 +118,31 @@ def movement_fig(df):
 
 
 def release_fig(df):
+    """Release-point dispersion: equal aspect, per-type 1σ ellipse + mean marker."""
     if df is None or df.empty:
         return _empty()
+    d = df.dropna(subset=["rel_side", "rel_height"])
+    if d.empty:
+        return _empty()
     fig = go.Figure()
-    for pt in _types(df):
-        sub = df[df["tagged_pitch_type"] == pt]
-        fig.add_trace(go.Scatter(
-            x=sub["rel_side"], y=sub["rel_height"], mode="markers", name=str(pt),
-            marker=dict(size=10, color=color_for(pt), line=dict(width=0.5, color="white")),
+    for pt in _types(d):
+        sub = d[d["tagged_pitch_type"] == pt]
+        col = color_for(pt)
+        ell = _ellipse_xy(sub["rel_side"], sub["rel_height"])
+        if ell is not None:
+            fig.add_trace(go.Scatter(x=ell[0], y=ell[1], mode="lines", fill="toself",
+                fillcolor=col, opacity=0.15, line=dict(color=col, width=1),
+                showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=sub["rel_side"], y=sub["rel_height"], mode="markers",
+            name=str(pt), marker=dict(size=9, color=col, line=dict(width=0.5, color="white")),
             customdata=[[str(pt)]] * len(sub),
             hovertemplate="%{customdata[0]}<br>Rel H: %{y:.2f} ft · Rel S: %{x:.2f} ft<extra></extra>"))
-    fig.update_layout(title="Release", xaxis_title="Rel side (ft)",
-                      yaxis_title="Rel height (ft)", **_BASE)
+        fig.add_trace(go.Scatter(x=[sub["rel_side"].mean()], y=[sub["rel_height"].mean()],
+            mode="markers", showlegend=False, hoverinfo="skip",
+            marker=dict(size=13, color="white", line=dict(width=2, color=col))))
+    fig.update_layout(**_BASE)
+    fig.update_layout(title="Release", xaxis_title="Rel side (ft)", yaxis_title="Rel height (ft)")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
     return fig
 
 
