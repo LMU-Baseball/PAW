@@ -53,13 +53,35 @@ def test_session_options_within_window_newest_first():
 
 def test_bullpen_session_summary_shape():
     s = B.bullpen_session_summary(GEIS, *WINDOW)
-    assert set(s) == {"sessions", "pitches", "pitch_types", "last_date"}
-    assert s["sessions"] >= 1 and s["pitches"] >= 1 and s["pitch_types"] >= 1
+    assert set(s) == {"sessions", "pitches", "strike_pct", "avg_fb_velo", "last_date"}
+    assert s["sessions"] >= 1 and s["pitches"] >= 1
 
 
 def test_bullpen_session_summary_empty_pitcher():
     s = B.bullpen_session_summary(-1, *WINDOW)
-    assert s == {"sessions": 0, "pitches": 0, "pitch_types": 0, "last_date": "—"}
+    assert s == {"sessions": 0, "pitches": 0, "strike_pct": None,
+                 "avg_fb_velo": None, "last_date": "—"}
+
+
+def test_strike_pct_zone_plus_edge():
+    df = pd.DataFrame({  # 3 in zone-ish, 1 far outside
+        "plate_loc_side": [0.0, 0.5, -0.9, 3.0],
+        "plate_loc_height": [2.5, 3.0, 2.0, 2.5]})
+    v = B.strike_pct(df)
+    assert v == 75.0  # first three within zone+~2.9in buffer, last far out
+    assert B.strike_pct(pd.DataFrame({"plate_loc_side": [], "plate_loc_height": []})) is None
+
+
+def test_avg_fb_velo():
+    df = pd.DataFrame({"tagged_pitch_type": ["Fastball", "Fastball", "Slider"],
+                       "rel_speed": [90.0, 92.0, 80.0]})
+    assert B.avg_fb_velo(df) == 91.0
+    assert B.avg_fb_velo(pd.DataFrame({"tagged_pitch_type": ["Slider"], "rel_speed": [80.0]})) is None
+
+
+def test_session_summary_has_new_tiles():
+    s = B.bullpen_session_summary(GEIS, "2025-09-01", "2026-05-13")
+    assert set(s) == {"sessions", "pitches", "strike_pct", "avg_fb_velo", "last_date"}
 
 
 def test_trend_by_session_columns_and_sorting():

@@ -12,6 +12,10 @@ from app.db import query_df
 
 LMU_BULLPEN_TEAMS = ("LOY_MAR", "LOY_LIO")
 
+# Strike zone (ft, plate-center coords) + a one-ball edge buffer.
+_SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)
+_EDGE = 0.24  # one-ball buffer (ft); provisional
+
 # BULLPEN PascalCase -> our snake_case.
 _COLMAP = {
     "PitchNo": "pitch_no", "TaggedPitchType": "tagged_pitch_type",
@@ -83,6 +87,25 @@ def _r1(x):
     return None if x is None or pd.isna(x) else round(float(x), 1)
 
 
+def strike_pct(df) -> float | None:
+    """% of located pitches inside the strike zone + one-ball edge buffer."""
+    if df is None or df.empty:
+        return None
+    d = df.dropna(subset=["plate_loc_side", "plate_loc_height"])
+    if d.empty:
+        return None
+    inx = d["plate_loc_side"].between(_SZ["x0"] - _EDGE, _SZ["x1"] + _EDGE)
+    iny = d["plate_loc_height"].between(_SZ["y0"] - _EDGE, _SZ["y1"] + _EDGE)
+    return round(100.0 * float((inx & iny).mean()), 1)
+
+
+def avg_fb_velo(df) -> float | None:
+    if df is None or df.empty or "tagged_pitch_type" not in df.columns:
+        return None
+    fb = df[df["tagged_pitch_type"] == "Fastball"]["rel_speed"].dropna()
+    return round(float(fb.mean()), 1) if not fb.empty else None
+
+
 def summary_by_pitch_type(df: pd.DataFrame) -> list[dict]:
     """Per-pitch-type aggregates for the Stats-by-pitch-type table."""
     if df is None or df.empty:
@@ -144,25 +167,26 @@ def session_options(pitcher_id, start, end) -> pd.DataFrame:
 
 
 def bullpen_session_summary(pitcher_id, start, end) -> dict:
-    """Sidebar tiles for a pitcher within [start, end]."""
+    """Sidebar tiles: Sessions, Pitches, Strike %, Avg FB Velo, plus last_date."""
     df = query_df(
         """
-        SELECT COUNT(DISTINCT DATE(Date)) AS sessions, COUNT(*) AS pitches,
-               COUNT(DISTINCT TaggedPitchType) AS pitch_types, MAX(DATE(Date)) AS last_date
+        SELECT DATE(Date) AS date, TaggedPitchType AS tagged_pitch_type,
+               RelSpeed AS rel_speed, PlateLocSide AS plate_loc_side,
+               PlateLocHeight AS plate_loc_height
           FROM BULLPEN
          WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
         """,
         {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
     )
     if df.empty:
-        return {"sessions": 0, "pitches": 0, "pitch_types": 0, "last_date": "—"}
-    r = df.iloc[0]
-    last = r["last_date"]
+        return {"sessions": 0, "pitches": 0, "strike_pct": None,
+                "avg_fb_velo": None, "last_date": "—"}
     return {
-        "sessions": int(r["sessions"] or 0),
-        "pitches": int(r["pitches"] or 0),
-        "pitch_types": int(r["pitch_types"] or 0),
-        "last_date": "—" if last is None or pd.isna(last) else str(last),
+        "sessions": int(df["date"].nunique()),
+        "pitches": int(len(df)),
+        "strike_pct": strike_pct(df),
+        "avg_fb_velo": avg_fb_velo(df),
+        "last_date": str(df["date"].max()),
     }
 
 

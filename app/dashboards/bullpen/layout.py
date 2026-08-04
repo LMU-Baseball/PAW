@@ -45,7 +45,10 @@ def sidebar(pitcher_id, start, end) -> html.Div:
         html.Div(f"{jersey}{name}",
                  style={"fontSize": "24px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div([_tile("SESSIONS", summ["sessions"]), _tile("PITCHES", summ["pitches"]),
-                  _tile("PITCH TYPES", summ["pitch_types"]), _tile("LAST", summ["last_date"])],
+                  # NOTE: bullpen_session_summary dropped "pitch_types" (Task 1, Polish Wave
+                  # B). Defensive .get() keeps this sidebar from KeyError-ing until Task 2
+                  # redesigns these tiles (Strike % / Avg FB Velo).
+                  _tile("PITCH TYPES", summ.get("pitch_types", 0)), _tile("LAST", summ["last_date"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Stats reflect the selected date range.",
