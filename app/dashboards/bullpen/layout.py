@@ -23,6 +23,13 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
+def _bullpen_anchor(pitcher_id):
+    if pitcher_id is None:
+        return date.today().isoformat()
+    s = B.session_options(int(pitcher_id), WINDOW_MIN, date.today().isoformat())
+    return str(s.iloc[0]["date"]) if not s.empty else date.today().isoformat()
+
+
 def sidebar(pitcher_id, start, end) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style={"padding": "12px"})
@@ -55,7 +62,11 @@ def serve_layout() -> html.Div:
     default_pitcher = selectors.resolve_pitcher(
         pitchers[0]["value"] if pitchers else None, is_coach=is_coach, own_trackman_id=own)
 
-    start_d, end_d = WINDOW_MIN, date.today().isoformat()
+    anchor = _bullpen_anchor(default_pitcher)
+    s0, e0 = dr.preset_range("season", anchor)
+    start_d, end_d = str(s0), str(e0)
+    # WINDOW_MIN remains the calendar min; end bound = today
+    cal_max = date.today().isoformat()
     sess = B.session_options(default_pitcher, start_d, end_d) if default_pitcher is not None else None
     session_opts = selectors.session_dropdown_options(sess)
     default_session = session_opts[0]["value"] if session_opts else None
@@ -68,7 +79,7 @@ def serve_layout() -> html.Div:
         ]),
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_picker("bp", start_d, end_d, min_date=WINDOW_MIN, max_date=end_d),
+            dr.date_control("bp", anchor, min_date=WINDOW_MIN, max_date=cal_max, preset="season"),
         ]),
         html.Div([
             html.Label("Session (detail)", style={"color": "white", "fontWeight": "bold"}),

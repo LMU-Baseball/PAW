@@ -6,6 +6,7 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import bullpen as B
+from app.dashboards import date_range as dr
 from app.dashboards.bullpen import layout, selectors
 from app.dashboards.bullpen.tabs import session_detail, trends
 from app.reports.plots import color_for
@@ -18,6 +19,23 @@ def _resolve(pitcher_id):
 
 
 def register_callbacks(dash_app) -> None:
+
+    # Preset dropdown (or pitcher) change -> resolve the range + toggle the calendar.
+    @dash_app.callback(
+        Output("bp-daterange", "start_date"), Output("bp-daterange", "end_date"),
+        Output("bp-cal-wrap", "style"),
+        Input("bp-date-preset", "value"), Input("bp-pitcher-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_preset(preset, pitcher_id):
+        from dash import no_update
+        show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
+        if preset == "custom":
+            return no_update, no_update, show
+        pid = _resolve(pitcher_id)
+        anchor = layout._bullpen_anchor(pid)
+        s, e = dr.preset_range(preset, anchor)
+        return str(s), str(e), show
 
     # Pitcher or date-range change -> refresh session dropdown (default most-recent).
     @dash_app.callback(

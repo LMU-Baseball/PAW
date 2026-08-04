@@ -177,6 +177,59 @@ def test_build_bullpen_dash_mounts(server):
     assert any(r.startswith("/dash/bullpen/") for r in rules)
 
 
+def test_bullpen_layout_uses_preset_dropdown(server):
+    import inspect
+    from app.dashboards.bullpen import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "date_control" in src and "bp-date-preset" not in src  # id comes from component
+    # the component provides bp-date-preset; assert control is used, not raw date_picker
+    assert "date_picker(" not in src
+
+
+def test_bullpen_preset_callback_registered(server):
+    from dash import Dash
+    from app.dashboards.bullpen import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/bptest2/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    outs = {str(k) for k in app.callback_map}
+    assert any("bp-daterange" in o for o in outs)  # a callback now writes the range
+
+
+def test_bullpen_preset_resolves_season_range_live():
+    # Same resolution path _on_preset uses (anchor -> preset_range); confirms the
+    # cascade the callback drives (range -> session dd -> selection) gets a real range.
+    from app.dashboards import date_range as dr
+    from app.dashboards.bullpen import layout
+    anchor = layout._bullpen_anchor(GEIS)
+    s, e = dr.preset_range("season", anchor)
+    assert s is not None and e is not None and str(s) <= str(e) <= layout.date.today().isoformat()
+
+
+def test_serve_layout_season_default_matches_preset_range(server):
+    # serve_layout's initial start/end should equal preset_range("season", anchor) for
+    # the default pitcher, so first render and the preset dropdown agree.
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.dashboards import date_range as dr
+    from app.dashboards.bullpen import layout
+    with server.app_context():
+        coach = User(email="bps@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/bullpen/"):
+            login_user(coach)
+            out = layout.serve_layout()
+    store = out.children[0]
+    assert store.id == "bp-selection"
+    anchor = layout._bullpen_anchor(store.data["pitcher_id"])
+    s, e = dr.preset_range("season", anchor)
+    assert store.data["start"] == str(s) and store.data["end"] == str(e)
+
+
 def test_pitching_hub_has_bullpen_dashboard_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User
