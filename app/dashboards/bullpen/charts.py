@@ -73,7 +73,10 @@ def pitch_freq_bar(df):
             hovertemplate=f"{pt}: {int(n)}<extra></extra>"))
     fig.update_layout(barmode="stack", **_BASE)
     fig.update_layout(title=f"Pitch Frequency (Total {total})", showlegend=True,
-                      height=140, yaxis_visible=False)
+                      height=180, yaxis_visible=False,
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0))
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
     return fig
 
 
@@ -107,6 +110,7 @@ def velo_fig(df):
     fig.update_layout(title="Velocity by pitch type", xaxis_title="mph", showlegend=False)
     fig.update_yaxes(tickvals=list(range(1, len(rows) + 1)),
                      ticktext=[r[0] for r in rows], range=[0.4, len(rows) + 0.7])
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
     return fig
 
 
@@ -131,7 +135,8 @@ def movement_fig(df):
             marker=dict(size=13, color="white", line=dict(width=2, color=color_for(pt)))))
     fig.add_hline(y=0, line_color="#ccc"); fig.add_vline(x=0, line_color="#ccc")
     fig.update_layout(title="Movement", xaxis_title="HB (in)", yaxis_title="IVB (in)", **_BASE)
-    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee")
     return fig
 
 
@@ -160,7 +165,8 @@ def release_fig(df):
             marker=dict(size=13, color="white", line=dict(width=2, color=col))))
     fig.update_layout(**_BASE)
     fig.update_layout(title="Release", xaxis_title="Rel side (ft)", yaxis_title="Rel height (ft)")
-    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee")
     return fig
 
 
@@ -182,35 +188,53 @@ def location_fig(df):
     return fig
 
 
+# Per-metric series for the trend small-multiples. Each entry:
+#   (df_column, legend_label, line_dash, on_secondary_y_axis)
+# Labels are plain words (a top legend names each line) — no parenthetical
+# solid/dashed decoding. Spin puts Efficiency on a secondary axis because its
+# scale (~40-96%) is dwarfed by Spin Rate (~2000 rpm).
+_METRIC_SERIES = {
+    "velocity": [("velo_avg", "Avg", None, False), ("velo_max", "Max", "dash", False)],
+    "spin": [("spin_avg", "Spin Rate", None, False),
+             ("eff_avg", "Efficiency %", "dot", True)],
+    "movement": [("ivb_avg", "IVB", None, False), ("hb_avg", "HB", "dash", False)],
+    "command": [("loc_spread", "Location Spread", None, False)],
+}
+_METRIC_YTITLE = {"velocity": "mph", "spin": "rpm", "movement": "inches",
+                  "command": "spread"}
+
+
 def trend_small_multiples(df, metric):
     if df is None or df.empty:
         return _empty("Need at least 2 sessions to show a trend.")
     types = sorted(df["tagged_pitch_type"].unique())
+    series = _METRIC_SERIES.get(metric, _METRIC_SERIES["velocity"])
+    has_secondary = any(s[3] for s in series)
     ncols = 2
     nrows = (len(types) + 1) // 2
-    fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=types,
-                        shared_xaxes=False, vertical_spacing=0.12, horizontal_spacing=0.08)
+    specs = [[{"secondary_y": has_secondary} for _ in range(ncols)] for _ in range(nrows)]
+    fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=types, specs=specs,
+                        vertical_spacing=0.16, horizontal_spacing=0.10)
     for i, pt in enumerate(types):
         r, c = i // ncols + 1, i % ncols + 1
         sub = df[df["tagged_pitch_type"] == pt].sort_values("date")
         col = color_for(pt)
-        if metric == "velocity":
-            series = [("velo_avg", None, "avg"), ("velo_max", "dash", "max")]
-        elif metric == "spin":
-            series = [("spin_avg", None, "spin"), ("eff_avg", "dot", "eff%")]
-        elif metric == "movement":
-            series = [("ivb_avg", None, "IVB"), ("hb_avg", "dash", "HB")]
-        else:  # command
-            series = [("loc_spread", None, "spread")]
-        for key, dash, nm in series:
-            fig.add_trace(go.Scatter(x=sub["date"], y=sub[key], mode="lines+markers",
-                name=f"{pt} {nm}", line=dict(color=col, dash=dash), showlegend=False),
-                row=r, col=c)
+        for key, label, dash, secondary in series:
+            # Show the legend once (first panel) with plain-word labels so both
+            # lines are named; legendgroup keeps later panels from duplicating.
+            fig.add_trace(go.Scatter(
+                x=sub["date"], y=sub[key], mode="lines+markers", name=label,
+                legendgroup=label, showlegend=(i == 0),
+                line=dict(color=col, dash=dash),
+                hovertemplate=f"{label}: %{{y:.1f}}<extra></extra>"),
+                row=r, col=c, secondary_y=secondary)
     fig.update_layout(paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
                       font=dict(family="Teko, sans-serif", size=13),
                       title_font=dict(color="#9A0021"),
-                      margin=dict(l=40, r=20, t=40, b=30),
-                      height=max(260, 240 * nrows))
+                      margin=dict(l=40, r=20, t=54, b=30),
+                      height=max(280, 250 * nrows),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                                  xanchor="left", x=0))
     fig.update_xaxes(showgrid=True, gridcolor="#eee")
     fig.update_yaxes(showgrid=True, gridcolor="#eee")
     return fig

@@ -166,6 +166,33 @@ def test_trend_small_multiples_grid():
     assert charts.trend_small_multiples(df, "movement") is not None
 
 
+def test_trend_spin_is_dual_axis_with_word_labels():
+    from app.dashboards.bullpen import charts
+    df = _trend_df()
+    velo = charts.trend_small_multiples(df, "velocity")
+    spin = charts.trend_small_multiples(df, "spin")
+    # Spin uses a secondary y-axis (efficiency %) -> more y-axes than velocity.
+    yv = [k for k in velo.layout if k.startswith("yaxis")]
+    ys = [k for k in spin.layout if k.startswith("yaxis")]
+    assert len(ys) > len(yv)
+    # Legend labels are plain words (no parenthetical decoding).
+    names = {t.name for t in velo.data}
+    assert "Avg" in names and "Max" in names
+    assert any(t.name == "Efficiency %" for t in spin.data)
+    # Legend shown once (first panel) so it isn't repeated per panel.
+    assert sum(1 for t in velo.data if t.showlegend) == 2
+
+
+def test_freq_bar_legend_on_top_and_gridlines():
+    import pandas as pd
+    from app.dashboards.bullpen import charts
+    fig = charts.pitch_freq_bar(pd.DataFrame({"tagged_pitch_type": ["Fastball", "Slider"]}))
+    assert fig.layout.legend.orientation == "h"      # horizontal legend across the top
+    assert fig.layout.xaxis.showgrid is True
+    v = charts.velo_fig(_session_df())
+    assert v.layout.xaxis.showgrid is True            # velocity gridlines
+
+
 def test_sidebar_shows_new_tiles_live():
     from app.dashboards.bullpen import layout
     s = str(layout.sidebar(GEIS, "2025-09-01", "2026-05-13"))
