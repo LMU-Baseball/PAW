@@ -432,3 +432,21 @@ def test_catching_tabs_include_pitch_level():
     from app.dashboards.catching import layout
     src = inspect.getsource(layout.serve_layout)
     assert '"pitchlevel"' in src and "Outing Video" in src
+
+
+def test_catching_uses_preset_control():
+    import inspect
+    from app.dashboards.catching import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "date_control" in src and "date_picker(" not in src
+
+
+def test_catching_preset_callback_writes_range(server):
+    from dash import Dash
+    from app.dashboards.catching import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/cattest2/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    assert any("cat-daterange" in str(k) for k in app.callback_map)
+    assert any("cat-date-preset" in str(v) for v in app.callback_map.values())

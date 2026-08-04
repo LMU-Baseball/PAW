@@ -1,6 +1,8 @@
 """The catching dashboard shell: sidebar + selector row + tab frame."""
 from __future__ import annotations
 
+from datetime import date
+
 from dash import dcc, html
 from flask_login import current_user
 
@@ -73,11 +75,18 @@ def serve_layout() -> html.Div:
         is_coach=is_coach, own_trackman_id=own)
     games_df = C.games_for_catcher(default_catcher) if default_catcher else None
     if games_df is not None and not games_df.empty:
-        start_d = str(games_df["game_date"].min())
-        end_d = str(games_df["game_date"].max())
+        min_bound = str(games_df["game_date"].min())
+        max_bound = str(games_df["game_date"].max())
         games = dr.game_options(games_df)
         default_game = int(games_df.iloc[0]["game_id"])
+        anchor = max_bound
+        s0, e0 = dr.preset_range("season", anchor)
+        # DEFAULT selected range only -- the calendar's own min/max stay the
+        # catcher's full history so Custom Range can reach out-of-season data.
+        start_d = max(str(s0), min_bound)
+        end_d = anchor
     else:
+        min_bound = max_bound = None
         start_d = end_d = None
         games = []
         default_game = None
@@ -91,7 +100,8 @@ def serve_layout() -> html.Div:
         ]),
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_picker("cat", start_d, end_d),
+            dr.date_control("cat", (end_d or date.today().isoformat()),
+                            min_date=min_bound, max_date=max_bound, preset="season"),
         ]),
         html.Div([
             html.Label("Game", style={"color": "white", "fontWeight": "bold"}),
