@@ -5,6 +5,7 @@ Pitch-type color always via plots.color_for for cross-app consistency.
 """
 from __future__ import annotations
 
+import numpy as np
 import plotly.graph_objects as go
 
 from app.reports.plots import color_for
@@ -14,6 +15,36 @@ _BASE = dict(paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
              font=dict(family="Teko, sans-serif", size=14),
              title_font=dict(color="#9A0021", size=16))
 _ZONE = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)  # standard strike-zone box (ft)
+
+
+def _ellipse_xy(xs, ys, n_std=1.0, n=40):
+    xs = np.asarray(xs, float); ys = np.asarray(ys, float)
+    m = np.isfinite(xs) & np.isfinite(ys)
+    xs, ys = xs[m], ys[m]
+    if len(xs) < 3:
+        return None
+    cov = np.cov(xs, ys)
+    if not np.all(np.isfinite(cov)):
+        return None
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]; vals, vecs = vals[order], vecs[:, order]
+    t = np.linspace(0, 2 * np.pi, n)
+    ell = vecs @ ((n_std * np.sqrt(np.maximum(vals, 0)))[:, None] * np.array([np.cos(t), np.sin(t)]))
+    return ell[0] + xs.mean(), ell[1] + ys.mean()
+
+
+def _add_zone(fig):
+    """Strike-zone box + nine-pocket 3x3 grid."""
+    z = _ZONE
+    fig.add_shape(type="rect", x0=z["x0"], x1=z["x1"], y0=z["y0"], y1=z["y1"],
+                  line=dict(color="black", width=1.5))
+    for i in (1, 2):
+        xi = z["x0"] + (z["x1"] - z["x0"]) * i / 3
+        yi = z["y0"] + (z["y1"] - z["y0"]) * i / 3
+        fig.add_shape(type="line", x0=xi, x1=xi, y0=z["y0"], y1=z["y1"],
+                      line=dict(color="#bbb", width=0.8))
+        fig.add_shape(type="line", x0=z["x0"], x1=z["x1"], y0=yi, y1=yi,
+                      line=dict(color="#bbb", width=0.8))
 
 
 def _empty(msg="No data"):
@@ -38,7 +69,9 @@ def velo_fig(df):
         y = len(types) - i
         fig.add_trace(go.Scatter(
             x=sub["rel_speed"], y=[y] * len(sub), mode="markers", name=str(pt),
-            marker=dict(size=11, color=color_for(pt), line=dict(width=0.5, color="white"))))
+            marker=dict(size=11, color=color_for(pt), line=dict(width=0.5, color="white")),
+            customdata=[[str(pt)]] * len(sub),
+            hovertemplate="%{customdata[0]}<br>Velo: %{x:.1f} mph<extra></extra>"))
     fig.update_layout(title="Velocity by pitch type", xaxis_title="mph", **_BASE)
     fig.update_yaxes(tickvals=list(range(1, len(types) + 1)), ticktext=list(reversed(types)))
     return fig
@@ -52,7 +85,17 @@ def movement_fig(df):
         sub = df[df["tagged_pitch_type"] == pt]
         fig.add_trace(go.Scatter(
             x=sub["horz_break"], y=sub["ind_vert_break"], mode="markers", name=str(pt),
-            marker=dict(size=10, color=color_for(pt), line=dict(width=0.5, color="white"))))
+            marker=dict(size=10, color=color_for(pt), line=dict(width=0.5, color="white")),
+            customdata=[[str(pt)]] * len(sub),
+            hovertemplate="%{customdata[0]}<br>IVB: %{y:.1f} in · HB: %{x:.1f} in<extra></extra>"))
+        ell = _ellipse_xy(sub["horz_break"], sub["ind_vert_break"])
+        if ell is not None:
+            fig.add_trace(go.Scatter(x=ell[0], y=ell[1], mode="lines", fill="toself",
+                fillcolor=color_for(pt), opacity=0.15, line=dict(color=color_for(pt), width=1),
+                showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=[sub["horz_break"].mean()], y=[sub["ind_vert_break"].mean()],
+            mode="markers", showlegend=False, hoverinfo="skip",
+            marker=dict(size=13, color="white", line=dict(width=2, color=color_for(pt)))))
     fig.add_hline(y=0, line_color="#ccc"); fig.add_vline(x=0, line_color="#ccc")
     fig.update_layout(title="Movement", xaxis_title="HB (in)", yaxis_title="IVB (in)", **_BASE)
     fig.update_yaxes(scaleanchor="x", scaleratio=1)
@@ -67,7 +110,9 @@ def release_fig(df):
         sub = df[df["tagged_pitch_type"] == pt]
         fig.add_trace(go.Scatter(
             x=sub["rel_side"], y=sub["rel_height"], mode="markers", name=str(pt),
-            marker=dict(size=10, color=color_for(pt), line=dict(width=0.5, color="white"))))
+            marker=dict(size=10, color=color_for(pt), line=dict(width=0.5, color="white")),
+            customdata=[[str(pt)]] * len(sub),
+            hovertemplate="%{customdata[0]}<br>Rel H: %{y:.2f} ft · Rel S: %{x:.2f} ft<extra></extra>"))
     fig.update_layout(title="Release", xaxis_title="Rel side (ft)",
                       yaxis_title="Rel height (ft)", **_BASE)
     return fig
@@ -77,13 +122,14 @@ def location_fig(df):
     if df is None or df.empty:
         return _empty()
     fig = go.Figure()
-    fig.add_shape(type="rect", x0=_ZONE["x0"], x1=_ZONE["x1"], y0=_ZONE["y0"], y1=_ZONE["y1"],
-                  line=dict(color="black", width=1.5))
+    _add_zone(fig)
     for pt in _types(df):
         sub = df[df["tagged_pitch_type"] == pt]
         fig.add_trace(go.Scatter(
             x=sub["plate_loc_side"], y=sub["plate_loc_height"], mode="markers", name=str(pt),
-            marker=dict(size=9, color=color_for(pt), line=dict(width=0.5, color="white"))))
+            marker=dict(size=9, color=color_for(pt), line=dict(width=0.5, color="white")),
+            customdata=[[str(pt)]] * len(sub),
+            hovertemplate="%{customdata[0]}<br>Side: %{x:.2f} · Height: %{y:.2f} ft<extra></extra>"))
     fig.update_layout(title="Location", **_BASE)
     fig.update_xaxes(range=[-2.5, 2.5], visible=False)
     fig.update_yaxes(range=[0, 5], visible=False, scaleanchor="x", scaleratio=1)

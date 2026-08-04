@@ -231,6 +231,25 @@ def test_serve_layout_season_default_matches_preset_range(server):
     assert store.data["start"] == str(s) and store.data["end"] == str(e)
 
 
+def test_charts_have_hover_and_zone_grid():
+    from app.dashboards.bullpen import charts
+    df = _session_df()  # existing helper in this test file
+    assert any("Velo:" in (t.hovertemplate or "") for t in charts.velo_fig(df).data)
+    mv = charts.movement_fig(df)
+    assert any("IVB:" in (t.hovertemplate or "") for t in mv.data if t.hovertemplate)
+    loc = charts.location_fig(df)
+    # nine-pocket = >=5 line shapes (box + 2 v + 2 h)
+    assert len(loc.layout.shapes) >= 5
+
+
+def test_ellipse_xy_shape():
+    from app.dashboards.bullpen import charts
+    import numpy as np
+    x, y = charts._ellipse_xy([1, 2, 3, 4, 2, 3], [2, 1, 3, 2, 2, 1])
+    assert len(x) == len(y) >= 20
+    assert charts._ellipse_xy([1, 2], [1, 2]) is None  # <3 pts
+
+
 def test_pitching_hub_has_bullpen_dashboard_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User
