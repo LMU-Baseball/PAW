@@ -76,16 +76,18 @@ def serve_layout() -> html.Div:
         is_coach=is_coach, own_trackman_id=own)
     games_df = P.games_for_pitcher(default_pitcher) if default_pitcher else None
     if games_df is not None and not games_df.empty:
-        start_d = str(games_df["game_date"].min())
-        end_d = str(games_df["game_date"].max())
+        min_bound = str(games_df["game_date"].min())
+        max_bound = str(games_df["game_date"].max())
         outings = dr.game_options(games_df)
         default_game = int(games_df.iloc[0]["game_id"])  # most recent single game
-        anchor = str(games_df["game_date"].max())
+        anchor = max_bound
         s0, e0 = dr.preset_range("season", anchor)
-        # clamp to available bounds
-        start_d = max(str(s0), str(games_df["game_date"].min()))
+        # DEFAULT selected range only -- the calendar's own min/max stay the
+        # pitcher's full history so Custom Range can reach out-of-season data.
+        start_d = max(str(s0), min_bound)
         end_d = anchor
     else:
+        min_bound = max_bound = None
         start_d = end_d = None
         outings = []
         default_game = None
@@ -100,7 +102,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
             dr.date_control("pit", (end_d or date.today().isoformat()),
-                            min_date=start_d, max_date=end_d, preset="season"),
+                            min_date=min_bound, max_date=max_bound, preset="season"),
         ]),
         html.Div([
             html.Label("Outing", style={"color": "white", "fontWeight": "bold"}),
