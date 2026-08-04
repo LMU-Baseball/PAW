@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from app.reports.plots import color_for
 
@@ -204,4 +205,38 @@ def trend_fig(df, metric, active_types=None):
     fig.update_layout(title=_TREND_TITLES.get(metric, ""), xaxis_title="Session date", **_BASE)
     if metric == "spin":
         fig.update_layout(yaxis2=dict(overlaying="y", side="right", title="eff %"))
+    return fig
+
+
+def trend_small_multiples(df, metric):
+    if df is None or df.empty:
+        return _empty("Need at least 2 sessions to show a trend.")
+    types = sorted(df["tagged_pitch_type"].unique())
+    ncols = 2
+    nrows = (len(types) + 1) // 2
+    fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=types,
+                        shared_xaxes=False, vertical_spacing=0.12, horizontal_spacing=0.08)
+    for i, pt in enumerate(types):
+        r, c = i // ncols + 1, i % ncols + 1
+        sub = df[df["tagged_pitch_type"] == pt].sort_values("date")
+        col = color_for(pt)
+        if metric == "velocity":
+            series = [("velo_avg", None, "avg"), ("velo_max", "dash", "max")]
+        elif metric == "spin":
+            series = [("spin_avg", None, "spin"), ("eff_avg", "dot", "eff%")]
+        elif metric == "movement":
+            series = [("ivb_avg", None, "IVB"), ("hb_avg", "dash", "HB")]
+        else:  # command
+            series = [("loc_spread", None, "spread")]
+        for key, dash, nm in series:
+            fig.add_trace(go.Scatter(x=sub["date"], y=sub[key], mode="lines+markers",
+                name=f"{pt} {nm}", line=dict(color=col, dash=dash), showlegend=False),
+                row=r, col=c)
+    fig.update_layout(paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+                      font=dict(family="Teko, sans-serif", size=13),
+                      title_font=dict(color="#9A0021"),
+                      margin=dict(l=40, r=20, t=40, b=30),
+                      height=max(260, 240 * nrows))
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
+    fig.update_yaxes(showgrid=True, gridcolor="#eee")
     return fig

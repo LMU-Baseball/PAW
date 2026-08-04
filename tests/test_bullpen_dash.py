@@ -130,7 +130,13 @@ def test_renumber_and_round_helpers():
 def test_trends_render_has_controls_live():
     from app.dashboards.bullpen.tabs import trends
     s = str(trends.render(GEIS, "2025-09-01", "2026-05-13"))
-    assert "bp-trend-metric" in s and "bp-trend-active" in s and "bp-trend-body" in s
+    assert "bp-trend-metric" in s and "bp-trend-body" in s
+
+
+def test_trends_render_no_chips():
+    from app.dashboards.bullpen.tabs import trends
+    s = str(trends.render(GEIS, "2025-09-01", "2026-05-13"))
+    assert "bp-trend-metric" in s and "bp-trend-chip" not in s and "bp-trend-active" not in s
 
 
 def test_trends_render_empty_pitcher():
@@ -141,14 +147,24 @@ def test_trends_render_empty_pitcher():
 def test_trends_body_one_session_note():
     from app.dashboards.bullpen.tabs import trends
     one = _trend_df().iloc[[0, 2]].copy()   # both rows share date 2026-05-06
-    assert "2 session" in str(trends.body(one, "velocity", ["Fastball", "Slider"])).lower() \
-        or "one session" in str(trends.body(one, "velocity", ["Fastball", "Slider"])).lower()
+    assert "2 session" in str(trends.body(one, "velocity")).lower() \
+        or "one session" in str(trends.body(one, "velocity")).lower()
 
 
 def test_trends_body_two_sessions_renders_graph():
     from app.dashboards.bullpen.tabs import trends
-    out = trends.body(_trend_df(), "velocity", ["Fastball", "Slider"])
+    out = trends.body(_trend_df(), "velocity")
     assert out is not None and "Graph" in str(type(out)) or "dcc.Graph" in str(out)
+
+
+def test_trend_small_multiples_grid():
+    from app.dashboards.bullpen import charts
+    df = _trend_df()  # existing helper: Fastball + Slider across 2 dates
+    fig = charts.trend_small_multiples(df, "velocity")
+    # one subplot per pitch type -> >=2 x-axes
+    axes = [k for k in fig.layout if k.startswith("xaxis")]
+    assert len(axes) >= 2
+    assert charts.trend_small_multiples(df, "movement") is not None
 
 
 def test_sidebar_shows_new_tiles_live():
