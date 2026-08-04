@@ -40,6 +40,7 @@ td.l, th.l { text-align: left; }
 .chip.bad-strong  { background: #9A0021; color: #fff;    }  /* badly missed goal  */
 /* Pitch-type names carry the chart color (tables double as the chart legend). */
 td.pt { font-weight: 700; }
+.fb-callout { padding: 5px 10px; color: #555; font-size: 12px; border-top: 1px solid #eee; }
 .plot { display: flex; align-items: center; justify-content: center; padding: 4px; }
 .plot img { width: 100%; height: auto; }
 .usage-donuts { width: 100%; height: auto; display: block; }

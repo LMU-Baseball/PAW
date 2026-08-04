@@ -950,6 +950,20 @@ def pitch_usage_table(df: pd.DataFrame) -> list[dict]:
     return rows
 
 
+def fastball_callout(df: pd.DataFrame, pt_col: str = "tagged_pitch_type") -> dict:
+    """Fastball Avg Velo / Max Velo / Avg Spin for a pitch df."""
+    none = {"avg_velo": None, "max_velo": None, "avg_spin": None}
+    if df is None or df.empty or pt_col not in df.columns:
+        return none
+    fb = df[df[pt_col] == "Fastball"]
+    v = fb["rel_speed"].dropna()
+    s = fb["spin_rate"].dropna() if "spin_rate" in fb else None
+    if v.empty:
+        return none
+    return {"avg_velo": round(float(v.mean()), 1), "max_velo": round(float(v.max()), 1),
+            "avg_spin": (int(round(float(s.mean()))) if s is not None and not s.empty else None)}
+
+
 def movement_summary(df: pd.DataFrame) -> list[dict]:
     if df.empty:
         return []

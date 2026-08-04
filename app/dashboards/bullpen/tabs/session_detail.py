@@ -5,6 +5,7 @@ import pandas as pd
 from dash import dcc, html
 
 from app.data import bullpen as B
+from app.data import pitching as P
 from app.dashboards.bullpen import charts, tables
 
 _MUTED = {"padding": "12px", "color": "#555"}
@@ -67,8 +68,17 @@ def render(pitcher_id, date) -> html.Div:
         [graph(charts.velo_fig(df)), graph(charts.movement_fig(df)),
          graph(charts.release_fig(df)), graph(charts.location_fig(df))],
         style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"})
+
+    fb = P.fastball_callout(df, pt_col="tagged_pitch_type")
+    callout = html.Div()
+    if fb["avg_velo"] is not None:
+        callout = html.Div([html.B("Fastball"),
+            f" — Avg Velo {fb['avg_velo']} · Max {fb['max_velo']} · Avg Spin {fb['avg_spin']}"],
+            style={"padding": "6px 4px", "color": "#555", "fontSize": "15px"})
+
     return html.Div([
         tables.df_table(_display_summary(summ_df), id_="bp-summary", color_col="Pitch"),
+        callout,
         html.Div(style={"height": "12px"}),
         charts_grid,
         html.H4("All pitches", style={"color": "#9A0021", "marginTop": "14px"}),

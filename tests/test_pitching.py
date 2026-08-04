@@ -99,6 +99,16 @@ def test_usage_by_count_has_count_state_column():
     assert len(uc) >= 1
 
 
+def test_fastball_callout():
+    df = pd.DataFrame({"tagged_pitch_type": ["Fastball", "Fastball", "Slider"],
+                       "rel_speed": [90.0, 92.0, 80.0], "spin_rate": [2200.0, 2300.0, 2400.0]})
+    c = P.fastball_callout(df)
+    assert c["avg_velo"] == 91.0 and c["max_velo"] == 92.0 and c["avg_spin"] == 2250
+    empty = P.fastball_callout(pd.DataFrame({"tagged_pitch_type": ["Slider"],
+                                             "rel_speed": [80.0], "spin_rate": [2400.0]}))
+    assert empty == {"avg_velo": None, "max_velo": None, "avg_spin": None}
+
+
 def test_splits_cover_both_sides_keys():
     df = P.game_pitches(GAME_ID, PITCHER_ID)
     splits = P.splits_by_batter_side(df)

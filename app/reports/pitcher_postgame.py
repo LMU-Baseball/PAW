@@ -87,6 +87,9 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
 
     usage = P.pitch_usage_table(df)
     movement = P.movement_summary(df)
+    df = df.copy()
+    df["_pt"] = P.pitch_type(df)
+    fastball = P.fastball_callout(df, pt_col="_pt")
     # Color key for the tables. The charts dropped their legends (they hid data),
     # so the colored pitch-type names in the tables ARE the legend.
     pitch_colors = {r["pitch"]: plots.color_for(r["pitch"])
@@ -109,6 +112,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
         movement=movement,
         pitch_colors=pitch_colors,
         charts=charts,
+        fastball=fastball,
         css=css,
         assets=assets,
     )

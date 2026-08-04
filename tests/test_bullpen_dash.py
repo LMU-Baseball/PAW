@@ -103,6 +103,16 @@ def test_session_detail_empty_states():
     assert "session" in str(session_detail.render(GEIS, None)).lower()
 
 
+def test_session_detail_has_fastball_callout_live():
+    from app.dashboards.bullpen.tabs import session_detail
+    from app.data import bullpen as B
+    s = B.session_options(GEIS, "2025-09-01", "2026-05-13")
+    if s.empty:
+        pytest.skip("no sessions")
+    out = str(session_detail.render(GEIS, s.iloc[0]["date"]))
+    assert "Fastball" in out and ("Avg Velo" in out or "Avg" in out)
+
+
 def test_session_detail_tables_condensed_live():
     from app.dashboards.bullpen.tabs import session_detail
     from app.data import bullpen as B
