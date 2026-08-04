@@ -70,6 +70,16 @@ def test_landing_lists_games(app_ctx, monkeypatch):
     assert "SMC" in body and "USD" in body  # both games offered
 
 
+def test_landing_has_white_header_back_link(app_ctx, monkeypatch):
+    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    body = client.get("/reports/pitching").get_data(as_text=True)
+    # the standard white header back-link (in the crimson bar, not a body <p>)
+    assert 'class="back"' in body
+    assert "Back to Pitching" not in body   # old plain body link removed
+
+
 def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
     monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
     monkeypatch.setattr("app.data.pitching.pitchers_for_game",

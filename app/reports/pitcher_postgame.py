@@ -90,8 +90,9 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     df = df.copy()
     df["_pt"] = P.pitch_type(df)
     fastball = P.fastball_callout(df, pt_col="_pt")
-    counts = list(df["_pt"].value_counts().items())
-    charts["pitch_freq"] = plots.pitch_freq_bar_uri(counts)
+    # (No pitch-frequency bar here — this report already shows the pitch mix via
+    # the Pitch Usage donuts; the freq bar lives on the bullpen report, which has
+    # no donuts.)
     # Color key for the tables. The charts dropped their legends (they hid data),
     # so the colored pitch-type names in the tables ARE the legend.
     pitch_colors = {r["pitch"]: plots.color_for(r["pitch"])
@@ -123,7 +124,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
 # Bump this whenever the report's layout/content changes so previously cached
 # PDFs (keyed by DATA version) don't keep serving the old design. The data
 # version alone can't detect a code change — see MEMORY §3j.
-_CODE_VERSION = "2026-08-polish"
+_CODE_VERSION = "2026-08-polish-2"
 
 
 def _cache_path(game_id: int, pitcher_id: int, version: str) -> Path:
