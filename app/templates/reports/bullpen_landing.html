@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Bullpen Reports — The PAW{% endblock %}
+{% block header_back %}<a class="back" href="{{ url_for('main.pitching') }}">← Pitching</a>{% endblock %}
 {% block content %}
 <style>
   .hero {
@@ -27,8 +28,6 @@
   .empty { color: #777; font-style: italic; }
   .hint { color: #777; font-size: 14px; margin: 0 0 14px; }
 </style>
-
-<p><a href="{{ url_for('main.pitching') }}">← Back to Pitching</a></p>
 
 <div class="hero">
   <img src="{{ url_for('static', filename='reports/lmu-bsb.png') }}" alt="LMU Baseball">

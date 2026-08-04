@@ -72,9 +72,11 @@ def pitch_freq_bar(df):
             marker_color=color_for(pt), text=[int(n)], textposition="inside",
             hovertemplate=f"{pt}: {int(n)}<extra></extra>"))
     fig.update_layout(barmode="stack", **_BASE)
-    fig.update_layout(title=f"Pitch Frequency (Total {total})", showlegend=True,
-                      height=180, yaxis_visible=False,
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02,
+    # No in-figure title (the tab renders a heading above it) so the horizontal
+    # top legend has clear space and never overlaps a title.
+    fig.update_layout(title=None, showlegend=True, height=150, yaxis_visible=False,
+                      margin=dict(l=40, r=20, t=34, b=30),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.0,
                                   xanchor="left", x=0))
     fig.update_xaxes(showgrid=True, gridcolor="#eee")
     return fig

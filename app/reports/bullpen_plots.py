@@ -33,6 +33,8 @@ def velo_strip_uri(df) -> str:
 
 def movement_uri(df) -> str:
     fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    ax.set_axisbelow(True)
+    ax.grid(True, color="#eee", lw=0.6)
     ax.axhline(0, color="#ccc", lw=0.8)
     ax.axvline(0, color="#ccc", lw=0.8)
     for pt, sub in _by_type(df):
@@ -47,6 +49,8 @@ def movement_uri(df) -> str:
 
 def release_uri(df) -> str:
     fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    ax.set_axisbelow(True)
+    ax.grid(True, color="#eee", lw=0.6)
     for pt, sub in _by_type(df):
         ax.scatter(sub["rel_side"], sub["rel_height"], s=55,
                    color=_color_for(pt), alpha=0.8, edgecolor="white", linewidth=0.5)

@@ -63,7 +63,11 @@
       font-family: var(--font-display); font-weight: 700; font-size: 30px;
       line-height: 1; letter-spacing: 1px; text-transform: uppercase;
     }
+    header.bar .left { display: flex; align-items: center; }
     header.bar a { color: #fff; }
+    header.bar .back {
+      color: #fff; text-decoration: underline; font-size: 14px; margin-left: 18px;
+    }
     .user { font-size: 14px; color: rgba(255,255,255,.85); }
     .user a { text-decoration: underline; }
     main.wrap { max-width: 900px; margin: 32px auto; padding: 0 20px; }
@@ -95,10 +99,13 @@
 </head>
 <body>
   <header class="bar">
-    <a class="brand" href="{{ url_for('main.index') }}">
-      <img src="{{ url_for('static', filename='reports/lmu.png') }}" alt="LMU">
-      <span class="wordmark">The Paw</span>
-    </a>
+    <div class="left">
+      <a class="brand" href="{{ url_for('main.index') }}">
+        <img src="{{ url_for('static', filename='reports/lmu.png') }}" alt="LMU">
+        <span class="wordmark">The Paw</span>
+      </a>
+      {% block header_back %}{% endblock %}
+    </div>
     {% if current_user.is_authenticated %}
       <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
         <a href="{{ url_for('auth.logout') }}">Log out</a></span>

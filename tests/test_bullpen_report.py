@@ -28,3 +28,19 @@ def test_build_bullpen_report_valid_pdf():
 def test_build_raises_on_empty_session():
     with pytest.raises(ReportDataError):
         build_bullpen_report(GEIS, "1999-01-01")
+
+
+def test_bullpen_report_html_has_new_elements():
+    from app.reports import bullpen_report as BR
+    pid, date = _session()
+    html = BR._build_html(pid, date)
+    # SP5 additions now on the bullpen report: header metrics, freq bar, callout.
+    assert "STRIKE%" in html and "MAX MPH" in html
+    assert "freq-bar" in html          # pitch-frequency stacked bar image
+    assert "fb-callout" in html        # fastball callout (GEIS throws a fastball)
+
+
+def test_bullpen_cache_key_includes_code_version():
+    from app.reports import bullpen_report as BR
+    p = BR._cache_path(824645, "2026-05-13", "2026-05-13")
+    assert BR._CODE_VERSION in p.name

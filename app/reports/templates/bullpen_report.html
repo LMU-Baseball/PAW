@@ -8,9 +8,16 @@
       <div class="hdr-name">{{ pitcher }}</div>
       <div class="hdr-game">Bullpen &nbsp;|&nbsp; {{ date }}</div>
     </div>
-    <div class="hdr-line"><span><b>{{ total }}</b><i>PITCHES</i></span></div>
+    <div class="hdr-line">
+      <span><b>{{ total }}</b><i>PITCHES</i></span>
+      <span><b>{{ strike_pct|round(0)|int if strike_pct is not none else '—' }}%</b><i>STRIKE%</i></span>
+      <span><b>{{ max_velo if max_velo is not none else '—' }}</b><i>MAX MPH</i></span>
+    </div>
     <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
   </div>
+
+  <img class="freq-bar" src="{{ charts.pitch_freq }}" alt="Pitch Frequency"
+       style="width:100%; margin:6px 0;">
 
   <div class="grid3">
     <div class="panel plot"><img src="{{ charts.velo }}" alt="Velocity"></div>
@@ -35,6 +42,9 @@
             <td>{{ r.ext_avg if r.ext_avg is not none else '—' }}</td></tr>
         {% endfor %}
       </table>
+      {% if fastball.avg_velo is not none %}
+      <div class="fb-callout"><b>Fastball</b> — Avg Velo {{ fastball.avg_velo }} · Max {{ fastball.max_velo }} · Avg Spin {{ fastball.avg_spin if fastball.avg_spin is not none else '—' }}</div>
+      {% endif %}
     </div>
   </div>
 </div>
