@@ -52,6 +52,33 @@ def test_resolve_default_prefers_broadcast_then_falls_back():
     assert got != "Broadcast" and p_nob["urls"][got]
 
 
+def test_game_options_tags_video_games():
+    # Item 3: games with video for the player get a 🎥 marker in the dropdown label.
+    from app.dashboards import date_range as dr
+    games = pd.DataFrame({"game_id": [10, 20, 30],
+                          "GameLabel": ["A", "B", "C"], "game_date": ["d", "d", "d"]})
+    opts = dr.game_options(games, video_game_ids={20})
+    by_id = {o["value"]: o["label"] for o in opts}
+    assert "🎥" in by_id[20]
+    assert "🎥" not in by_id[10] and "🎥" not in by_id[30]
+    # the aggregate sentinel is still present and first
+    assert opts[0]["value"] == dr.ALL_IN_RANGE
+    # default (no set) tags nothing
+    assert not any("🎥" in o["label"] for o in dr.game_options(games))
+
+
+def test_games_with_video_empty_input_is_empty_set():
+    from app.data import video as vdata
+    assert vdata.games_with_video([], batter_id=1) == set()
+
+
+def test_video_game_ids_safe_on_empty_and_none():
+    # Safe dropdown-tag convenience: never raises, empty set for empty/None input.
+    from app.data import video as vdata
+    assert vdata.video_game_ids(pd.DataFrame(), batter_id=1) == set()
+    assert vdata.video_game_ids(None, batter_id=1) == set()
+
+
 def _contains(node, typ):
     if isinstance(node, typ):
         return True

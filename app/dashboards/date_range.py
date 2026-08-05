@@ -78,14 +78,19 @@ def date_control(id_prefix, anchor, *, min_date=None, max_date=None, preset="sea
     ])
 
 
-def game_options(games_df: pd.DataFrame) -> list[dict]:
+def game_options(games_df: pd.DataFrame, video_game_ids=None) -> list[dict]:
     """Dropdown options for in-range games, prepended with the aggregate sentinel.
-    Empty df -> [] (caller shows an empty state)."""
+    Games whose id is in `video_game_ids` are tagged with a 🎥 marker so coaches
+    can see at a glance which games have video. Empty df -> [] (caller shows an
+    empty state)."""
     if games_df is None or games_df.empty:
         return []
+    vids = {int(g) for g in (video_game_ids or set())}
     opts = [{"label": f"All games in range ({len(games_df)})", "value": ALL_IN_RANGE}]
     for r in games_df.itertuples():
-        opts.append({"label": str(r.GameLabel), "value": int(r.game_id)})
+        gid = int(r.game_id)
+        label = f"🎥 {r.GameLabel}" if gid in vids else str(r.GameLabel)
+        opts.append({"label": label, "value": gid})
     return opts
 
 

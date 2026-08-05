@@ -7,6 +7,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import hitting_wh
+from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.hitting import selectors
 from app.dashboards.shell import (
@@ -81,7 +82,8 @@ def serve_layout() -> html.Div:
     if games_df is not None and not games_df.empty:
         min_bound = str(games_df["game_date"].min())
         max_bound = str(games_df["game_date"].max())
-        games = dr.game_options(games_df)
+        games = dr.game_options(
+            games_df, videodata.video_game_ids(games_df, batter_id=default_batter))
         default_game = int(games_df.iloc[0]["game_id"])
         anchor = max_bound
         s0, e0 = dr.preset_range("season", anchor)

@@ -59,6 +59,44 @@ def _sibling_ids(*, batter_id, pitcher_id, catcher_id):
     return col, [int(x) for x in sib]
 
 
+def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=None) -> set[int]:
+    """Of the given game_ids, the subset that have at least one video clip for the
+    subject (Item 3: used to tag the game dropdown). Empty input -> empty set."""
+    gids = [int(g) for g in (game_ids if isinstance(game_ids, (list, tuple, set)) else [game_ids])]
+    if not gids:
+        return set()
+    subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)
+    if not sib:
+        return set()
+    gph = ", ".join(f":g{i}" for i in range(len(gids)))
+    sph = ", ".join(f":s{i}" for i in range(len(sib)))
+    params = {f"g{i}": g for i, g in enumerate(gids)}
+    params.update({f"s{i}": s for i, s in enumerate(sib)})
+    df = query_df(
+        f"""
+        SELECT DISTINCT f.game_id
+          FROM vw_pitch_video v
+          JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
+         WHERE f.game_id IN ({gph}) AND f.{subj_col} IN ({sph})
+        """,
+        params,
+    )
+    return set() if df.empty else {int(g) for g in df["game_id"]}
+
+
+def video_game_ids(games_df, **subject) -> set:
+    """Safe convenience for dropdown tagging (Item 3): of the games in `games_df`
+    (needs a `game_id` column), the subset that have video for the subject. Pass
+    exactly one of batter_id / pitcher_id / catcher_id. Never raises — returns an
+    empty set on any error so a video-view hiccup can't blank the game dropdown."""
+    try:
+        if games_df is None or getattr(games_df, "empty", True):
+            return set()
+        return games_with_video([int(x) for x in games_df["game_id"]], **subject)
+    except Exception:
+        return set()
+
+
 def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None) -> pd.DataFrame:
     """One row per pitch (angles pivoted to url columns) for a game (or list of
     games) and one subject. Empty full-column frame when there is no video."""

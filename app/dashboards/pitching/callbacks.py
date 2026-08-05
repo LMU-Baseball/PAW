@@ -70,7 +70,7 @@ def register_callbacks(dash_app) -> None:
         if not pid or not start or not end:
             return [], None
         g = P.games_for_pitcher(pid, start=start, end=end)
-        opts = dr.game_options(g)
+        opts = dr.game_options(g, videodata.video_game_ids(g, pitcher_id=pid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None
         return opts, value
 

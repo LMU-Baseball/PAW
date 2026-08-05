@@ -56,7 +56,7 @@ def register_callbacks(dash_app) -> None:
         if not cid or not start or not end:
             return [], None
         g = C.games_for_catcher(cid, start=start, end=end)
-        opts = dr.game_options(g)
+        opts = dr.game_options(g, videodata.video_game_ids(g, catcher_id=cid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
 

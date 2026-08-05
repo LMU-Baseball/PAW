@@ -114,7 +114,7 @@ def register_callbacks(dash_app) -> None:
         if not bid or not start or not end:
             return [], None
         g = hitting_wh.wh_games_for_batter(bid, start=start, end=end)
-        opts = dr.game_options(g)
+        opts = dr.game_options(g, videodata.video_game_ids(g, batter_id=bid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
 
