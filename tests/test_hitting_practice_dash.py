@@ -227,6 +227,63 @@ def test_swing_frequency_has_trend_and_zone_chips():
     assert "Swing Decision Score" not in src or "trend" in src.lower()
 
 
+def _find_store(node, store_id):
+    """Return the dcc.Store with the given id anywhere in the tree, else None."""
+    from dash import dcc
+    if isinstance(node, dcc.Store) and getattr(node, "id", None) == store_id:
+        return node
+    ch = getattr(node, "children", None)
+    kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+    for k in kids:
+        found = _find_store(k, store_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_swing_frequency_has_swing_decision_zone_chips():
+    """Item 4: the Swing Decision Score Trend gets its own zone chip filter
+    (sds-*), default zones 1-9 selected, driving a callback-updated trend body."""
+    import inspect
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    src = inspect.getsource(sf)
+    assert "sds-chip" in src and "sds-active" in src and "sds-trend-body" in src
+
+
+def test_sds_chip_row_defaults_to_zones_1_through_9():
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    df = pd.DataFrame([{"zone_section": z} for z in [3, 5, 11, 12]])
+    row = sf.sds_zone_chip_row(df)
+    active = _find_store(row, "sds-active")
+    assert active is not None
+    assert list(active.data) == list(range(1, 10))
+
+
+def test_sds_trend_body_recomputes_with_in_zones():
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    df = pd.DataFrame([
+        {"player_name": "Doe, John", "session_id": 1,
+         "play_timestamp": "2026-04-01 10:00:05", "play_date": "2026-04-01",
+         "zone_section": 3, "result": 1, "is_contact": True},
+        {"player_name": "Doe, John", "session_id": 1,
+         "play_timestamp": "2026-04-01 10:00:10", "play_date": "2026-04-01",
+         "zone_section": 11, "result": -4, "is_contact": False},
+    ])
+    # builds for default and a custom in-zone set without crashing
+    assert sf.trend_body(df, list(range(1, 10))) is not None
+    assert sf.trend_body(df, [11]) is not None
+    assert sf.trend_body(pd.DataFrame(), [1]) is not None
+
+
+def test_sds_chip_callbacks_registered():
+    import inspect
+    from app.dashboards.hitting_practice import callbacks
+    src = inspect.getsource(callbacks)
+    assert "sds-active" in src and "sds-trend-body" in src
+
+
 def test_swing_frequency_ev_body_zone_filter():
     import pandas as pd
     from app.dashboards.hitting_practice.tabs import swing_frequency as sf

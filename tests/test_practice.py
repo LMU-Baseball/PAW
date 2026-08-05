@@ -50,6 +50,44 @@ def test_swing_decision_score():
     assert s["score"] == round(s["in_zone_pct"] - s["chase_pct"], 1)
 
 
+def test_swing_decision_score_default_in_zones_matches_1_through_9():
+    # Default (no arg) must reproduce the legacy 1-9 in-zone / 10-13 chase behavior.
+    df = _pitches()
+    assert P.swing_decision_score(df) == P.swing_decision_score(df, in_zones=range(1, 10))
+
+
+def test_swing_decision_score_custom_in_zones_changes_result():
+    # zone 3 = in-zone contact; zone 5 = in-zone miss; zone 11 = chase contact;
+    # zone 12 = chase miss.  Default (1-9): in-zone 1/2=50, chase 1/2=50, score 0.
+    df = pd.DataFrame([
+        {"zone_section": 3, "result": 1},
+        {"zone_section": 5, "result": -4},
+        {"zone_section": 11, "result": 1},
+        {"zone_section": 12, "result": -4},
+    ])
+    df["is_contact"] = df["result"] != -4
+    assert P.swing_decision_score(df)["score"] == 0.0
+    # Restrict in-zone to just zone 3: in-zone 1/1=100; chase = zones 5,11,12 ->
+    # 1 contact / 3 = 33.3; score 66.7.
+    custom = P.swing_decision_score(df, in_zones={3})
+    assert custom["in_zone_pct"] == 100.0
+    assert custom["chase_pct"] == 33.3
+    assert custom["score"] == 66.7
+
+
+def test_swing_decision_trend_respects_in_zones():
+    df = pd.DataFrame([
+        {"play_date": "2026-04-01", "zone_section": 3, "result": 1},   # in-zone contact
+        {"play_date": "2026-04-01", "zone_section": 11, "result": -4},  # chase miss
+    ])
+    df["is_contact"] = df["result"] != -4
+    # Default (1-9): iz 100, chase 0, score 100.
+    assert P.swing_decision_trend(df).iloc[0]["score"] == 100.0
+    # In-zone = {11} only: iz (zone 11) 0%, chase (zone 3) 100%, score -100.
+    t = P.swing_decision_trend(df, in_zones={11})
+    assert t.iloc[0]["score"] == -100.0
+
+
 def test_zone_contact_table():
     z = P.zone_contact_table(_pitches())
     assert set(z["Zone"]) >= {5, 11}

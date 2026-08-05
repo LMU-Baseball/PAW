@@ -206,6 +206,47 @@ def register_callbacks(dash_app) -> None:
                 for i in ids]
 
     @dash_app.callback(
+        Output("sds-active", "data"),
+        Input({"type": "sds-chip", "index": ALL}, "n_clicks"),
+        State("sds-active", "data"), State("sds-present", "data"),
+        prevent_initial_call=True,
+    )
+    def _sds_toggle(_clicks, active, present):
+        tid = ctx.triggered_id
+        if not tid:
+            return active
+        z = tid["index"]
+        present = set(present or [])
+        if z not in present:                  # disabled/empty zone -> ignore
+            return active
+        active = list(active or [])
+        return [x for x in active if x != z] if z in active else active + [z]
+
+    @dash_app.callback(
+        Output("sds-trend-body", "children"),
+        Input("sds-active", "data"), State("prac-pitch-data", "data"),
+    )
+    def _sds_body(active, pitch_json):
+        from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+        df = _read_json(pitch_json)
+        if df.empty:
+            return sf.trend_body(df, active or [])
+        return sf.trend_body(P.trim_to_first_contact(df), active or [])
+
+    @dash_app.callback(
+        Output({"type": "sds-chip", "index": ALL}, "style"),
+        Input("sds-active", "data"),
+        State("sds-present", "data"),
+        State({"type": "sds-chip", "index": ALL}, "id"),
+    )
+    def _sds_styles(active, present, ids):
+        from app.dashboards.hitting_practice.tabs.swing_frequency import chip_style
+        active = set(active or [])
+        present = set(present or [])
+        return [chip_style(active=i["index"] in active, present=i["index"] in present)
+                for i in ids]
+
+    @dash_app.callback(
         Output("bb-active", "data"),
         Input({"type": "bb-chip", "index": ALL}, "n_clicks"),
         State("bb-active", "data"), State("bb-present", "data"),

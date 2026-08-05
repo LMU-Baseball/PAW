@@ -44,15 +44,38 @@ def ev_body(df: pd.DataFrame, active_zones) -> html.Div:
     return html.Div(dcc.Graph(figure=charts.ev_distance_by_pitch(d)))
 
 
+def sds_zone_chip_row(df: pd.DataFrame) -> html.Div:
+    """Zone chips that define the in-zone set for the Swing Decision Score.
+    Defaults to zones 1-9 selected; deselected zones count as chases. Absent
+    zones are greyed/disabled. Separate from the sfz EV/distance chips above."""
+    present = {int(z) for z in df["zone_section"].dropna().unique()} \
+        if not df.empty and "zone_section" in df.columns else set(_ZONES)
+    default_active = list(range(1, 10))
+    chips = [html.Button(
+        f"Zone {z}", id={"type": "sds-chip", "index": z}, n_clicks=0,
+        disabled=z not in present,
+        style=chip_style(active=z in default_active, present=z in present))
+        for z in _ZONES]
+    return html.Div([dcc.Store(id="sds-active", data=default_active),
+                     dcc.Store(id="sds-present", data=sorted(present)),
+                     html.Div(chips)], style={"margin": "6px 0"})
+
+
+def trend_body(df: pd.DataFrame, in_zones) -> html.Div:
+    """Swing Decision Score Trend chart recomputed for the given in-zone set."""
+    trend = P.swing_decision_trend(df, in_zones=in_zones or [])
+    return html.Div(dcc.Graph(figure=charts.swing_decision_trend_fig(trend)))
+
+
 def render(df: pd.DataFrame) -> html.Div:
     if df.empty:
         return html.Div("No pitch data for these filters.",
                         style={"color": "#555", "padding": "12px"})
     d = P.trim_to_first_contact(df)
-    trend = P.swing_decision_trend(d)
     return html.Div([
         section("Swing Decision Score Trend"),
-        dcc.Graph(figure=charts.swing_decision_trend_fig(trend)),
+        sds_zone_chip_row(d),
+        html.Div(id="sds-trend-body", children=trend_body(d, list(range(1, 10)))),
         section("Exit Velo & Distance by Pitch"),
         zone_chip_row(d),
         html.Div(id="sf-ev-body", children=ev_body(d, None)),

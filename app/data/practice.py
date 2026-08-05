@@ -255,15 +255,21 @@ def contact_summary(df: pd.DataFrame) -> dict:
     }
 
 
-def swing_decision_score(df: pd.DataFrame) -> dict:
-    """In-zone (1-9) contact% minus chase (10-13) contact%."""
+def swing_decision_score(df: pd.DataFrame, in_zones=range(1, 10)) -> dict:
+    """In-zone contact% minus chase contact%.
+
+    ``in_zones`` is the set of HitTrax zone_sections treated as in-zone (default
+    1-9, which reproduces the legacy behavior); every other zone with
+    zone_section > 0 counts as a chase. Making the in-zone set configurable lets
+    a coach define a player-specific target zone."""
     if df.empty or "zone_section" not in df.columns:
         return {"in_zone_pct": None, "chase_pct": None, "score": None}
     d = df[df["zone_section"] > 0].copy()
     if d.empty:
         return {"in_zone_pct": None, "chase_pct": None, "score": None}
-    iz = d[d["zone_section"].between(1, 9)]
-    ch = d[d["zone_section"].between(10, 13)]
+    in_zones = set(in_zones)
+    iz = d[d["zone_section"].isin(in_zones)]
+    ch = d[~d["zone_section"].isin(in_zones)]
 
     def _pct(sub):
         if sub.empty:
@@ -324,15 +330,16 @@ def heatmap_contact_rate(df: pd.DataFrame, bins: int = 20):
     return heatmap_metric(df, "contact", bins)
 
 
-def swing_decision_trend(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-date swing-decision score (in-zone 1-9 contact% - chase 10-13 contact%).
+def swing_decision_trend(df: pd.DataFrame, in_zones=range(1, 10)) -> pd.DataFrame:
+    """Per-date swing-decision score (in-zone contact% - chase contact%).
+    ``in_zones`` defines the in-zone set (default 1-9); see swing_decision_score.
     Only dates where the score is computable. PROVISIONAL."""
     cols = ["play_date", "in_zone_pct", "chase_pct", "score"]
     if df.empty or "play_date" not in df.columns:
         return pd.DataFrame(columns=cols)
     rows = []
     for d, sub in df.groupby("play_date"):
-        s = swing_decision_score(sub)
+        s = swing_decision_score(sub, in_zones=in_zones)
         if s["score"] is not None:
             rows.append({"play_date": d, "in_zone_pct": s["in_zone_pct"],
                          "chase_pct": s["chase_pct"], "score": s["score"]})
