@@ -53,6 +53,28 @@ def _read_game_df(data_json):
     return pd.read_json(io.StringIO(data_json), orient="split")
 
 
+def game_tab_body(df) -> html.Div:
+    """Merged 'Game Level' tab (Item 1): batting/batted-ball tables, then the
+    per-PA breakdown + all-PAs facet, then the zone-filter scatter/tables. The
+    pa-dd / pa-breakdown / zone-dd / zone-body ids are preserved so their
+    existing callbacks still resolve."""
+    choices = pa.pa_choices(df)
+    return html.Div([
+        game_level.render(df),
+        html.H3("Plate Appearances", style={"color": "#9A0021", "marginTop": "18px"}),
+        dcc.Dropdown(id="pa-dd", options=choices,
+                     value=(choices[0]["value"] if choices else None),
+                     clearable=False, style={"maxWidth": "260px"}),
+        html.Div(id="pa-breakdown"),
+        html.H3("All Plate Appearances", style={"color": "#9A0021"}),
+        pa.render_all_pas(df),
+        html.H3("Zone Location", style={"color": "#9A0021", "marginTop": "18px"}),
+        dcc.Dropdown(id="zone-dd", options=zl.ZONE_FILTER_OPTIONS,
+                     value="All Swings", clearable=False, style={"maxWidth": "220px"}),
+        html.Div(id="zone-body"),
+    ])
+
+
 def register_callbacks(dash_app) -> None:
 
     # Preset dropdown (or a new hitter) -> refresh the date range; 'custom' just
@@ -171,24 +193,7 @@ def register_callbacks(dash_app) -> None:
             return videotab.render(vdf, prefix="hit", default_angle="batter_side")
         df = _read_game_df(data_json)
         if tab == "game":
-            return game_level.render(df)
-        if tab == "pa":
-            choices = pa.pa_choices(df)
-            return html.Div([
-                dcc.Dropdown(id="pa-dd", options=choices,
-                             value=(choices[0]["value"] if choices else None),
-                             clearable=False, style={"maxWidth": "260px"}),
-                html.Div(id="pa-breakdown"),
-                html.H3("All Plate Appearances", style={"color": "#9A0021"}),
-                pa.render_all_pas(df),
-            ])
-        if tab == "zone":
-            return html.Div([
-                dcc.Dropdown(id="zone-dd", options=zl.ZONE_FILTER_OPTIONS,
-                             value="All Swings", clearable=False,
-                             style={"maxWidth": "220px"}),
-                html.Div(id="zone-body"),
-            ])
+            return game_tab_body(df)
         return html.Div()
 
     # PA dropdown -> per-PA breakdown.

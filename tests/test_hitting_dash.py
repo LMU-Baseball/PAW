@@ -218,6 +218,53 @@ def test_stat_table_empty_df_is_safe():
     assert tbl.data == []
 
 
+def _collect_ids(component, out=None):
+    """Collect every component id found anywhere in a Dash component tree."""
+    out = [] if out is None else out
+    cid = getattr(component, "id", None)
+    if cid is not None:
+        out.append(cid)
+    ch = getattr(component, "children", None)
+    kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+    for k in kids:
+        _collect_ids(k, out)
+    return out
+
+
+def _has_type(component, typ):
+    if isinstance(component, typ):
+        return True
+    ch = getattr(component, "children", None)
+    kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+    return any(_has_type(k, typ) for k in kids)
+
+
+def test_hitting_tab_bar_merges_game_pa_zone():
+    """Item 1: Game Level / Plate Appearances / Zone Location collapse into one
+    'Game Level' tab; the standalone pa/zone tabs are gone."""
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout)
+    assert 'value="pa"' not in src
+    assert 'value="zone"' not in src
+    assert 'value="game"' in src
+    for v in ("video", "bip", "last27", "devplan"):
+        assert f'value="{v}"' in src
+
+
+def test_game_tab_body_stacks_batting_pa_and_zone(game_df):
+    """The merged Game Level body contains the batting table plus the PA and
+    Zone controls (so their existing callbacks still resolve)."""
+    from app.dashboards.hitting import callbacks
+    from dash import dash_table
+    body = callbacks.game_tab_body(game_df)
+    ids = _collect_ids(body)
+    assert "pa-dd" in ids and "pa-breakdown" in ids and "zone-dd" in ids
+    assert _has_type(body, dash_table.DataTable)
+    # empty df must not crash
+    assert callbacks.game_tab_body(pd.DataFrame()) is not None
+
+
 def test_game_level_renders_for_real_and_empty(game_df):
     from app.dashboards.hitting.tabs import game_level
     from dash import html
