@@ -126,9 +126,11 @@ def serve_layout() -> html.Div:
         dcc.Store(id="game-data"),
         header(back_href="/catching", back_label="← Catching"),
         html.Div([
-            html.Div(id="sidebar", children=sidebar(default_catcher),
-                     style={"width": "240px", "flexShrink": "0"}),
-            html.Div([selector_row, tabs, notes_ui.note_card("catching"),
+            html.Div([
+                html.Div(id="sidebar", children=sidebar(default_catcher)),
+                notes_ui.note_card("catching"),
+            ], style={"width": "260px", "flexShrink": "0"}),
+            html.Div([selector_row, tabs,
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],
                      style={"flexGrow": "1"}),
         ], style={"display": "flex", "gap": "16px", "padding": "16px",

@@ -52,6 +52,29 @@ def test_resolve_default_prefers_broadcast_then_falls_back():
     assert got != "Broadcast" and p_nob["urls"][got]
 
 
+def _contains(node, typ):
+    if isinstance(node, typ):
+        return True
+    ch = getattr(node, "children", None)
+    kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+    return any(_contains(k, typ) for k in kids)
+
+
+def test_video_display_cols_drops_date():
+    # Item 2: Date column removed from the pitch table.
+    assert "Date" not in vdata.DISPLAY_COLS
+
+
+def test_video_is_left_and_larger_than_table():
+    # Item 2: video is the dominant element on the left; table compact on the right.
+    out = vc.render(_df(), prefix="pit", default_angle="HomeBehind")
+    row = out.children[-1]                       # the two-column flex row
+    left, right = row.children[0], row.children[1]
+    assert _contains(left, html.Video)           # video on the left
+    assert _contains(right, dash_table.DataTable)  # table on the right
+    assert float(left.style["flex"]) > float(right.style["flex"])  # video column larger
+
+
 def test_table_hides_url_columns_but_keeps_them_in_data():
     out = vc.render(_df(), prefix="hit", default_angle="batter_side")
     table = next(n for n in _walk(out)

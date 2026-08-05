@@ -49,14 +49,16 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str) -> html.Div:
         dcc.Store(id=f"{prefix}-video-pitch"),
         dcc.Store(id=f"{prefix}-video-angle"),
         html.Div([
-            html.Div([table], style={"flex": "1", "minWidth": "340px"}),
+            # LEFT: the video is the dominant element (large).
             html.Div([
                 html.Div(buttons, style={"marginBottom": "8px"}),
                 html.Div("Click a pitch row to load video.", id=f"{prefix}-video-hint",
                          style={"color": "#555", "marginBottom": "6px"}),
                 player,
                 reload_sink,
-            ], style={"flex": "1", "minWidth": "360px"}),
+            ], style={"flex": "2", "minWidth": "480px"}),
+            # RIGHT: the pitch table, compact.
+            html.Div([table], style={"flex": "1", "minWidth": "300px"}),
         ], style={"display": "flex", "gap": "16px", "alignItems": "flex-start"}),
     ])
 

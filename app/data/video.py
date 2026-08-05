@@ -18,7 +18,9 @@ ANGLES: list[tuple[str, str]] = [
     ("HomeLeft", "Home L"), ("Broadcast", "Broadcast"),
 ]
 URL_COL: dict[str, str] = {a: f"url_{a.lower()}" for a, _ in ANGLES}
-DISPLAY_COLS: list[str] = ["Pitch", "Inn", "Count", "Type", "Velo", "Result", "Zone", "Date"]
+# Date is intentionally omitted from the table display (Item 2); it is still
+# computed in pitch_video_df for sorting, then dropped by the _ALL_COLS projection.
+DISPLAY_COLS: list[str] = ["Pitch", "Inn", "Count", "Type", "Velo", "Result", "Zone"]
 
 _ALL_COLS = DISPLAY_COLS + list(URL_COL.values()) + ["batter_side", "pitch_uid"]
 
