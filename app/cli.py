@@ -1,4 +1,4 @@
-"""Custom Flask CLI commands (user management)."""
+"""Custom Flask CLI commands (user management + data ingestion)."""
 import click
 
 from app.auth.models import ROLES, User
@@ -6,6 +6,9 @@ from app.extensions import db
 
 
 def register_cli(server):
+    from app.ingest.cli import ingest_cli
+    server.cli.add_command(ingest_cli)
+
     @server.cli.command("create-user")
     @click.option("--email", required=True)
     @click.option("--name", required=True)
