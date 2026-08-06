@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import click
 
 from app.db import get_engine
+from app.ingest.add_game_type import backfill_game_type
 from app.ingest.bullpen import load_bullpen
 from app.ingest.config import hittrax_cfg, trackman_cfg
 from app.ingest.connections import open_ftps, open_sftp
@@ -86,6 +87,20 @@ def normalize_games_date_command(dry_run: bool):
     click.echo(
         f"GAMES.Date normalize: scanned={result['scanned']} would_change={result['would_change']} "
         f"unparseable={result['unparseable']} dry_run={dry_run}"
+    )
+
+
+@ingest_cli.command("backfill-game-type")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually update.",
+)
+def backfill_game_type_command(dry_run: bool):
+    """One-time: add GAMES.GameType and backfill from dim_tm_game.game_type."""
+    engine = get_engine()
+    result = backfill_game_type(engine, dry_run=dry_run)
+    click.echo(
+        f"GAMES.GameType backfill: would_update={result['would_update']} dry_run={dry_run}"
     )
 
 
