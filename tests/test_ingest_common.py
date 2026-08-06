@@ -86,6 +86,21 @@ def test_chunked_insert_empty_rows_returns_zero(sqlite_engine):
     assert common.chunked_insert(sqlite_engine, "widgets", [], chunksize=500) == 0
 
 
+def test_chunked_insert_handles_dotted_column_name(sqlite_engine):
+    # GAMES has a column literally named `Top.Bottom`; a naive `:Top.Bottom`
+    # placeholder parses as bind param `Top` + literal `.Bottom` and blows up.
+    with sqlite_engine.begin() as conn:
+        conn.execute(text("CREATE TABLE dotted (id INTEGER, `Top.Bottom` TEXT)"))
+    rows = [{"id": 1, "Top.Bottom": "Top"}, {"id": 2, "Top.Bottom": "Bottom"}]
+
+    count = common.chunked_insert(sqlite_engine, "dotted", rows, chunksize=10)
+
+    assert count == 2
+    with sqlite_engine.connect() as conn:
+        got = {r[0] for r in conn.execute(text("SELECT `Top.Bottom` FROM dotted")).fetchall()}
+    assert got == {"Top", "Bottom"}
+
+
 # ---- common: chunked_insert NaN scrub + column union (fake recording engine) ---
 
 class _RecordingConn:

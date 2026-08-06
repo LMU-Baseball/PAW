@@ -8,10 +8,13 @@ engine.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass
@@ -105,12 +108,20 @@ def chunked_insert(engine: Engine, table: str, rows: list[dict], chunksize: int 
                         seen.add(k)
                         cols.append(k)
 
-            col_list = ", ".join(cols)
-            placeholders = ", ".join(f":{c}" for c in cols)
+            # Backtick-quote column names (handles dots/reserved words/spaces,
+            # e.g. GAMES.`Top.Bottom`). Bind-param names must be valid
+            # identifiers -- `:Top.Bottom` would parse as param `Top` + literal
+            # `.Bottom` -- so any non-identifier column gets a positional alias
+            # `p{i}`; ordinary columns keep their name (callers/tests that
+            # inspect bound params by column name are unaffected).
+            param_names = [c if _IDENTIFIER.match(c) else f"p{i}"
+                           for i, c in enumerate(cols)]
+            col_list = ", ".join(f"`{c}`" for c in cols)
+            placeholders = ", ".join(f":{p}" for p in param_names)
             sql = text(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})")
 
             scrubbed_chunk = [
-                {c: _scrub_value(row.get(c)) for c in cols}
+                {param_names[i]: _scrub_value(row.get(c)) for i, c in enumerate(cols)}
                 for row in chunk
             ]
             conn.execute(sql, scrubbed_chunk)
