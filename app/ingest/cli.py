@@ -15,6 +15,7 @@ from app.ingest.config import hittrax_cfg, trackman_cfg
 from app.ingest.connections import open_ftps, open_sftp
 from app.ingest.games import load_games
 from app.ingest.hittrax import extract_load_raw, transform
+from app.ingest.normalize_games_date import normalize_dates
 from app.ingest.warehouse_to_games import load_backfill
 
 ingest_cli = click.Group("ingest", help="Data ingestion loaders (Trackman SFTP / HitTrax FTPS).")
@@ -70,6 +71,21 @@ def backfill_games_command(dry_run: bool, since: str | None):
         f"GAMES backfill: games={result.files} inserted={result.inserted} "
         f"skipped={result.skipped} date_min={result.date_min} date_max={result.date_max} "
         f"dry_run={result.dry_run}"
+    )
+
+
+@ingest_cli.command("normalize-games-date")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually update.",
+)
+def normalize_games_date_command(dry_run: bool):
+    """One-time: normalize GAMES.Date (mixed ISO + US m/d/yy) to ISO YYYY-MM-DD."""
+    engine = get_engine()
+    result = normalize_dates(engine, dry_run=dry_run)
+    click.echo(
+        f"GAMES.Date normalize: scanned={result['scanned']} would_change={result['would_change']} "
+        f"unparseable={result['unparseable']} dry_run={dry_run}"
     )
 
 
