@@ -28,3 +28,13 @@ def register_cli(server):
         db.session.add(user)
         db.session.commit()
         click.echo(f"Created {role} {email} (id={user.id}).")
+
+    @server.cli.command("rebuild-precalc")
+    @click.option("--module", default="hitting", type=click.Choice(["hitting"]),
+                  help="Which precalc family to rebuild (only hitting so far).")
+    def rebuild_precalc(module):
+        """Rebuild the precalc rollup tables from CAPS."""
+        from app.data import precalc
+        from app.db import get_engine
+        n = precalc.rebuild_hitting(get_engine())
+        click.echo(f"rebuilt {module}: {n} rows")
