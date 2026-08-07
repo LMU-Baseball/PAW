@@ -150,25 +150,60 @@ def test_video_source_is_caps_only():
 
 
 def test_parity_caps_matches_warehouse_oracle(sample):
-    """CAPS output == the old warehouse path, row-for-row, for each subject.
+    """CAPS output == the old warehouse path, per pitch AND value-for-value.
 
-    The oracle SQL below is the pre-migration query; it is deliberately the
-    LAST warehouse dependency in the video tests and is deleted in Phase 3
-    together with tm_*/vw_pitch_video.
+    The migration swapped the VALUE source (GAMES vs the fact/view), so this
+    checks the displayed metadata per pitch_uid -- not merely which pitches came
+    back. The oracle reproduces the pre-migration query faithfully: it unions
+    the SAME sibling id list pitch_video_df uses (via video._sibling_ids), so
+    the two are truly comparable and the sibling-union path is exercised. This
+    oracle is the LAST warehouse dependency in the video tests; it is deleted in
+    Phase 3 together with tm_*/vw_pitch_video.
     """
-    for subj_col, subj_kw, sib_val in [
-        ("batter_tm_id", "batter_id", sample["batter_tm_id"]),
-        ("pitcher_tm_id", "pitcher_id", sample["pitcher_tm_id"]),
-        ("catcher_tm_id", "catcher_id", sample["catcher_tm_id"]),
+    fact_col = {"BatterId": "batter_tm_id", "PitcherId": "pitcher_tm_id",
+                "CatcherId": "catcher_tm_id"}
+    for subj_col, subj_kw, subj_val in [
+        ("BatterId", "batter_id", sample["batter_tm_id"]),
+        ("PitcherId", "pitcher_id", sample["pitcher_tm_id"]),
+        ("CatcherId", "catcher_id", sample["catcher_tm_id"]),
     ]:
-        oracle_uids = set(query_df(
+        col, sib = video._sibling_ids(
+            batter_id=subj_val if subj_kw == "batter_id" else None,
+            pitcher_id=subj_val if subj_kw == "pitcher_id" else None,
+            catcher_id=subj_val if subj_kw == "catcher_id" else None)
+        assert col == subj_col
+        sph = ", ".join(f":s{i}" for i in range(len(sib)))
+        params = {f"s{i}": s for i, s in enumerate(sib)}
+        params["g"] = sample["game_id"]
+        oracle = query_df(
             f"""
-            SELECT DISTINCT v.pitch_uid
+            SELECT v.pitch_uid, v.pitch_no, v.inning, v.balls, v.strikes,
+                   v.tagged_pitch_type, f.rel_speed, f.izt_zone
               FROM vw_pitch_video v
               JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
-             WHERE f.game_id = :g AND f.{subj_col} = :s
+             WHERE f.game_id = :g AND f.{fact_col[subj_col]} IN ({sph})
             """,
-            {"g": sample["game_id"], "s": sib_val},
-        )["pitch_uid"])
-        new_df = video.pitch_video_df(sample["game_id"], **{subj_kw: sib_val})
-        assert set(new_df["pitch_uid"]) == oracle_uids
+            params,
+        ).drop_duplicates("pitch_uid").set_index("pitch_uid")
+        new_df = video.pitch_video_df(
+            sample["game_id"], **{subj_kw: subj_val}).set_index("pitch_uid")
+
+        # Same pitches came back...
+        assert set(new_df.index) == set(oracle.index)
+        assert len(oracle.index)  # sanity: the sample actually has video
+        # ...and the DISPLAYED values agree (GAMES value source == fact/view).
+        for uid in oracle.index:
+            o, n = oracle.loc[uid], new_df.loc[uid]
+            assert int(n["Pitch"]) == int(o["pitch_no"])
+            assert int(n["Inn"]) == int(o["inning"])
+            assert n["Count"] == f"{int(o['balls'])}-{int(o['strikes'])}"
+            nt, ot = n["Type"], o["tagged_pitch_type"]
+            assert (pd.isna(nt) and pd.isna(ot)) or nt == ot
+            z = o["izt_zone"]
+            expected_zone = "—" if z is None or (isinstance(z, float) and pd.isna(z)) else str(z)
+            assert n["Zone"] == expected_zone
+            rs = o["rel_speed"]
+            if pd.isna(rs):
+                assert n["Velo"] == "—"
+            else:
+                assert n["Velo"] != "—" and abs(float(n["Velo"]) - float(rs)) < 0.06

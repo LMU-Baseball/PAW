@@ -116,6 +116,8 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
     if not gids:
         return pd.DataFrame(columns=_ALL_COLS)
     subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)
+    if not sib:  # resolvers currently always return >=1; guard the IN () trap defensively
+        return pd.DataFrame(columns=_ALL_COLS)
 
     gph = ", ".join(f":g{i}" for i in range(len(gids)))
     sph = ", ".join(f":s{i}" for i in range(len(sib)))
