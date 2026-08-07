@@ -11,20 +11,21 @@ from app.db import query_df
 def sample():
     """A (game_id, pitcher_tm_id, batter_tm_id, catcher_tm_id) that has video.
 
-    pitcher_tm_id/catcher_tm_id are the RAW trackman ids (== GAMES.PitcherId/
-    GAMES.CatcherId, what the pitching/catching dashboards+report pass
-    post-cutover) -- NOT the warehouse surrogate f.pitcher_id/f.catcher_id,
-    which video._sibling_ids no longer accepts for either subject (see
-    test_sibling_ids_pitcher_uses_raw_column_and_pitching_caps and
-    test_sibling_ids_catcher_uses_raw_column_and_catching_caps below).
+    Sourced from CAPS (video_clips joined to GAMES on PitchUID). The three ids
+    are RAW trackman ids (== GAMES.PitcherId/BatterId/CatcherId, what the
+    dashboards+report pass post-cutover); the `_tm_id` dict keys are kept only
+    to avoid churning every consuming test. Deliberately warehouse-free -- the
+    only remaining tm_* dependency in this file is the Phase-3 parity oracle in
+    test_parity_caps_matches_warehouse_oracle.
     """
     row = query_df(
         """
-        SELECT f.game_id, f.pitcher_tm_id, f.batter_tm_id, f.catcher_tm_id
-          FROM vw_pitch_video v
-          JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
-         WHERE f.catcher_tm_id IS NOT NULL AND f.batter_tm_id IS NOT NULL
-           AND f.pitcher_tm_id IS NOT NULL
+        SELECT g.GameID AS game_id, g.PitcherId AS pitcher_tm_id,
+               g.BatterId AS batter_tm_id, g.CatcherId AS catcher_tm_id
+          FROM video_clips v
+          JOIN GAMES g ON g.PitchUID = v.pitch_uid
+         WHERE g.CatcherId IS NOT NULL AND g.BatterId IS NOT NULL
+           AND g.PitcherId IS NOT NULL
          LIMIT 1
         """
     ).iloc[0]
