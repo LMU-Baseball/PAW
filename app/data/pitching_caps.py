@@ -262,3 +262,189 @@ def report_data_version(pitcher_id) -> str:
         return "none"
     v = df["game_date"].max()
     return "none" if v is None or pd.isna(v) else str(v)
+
+
+# ======================= IDENTITY + ROSTER ==================================
+#
+# Pitcher identity here is RAW GAMES.PitcherId (== a player's trackman_id),
+# unlike pitching.py's warehouse surrogate pitcher_id. GAMES.Pitcher is
+# verified live as "Last, First" (e.g. "Behrens, Adam") -- the same format
+# pitching.wh_lmu_pitchers/pitchers_for_game build from tm_player, so
+# lmu_pitchers/pitchers_for_game read GAMES.Pitcher as-is. pitching.py's
+# pitcher_name, however, builds "First Last" from tm_player, so
+# pitcher_name() here must split "Last, First" -> "First Last" to match.
+
+# Shared trailing-~12-month window (anchored to the newest LMU GAMES date, not
+# today's date -- see hitting_caps._RECENT_WINDOW_CLAUSE for the same
+# rationale: during the offseason an anchor on "today" would empty the list).
+# Scopes lmu_pitchers() to current pitchers instead of GAMES's full history
+# back to 2022.
+_RECENT_WINDOW_CLAUSE = """Date >= (
+               SELECT DATE_FORMAT(
+                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
+                        '%Y-%m-%d')
+                 FROM GAMES
+                WHERE PitcherTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+             )"""
+
+
+def lmu_pitchers() -> pd.DataFrame:
+    """One row per LMU pitcher (name deduped; canonical id = most-tracked id
+    within the window), scoped to a ~12-month recent-data window.
+
+    Mirrors pitching.wh_lmu_pitchers's dedup logic, but over GAMES/PitcherId
+    instead of fact_tm_game_pitch/pitcher_id -- windowed for the same reason
+    hitting_caps.lmu_hitters is: GAMES holds full CAPS history back to 2022,
+    so an unscoped version would surface retired alumni the warehouse
+    (current-season-only) never has.
+    """
+    df = query_df(
+        f"""
+        SELECT PitcherId, Pitcher FROM (
+          SELECT PitcherId, Pitcher,
+                 ROW_NUMBER() OVER (PARTITION BY Pitcher
+                                    ORDER BY COUNT(*) DESC, PitcherId) AS rn
+            FROM GAMES
+           WHERE PitcherTeam = :team AND PitcherId IS NOT NULL
+             AND {_RECENT_WINDOW_CLAUSE}
+           GROUP BY PitcherId, Pitcher
+        ) t WHERE rn = 1 ORDER BY Pitcher
+        """,
+        {"team": LMU_PITCHER_TEAM},
+    )
+    if not df.empty:
+        df["PitcherId"] = df["PitcherId"].astype(int)
+    return df
+
+
+def pitcher_name(pitcher_id) -> str:
+    """"First Last", matching pitching.pitcher_name's format exactly (built
+    from tm_player there; derived here by splitting GAMES.Pitcher's
+    "Last, First")."""
+    df = query_df(
+        "SELECT Pitcher FROM GAMES WHERE PitcherId = :p LIMIT 1",
+        {"p": int(pitcher_id)},
+    )
+    if df.empty:
+        return f"Pitcher {pitcher_id}"
+    raw = str(df.iloc[0]["Pitcher"])
+    if "," in raw:
+        last, first = (p.strip() for p in raw.split(",", 1))
+        return f"{first} {last}".strip()
+    return raw.strip()
+
+
+def pitcher_tm_id_for(pitcher_id):
+    """Identity: GAMES.PitcherId already IS the raw trackman id. Kept for API
+    compat with the report/dashboard's role-gating code."""
+    return int(pitcher_id)
+
+
+def pitcher_profile(pitcher_id) -> dict:
+    """Name + throws (from GAMES) + jersey/photo (roster_media, by raw id
+    directly -- no pitcher_tm_id_for mapping needed, unlike the oracle)."""
+    from app.data import roster_media
+    name = pitcher_name(pitcher_id)
+    thr = query_df(
+        "SELECT PitcherThrows FROM GAMES WHERE PitcherId = :p "
+        "AND PitcherThrows IS NOT NULL LIMIT 1",
+        {"p": int(pitcher_id)},
+    )
+    throws = "" if thr.empty else str(thr.iloc[0]["PitcherThrows"])
+    media = roster_media.player_media(int(pitcher_id))
+    return {"name": name, "class_year": "", "position": "",
+            "throws": throws, "jersey": media.get("jersey", ""),
+            "photo": media.get("photo_url", "")}
+
+
+def games_for_pitcher(pitcher_id, start=None, end=None) -> pd.DataFrame:
+    """A pitcher's outings, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'.
+    Optional start/end (inclusive) bound game_date. Sibling-id union, matching
+    pitching.games_for_pitcher's shape/format exactly.
+
+    Restricted to numeric GameIDs (see the REGEXP filter below): GAMES also
+    holds pre-CAPS-migration scrimmage rows under composite string GameIDs
+    (e.g. "20241019-LoyolaMarymount-1", verified live back to 2024 for a real
+    LMU pitcher) that predate the warehouse's synced season. Excluding them
+    conveniently reproduces the oracle's season boundary exactly (verified:
+    unbounded output is byte-identical to pitching.games_for_pitcher's for a
+    real fixture), not just a defensive int-cast guard.
+    """
+    ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
+    date_clause = ""
+    if start is not None and end is not None:
+        date_clause = " AND Date BETWEEN :start AND :end"
+        idp["start"] = str(start)
+        idp["end"] = str(end)
+    df = query_df(
+        f"""
+        SELECT DISTINCT GameID AS game_id, Date AS game_date,
+               HomeTeam AS home_team, AwayTeam AS away_team,
+               HomeTeamForeignID AS home_team_id
+          FROM GAMES
+         WHERE PitcherId IN ({ph}) AND GameID REGEXP '^[0-9]+$'{date_clause}
+        """,
+        idp,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
+    # GameID is stored as text in GAMES; pre-CAPS-migration scrimmage rows use
+    # composite string ids (e.g. "20241019-LoyolaMarymount-1") that predate the
+    # numeric GameID convention -- excluded above via REGEXP so the int-cast
+    # below never blows up on a real pitcher's older history (verified live:
+    # this raw pitcher id has 38 such legacy rows going back to 2024). Numeric
+    # ids still sort in pandas (not SQL ORDER BY, which would be lexicographic).
+    df["game_id"] = df["game_id"].astype(int)
+    df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
+    lmu_home = df["home_team_id"] == LMU_TEAM_ID
+    opp = df["away_team"].where(lmu_home, df["home_team"])
+    loc = pd.Series("vs", index=df.index).where(lmu_home, "@")
+    df["GameLabel"] = (df["game_date"].astype(str) + " " + loc + " " + opp.fillna("?"))
+    return df[["game_id", "game_date", "GameLabel"]].reset_index(drop=True)
+
+
+def pitchers_for_game(game_id, sort: str = "pitch") -> pd.DataFrame:
+    """LMU pitchers who appeared in a game (reimplements vw_game_pitchers
+    directly over GAMES, already filtered to PitcherTeam='LOY_LIO' -- no
+    opponent-exclusion join needed since GAMES rows carry pitcher_team
+    per-pitch, unlike the oracle's separate view + fact join).
+
+    `sort`: "pitch" (default) orders by first pitch thrown (MIN(PitchNo));
+    "alpha" orders by display_name. Anything else is treated as "pitch".
+    """
+    order_by = (
+        "Pitcher" if sort == "alpha" else
+        "(SELECT MIN(g2.PitchNo) FROM GAMES g2 "
+        " WHERE g2.GameID = :gid AND g2.PitcherId = g.PitcherId)"
+    )
+    return query_df(
+        f"""
+        SELECT DISTINCT GameID AS game_id, PitcherId AS player_id,
+               Pitcher AS display_name
+          FROM GAMES g
+         WHERE GameID = :gid AND PitcherTeam = :lmu
+         ORDER BY {order_by}
+        """,
+        {"gid": int(game_id), "lmu": LMU_PITCHER_TEAM},
+    )
+
+
+def recent_games(limit: int = 25) -> pd.DataFrame:
+    """LMU games (home or away), newest first, for the report picker.
+    `GAMES` has no season_label column, so it's derived via `_season_label`."""
+    df = query_df(
+        """
+        SELECT DISTINCT GameID AS game_id, Date AS game_date,
+               GameType AS game_type, HomeTeam AS home_team, AwayTeam AS away_team
+          FROM GAMES
+         WHERE HomeTeamForeignID = :lmu OR AwayTeamForeignID = :lmu
+         ORDER BY Date DESC, GameID DESC
+         LIMIT :lim
+        """,
+        {"lmu": LMU_TEAM_ID, "lim": limit},
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["game_id", "game_date", "season_label",
+                                      "game_type", "home_team", "away_team"])
+    df["season_label"] = df["game_date"].apply(_season_label)
+    return df[["game_id", "game_date", "season_label", "game_type", "home_team", "away_team"]]

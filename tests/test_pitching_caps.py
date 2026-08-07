@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from app.db import query_df
 from app.data import pitching, pitching_caps
 
 # Behrens, Adam: warehouse surrogate id 6 -> raw trackman id 823008, game_id 315
@@ -233,3 +234,131 @@ def test_report_data_version_matches_warehouse_max_date():
 
 def test_report_data_version_none_for_unknown_pitcher():
     assert pitching_caps.report_data_version(999999999) == "none"
+
+
+# --------------------------- identity + roster -----------------------------
+#
+# GAMES.Pitcher is verified live as "Last, First" (e.g. "Behrens, Adam"), the
+# same format pitching.wh_lmu_pitchers/pitchers_for_game build from tm_player.
+# pitching.pitcher_name, though, builds "First Last" -- so
+# pitching_caps.pitcher_name must split "Last, First" -> "First Last" while
+# pitching_caps.lmu_pitchers/pitchers_for_game read GAMES.Pitcher as-is.
+
+def test_pitcher_name_matches_warehouse_first_last_format():
+    old = pitching.pitcher_name(SURROGATE_PID)
+    new = pitching_caps.pitcher_name(RAW_PID)
+    assert new == old == "Adam Behrens"
+
+
+def test_pitcher_name_unknown_id_placeholder():
+    assert pitching_caps.pitcher_name(999999999) == "Pitcher 999999999"
+
+
+def test_pitcher_tm_id_for_is_identity():
+    assert pitching_caps.pitcher_tm_id_for(RAW_PID) == RAW_PID
+
+
+def test_pitcher_profile_matches_warehouse():
+    old = pitching.pitcher_profile(SURROGATE_PID)
+    new = pitching_caps.pitcher_profile(RAW_PID)
+    assert new["name"] == old["name"] == "Adam Behrens"
+    assert new["throws"] == old["throws"]
+    assert new["jersey"] == old["jersey"]
+    assert new["photo"] == old["photo"]
+    assert new["class_year"] == old["class_year"] == ""
+    assert new["position"] == old["position"] == ""
+
+
+def test_lmu_pitchers_matches_warehouse():
+    # Superset + window-bound, mirroring hitting_caps.lmu_hitters's parity
+    # test: GAMES holds full CAPS history back to 2022 while the warehouse
+    # oracle (fact_tm_game_pitch) only covers the current synced season, so
+    # an unscoped caps query would leak retired alumni. lmu_pitchers windows
+    # to the trailing ~12 months (anchored to the newest GAMES date).
+    old = pitching.wh_lmu_pitchers()
+    new = pitching_caps.lmu_pitchers()
+
+    # 1. SUPERSET: every current-season warehouse pitcher is present by name.
+    assert set(old["Pitcher"]) <= set(new["Pitcher"])
+
+    # 2. WINDOW BOUND: scoping is doing real work.
+    all_time = query_df(
+        "SELECT COUNT(DISTINCT Pitcher) n FROM GAMES "
+        "WHERE PitcherTeam = :t AND PitcherId IS NOT NULL",
+        {"t": pitching_caps.LMU_PITCHER_TEAM},
+    ).iloc[0]["n"]
+    assert len(new) < all_time
+
+    # 3. canonical-id sibling check: whichever raw id the warehouse's chosen
+    # surrogate id maps to must be a sibling of whatever id lmu_pitchers
+    # picked as canonical for that name (both resolve to the same union via
+    # _sibling_pitcher_ids downstream, so the specific "most-tracked" id is
+    # interchangeable).
+    new_by_name = dict(zip(new["Pitcher"], new["PitcherId"]))
+    for _, row in old.iterrows():
+        raw = pitching.pitcher_tm_id_for(int(row["PitcherId"]))
+        siblings = pitching_caps._sibling_pitcher_ids(new_by_name[row["Pitcher"]])
+        assert raw in siblings
+
+
+def test_lmu_pitchers_columns():
+    df = pitching_caps.lmu_pitchers()
+    assert list(df.columns) == ["PitcherId", "Pitcher"]
+
+
+def test_games_for_pitcher_unbounded_matches_labels():
+    # GAMES carries this raw id's rows back to 2024 via pre-CAPS-migration
+    # composite string GameIDs (e.g. "20241019-LoyolaMarymount-1") that
+    # games_for_pitcher excludes via a numeric-GameID filter (both to avoid
+    # crashing on the int-cast and because that filter happens to coincide
+    # exactly with the warehouse oracle's synced-season boundary) -- so this
+    # is real equality, not a superset, even unbounded.
+    old = (pitching.games_for_pitcher(SURROGATE_PID)[["game_id", "GameLabel"]]
+           .sort_values("game_id").reset_index(drop=True))
+    new = (pitching_caps.games_for_pitcher(RAW_PID)[["game_id", "GameLabel"]]
+           .sort_values("game_id").reset_index(drop=True))
+    pd.testing.assert_frame_equal(new, old, check_dtype=False)
+
+
+def test_games_for_pitcher_date_range_filters():
+    # Real, exact parity (bridging the data-coverage gap above): bounded to
+    # the oracle's own outing span, both sides see the same games, order-
+    # independent like hitting's test_games_for_batter_matches_labels (the
+    # oracle has no secondary ORDER BY, so same-date tie order is DB-planner
+    # incidental, not a real contract).
+    games = pitching.games_for_pitcher(SURROGATE_PID)
+    start, end = games["game_date"].min(), games["game_date"].max()
+    old = pitching.games_for_pitcher(SURROGATE_PID, start, end)[["game_id", "GameLabel"]].copy()
+    new = pitching_caps.games_for_pitcher(RAW_PID, start, end)[["game_id", "GameLabel"]].copy()
+    old["game_id"] = old["game_id"].astype(int)
+    new["game_id"] = new["game_id"].astype(int)
+    old = old.sort_values("game_id").reset_index(drop=True)
+    new = new.sort_values("game_id").reset_index(drop=True)
+    pd.testing.assert_frame_equal(new, old, check_dtype=False)
+
+
+def test_pitchers_for_game_matches_warehouse_pitch_order():
+    old = pitching.pitchers_for_game(GAME_ID, "pitch")
+    new = pitching_caps.pitchers_for_game(GAME_ID, "pitch")
+    assert list(new["display_name"]) == list(old["display_name"])
+    old_raw_ids = [pitching.pitcher_tm_id_for(int(pid)) for pid in old["player_id"]]
+    assert list(new["player_id"].astype(int)) == old_raw_ids
+
+
+def test_pitchers_for_game_alpha_sort():
+    old = pitching.pitchers_for_game(GAME_ID, "alpha")
+    new = pitching_caps.pitchers_for_game(GAME_ID, "alpha")
+    assert list(new["display_name"]) == list(old["display_name"])
+    names = list(new["display_name"])
+    assert names == sorted(names)
+
+
+def test_recent_games_matches_warehouse():
+    old = pitching.recent_games(10)
+    new = pitching_caps.recent_games(10)
+    assert len(new) == len(old) == 10
+    assert list(new["game_id"].astype(int)) == list(old["game_id"].astype(int))
+    assert [str(d) for d in new["game_date"]] == [str(d) for d in old["game_date"]]
+    assert list(new["season_label"]) == list(old["season_label"])
+    assert list(new["home_team"]) == list(old["home_team"])
+    assert list(new["away_team"]) == list(old["away_team"])
