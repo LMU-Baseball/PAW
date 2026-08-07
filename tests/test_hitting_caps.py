@@ -5,6 +5,14 @@ from app.data.hitting import game_batting_line, swing_decisions_by_zone, plate_d
 
 WADAS = 806253
 
+# Returning veteran hitter with BOTH current/backfilled numeric GameIDs and
+# legacy pre-2025 composite-string GameIDs (e.g.
+# "20241023-LoyolaMarymount-Private-1") in GAMES -- verified live. Before the
+# REGEXP '^[0-9]+$' guard, games_for_batter/last_n_pas crashed for this
+# hitter with `ValueError: invalid literal for int() with base 10` the
+# instant they tried `.astype(int)` / `int(...)` on a composite GameID.
+VETERAN = 801956  # "Danos, Luca"
+
 
 def _first_game(bid):
     g = hitting_wh.wh_games_for_batter(bid)
@@ -178,6 +186,53 @@ def test_bip_points_matches_warehouse_math():
     pd.testing.assert_frame_equal(
         new[cols].reset_index(drop=True), old[cols].reset_index(drop=True),
         check_dtype=False)
+
+
+def test_veteran_fixture_has_both_numeric_and_legacy_game_ids():
+    # Sanity-check the fixture itself: guards against DB drift silently
+    # making the regression tests below meaningless (e.g. if the legacy rows
+    # were ever purged, the crash they'd otherwise trigger just wouldn't
+    # happen and the tests would pass for the wrong reason).
+    df = query_df(
+        "SELECT GameID FROM GAMES WHERE BatterId = :b", {"b": VETERAN})
+    ids = df["GameID"].astype(str)
+    assert (ids.str.match(r"^[0-9]+$")).any(), "expected some numeric GameIDs"
+    assert (~ids.str.match(r"^[0-9]+$")).any(), "expected some legacy composite GameIDs"
+
+
+def test_games_for_batter_returns_only_numeric_game_ids_for_veteran():
+    # RED before the fix: GAMES holds legacy composite-string GameIDs (e.g.
+    # "20241023-LoyolaMarymount-Private-1") for this veteran alongside his
+    # current numeric ones. Without the REGEXP '^[0-9]+$' guard in the SQL,
+    # `df["game_id"] = df["game_id"].astype(int)` inside games_for_batter
+    # raises ValueError the moment a composite id comes back from the query
+    # -- this crashed the live hitting dashboard for any returning veteran.
+    df = hitting_caps.games_for_batter(VETERAN)
+    assert not df.empty
+    # The line below is exactly what games_for_batter itself executes
+    # internally; if it didn't raise, every game_id must already be
+    # int-castable -- i.e. no composite legacy id leaked through.
+    df["game_id"].astype(int)
+
+
+def test_games_for_batter_sql_guards_non_numeric_game_ids():
+    # Cheaper, DB-independent companion to the regression test above: pin
+    # down the actual mechanism of the fix (a SQL-level REGEXP filter),
+    # mirroring pitching_caps.games_for_pitcher's fix for the identical bug.
+    import inspect
+    src = inspect.getsource(hitting_caps.games_for_batter)
+    assert "GameID REGEXP '^[0-9]+$'" in src
+
+
+def test_last_n_pas_does_not_crash_for_veteran_with_legacy_game_ids():
+    # RED before the fix: last_n_pas's `all_df["GameID"]` (selected via
+    # _PITCH_COLS, unfiltered) carries the same composite legacy GameIDs
+    # through to `int(g)` inside the mask comprehension, crashing with the
+    # identical ValueError as games_for_batter above -- CAST(...AS UNSIGNED)
+    # in the ORDER BY only truncates, it doesn't protect this later int()
+    # call on the raw column.
+    df = hitting_caps.last_n_pas(VETERAN, 27)
+    assert not df.empty
 
 
 def test_last_n_pas_matches_warehouse_keys():

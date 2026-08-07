@@ -74,13 +74,26 @@ def range_pitches(batter_id, start, end):
 
 
 def games_for_batter(batter_id, start=None, end=None):
+    """A batter's games, newest first.
+
+    Restricted to numeric GameIDs (see the REGEXP filter below, mirroring
+    pitching_caps.games_for_pitcher): GAMES also holds pre-CAPS-migration
+    scrimmage rows under composite string GameIDs (e.g.
+    "20241023-LoyolaMarymount-Private-1") for RETURNING VETERAN hitters who
+    have both current/backfilled numeric-GameID games and legacy pre-2025
+    games in GAMES. Excluding those composite ids keeps the int-cast below
+    safe -- without the filter, a real veteran hitter (verified live:
+    BatterId 801956, "Danos, Luca") crashes here with
+    `ValueError: invalid literal for int() with base 10`.
+    """
     ph, idp = _in_clause(_sibling_ids(batter_id))
     date_clause = ""
     if start is not None and end is not None:
         date_clause = " AND Date BETWEEN :start AND :end"; idp["start"]=str(start); idp["end"]=str(end)
     df = query_df(
         f"SELECT DISTINCT GameID AS game_id, Date AS game_date, HomeTeam, AwayTeam, "
-        f"HomeTeamForeignID FROM GAMES WHERE BatterId IN ({ph}){date_clause}", idp)
+        f"HomeTeamForeignID FROM GAMES WHERE BatterId IN ({ph}) "
+        f"AND GameID REGEXP '^[0-9]+$'{date_clause}", idp)
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
     df["game_id"] = df["game_id"].astype(int)
@@ -251,6 +264,17 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     UNSIGNED), not the lexicographic default -- lexicographic order would
     mis-rank extra innings (e.g. "10" before "2"). Mirrors wh_last_n_pas's
     date/game/inning/PA ordering over the warehouse's integer columns.
+
+    Both queries below are restricted to numeric GameIDs (see the REGEXP
+    filter, mirroring games_for_batter/pitching_caps.games_for_pitcher):
+    GAMES also holds pre-CAPS-migration scrimmage rows under composite
+    string GameIDs (e.g. "20241023-LoyolaMarymount-Private-1") for RETURNING
+    VETERAN hitters. Without this filter the `int(g)` calls below crash for
+    such a hitter -- CAST(... AS UNSIGNED) in the ORDER BY merely truncates
+    the composite ids rather than crashing, but the raw (uncast) GameID
+    still flows through to `pas`/`all_df` and into the mask comprehension,
+    where the plain `int()` call raises ValueError (verified live: BatterId
+    801956, "Danos, Luca").
     """
     ph, idp = _in_clause(_sibling_ids(batter_id))
     pas = query_df(
@@ -258,7 +282,7 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
         SELECT d.GameID, d.Inning, d.PAofInning FROM (
           SELECT DISTINCT GameID, Inning, PAofInning, Date
             FROM GAMES
-           WHERE BatterId IN ({ph})
+           WHERE BatterId IN ({ph}) AND GameID REGEXP '^[0-9]+$'
         ) d
         ORDER BY d.Date DESC, CAST(d.GameID AS UNSIGNED) DESC,
                  CAST(d.Inning AS UNSIGNED) DESC, CAST(d.PAofInning AS UNSIGNED) DESC
@@ -268,6 +292,7 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     )
     all_df = _finish(query_df(
         f"SELECT {_PITCH_COLS} FROM GAMES WHERE BatterId IN ({ph}) "
+        f"AND GameID REGEXP '^[0-9]+$' "
         f"ORDER BY GameID, PitchNo", idp,
     ))
     if all_df.empty or pas.empty:
