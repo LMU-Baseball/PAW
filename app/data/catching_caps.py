@@ -30,7 +30,7 @@ _CATCHER_SELECT = """
     BatterSide AS batter_side, PitcherThrows AS pitcher_throws,
     PlayResult AS play_result, PopTime AS pop_time, ExchangeTime AS exchange_time,
     ThrowSpeed AS throw_speed, CatcherId AS catcher_id, GameID AS game_id,
-    Date AS game_date
+    Date AS game_date, Inning AS inning, Pitcher AS pitcher_name
 """
 
 

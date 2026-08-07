@@ -235,6 +235,24 @@ def test_lmu_catchers_excludes_ghost_with_only_legacy_games():
     assert catching_caps.games_for_catcher(GHOST_ID).empty
 
 
+# ------------------- caught-stealing Inn/Pitcher regression -----------------
+#
+# _CATCHER_SELECT didn't alias GAMES.Inning/GAMES.Pitcher, but the caught-
+# stealing tab renders per-attempt "Inn"/"Pitcher" columns via
+# ev.get("inning")/ev.get("pitcher_name"). The oracle's `SELECT f.*` carried
+# those fact_tm_game_pitch columns along for free; the caps SELECT dropped
+# them silently (no crash -- .get() on a missing column just renders blank).
+
+def test_caught_stealing_events_have_inning_and_pitcher_name():
+    new = catching_caps.game_pitches_for(GAME_ID, RAW_CID)
+    ev = catching.caught_stealing_events(new)
+    assert not ev.empty  # fixture game has 4 CS attempts
+    assert "inning" in ev.columns
+    assert "pitcher_name" in ev.columns
+    assert ev["inning"].notna().any()
+    assert ev["pitcher_name"].notna().any()
+
+
 def test_lmu_catchers_all_have_numeric_game_id_rows():
     # No-ghost property, as a single SQL set-membership check rather than N
     # per-id queries: every id lmu_catchers lists must have at least one
