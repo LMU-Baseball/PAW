@@ -121,13 +121,18 @@ def game_pitches_for(game_id, pitcher_id) -> pd.DataFrame:
 
 
 def range_pitches_for(pitcher_id, start, end) -> pd.DataFrame:
-    """All of a pitcher's pitches across in-range games (sibling-id union)."""
+    """All of a pitcher's pitches across in-range games (sibling-id union).
+
+    Guarded by `_NUMERIC_GAME_ID_CLAUSE` so a custom pre-2025 range can't pull
+    in pre-CAPS-migration composite-GameID scrimmage rows (see
+    `games_for_pitcher`); in-season ranges are all-numeric and unaffected.
+    """
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
     idp["start"] = str(start)
     idp["end"] = str(end)
     df = query_df(
         f"SELECT {_PITCH_SELECT} FROM GAMES WHERE PitcherId IN ({ph}) "
-        f"AND Date BETWEEN :start AND :end "
+        f"AND Date BETWEEN :start AND :end AND {_NUMERIC_GAME_ID_CLAUSE} "
         f"ORDER BY GameID, PitchNo",
         idp,
     )
@@ -192,18 +197,16 @@ def game_context(game_id) -> dict:
 # but not currently "active" would still show up here, where the warehouse
 # view would have excluded them. No current fixture pitcher is affected.
 
-_VELO_APPEARANCE_COLS = [
-    "game_id", "game_date", "game_type", "home_team_name", "away_team_name",
-    "appearance_avg_velo", "appearance_max_velo", "appearance_min_velo",
-    "pitch_count",
-]
-
-
 def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
     """Per-appearance (game) Fastball/Sinker velo aggregates, sibling-id union.
 
     Mirrors the warehouse's vw_pitcher_appearance_velo. Adds `season_label`
     (derived, since GAMES has none) for velo_trend's season-partitioned LAG.
+
+    Restricted to numeric GameIDs (see `_NUMERIC_GAME_ID_CLAUSE`) so
+    `recent_outings`/`velo_trend` don't surface pre-CAPS-migration composite-
+    GameID scrimmages/older seasons the warehouse oracle never showed --
+    same season-boundary reasoning as `games_for_pitcher`.
     """
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
     df = query_df(
@@ -216,6 +219,7 @@ def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
                COUNT(*) AS pitch_count
           FROM GAMES
          WHERE PitcherId IN ({ph}) AND TaggedPitchType IN ('Fastball', 'Sinker')
+           AND {_NUMERIC_GAME_ID_CLAUSE}
          GROUP BY GameID, Date, GameType, HomeTeam, AwayTeam
         """,
         idp,
