@@ -276,3 +276,32 @@ def test_compute_season_rollup_matches_current_compute():
         assert r[k] == counts[k], k
     assert r["pa"] >= r["ab"] >= 0
     assert r["h"] >= r["doubles"] + r["triples"] + r["hr"]
+
+
+def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
+    """When a rollup row exists, sidebar_stats returns it as a pure 1-row read
+    (no season load) mapped to the {qab,BA,SLG,OBP} contract."""
+    from app.data import precalc
+    sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
+                "qab_pct": 0.512, "ba": ".321", "obp": ".401", "slg": ".540",
+                "pa": 10, "ab": 9, "h": 3, "doubles": 1, "triples": 0,
+                "hr": 1, "bb": 1, "so": 2}
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b: sentinel)
+    assert hitting_caps.sidebar_stats(WADAS) == {
+        "qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401"}
+    assert hitting_caps.season_qab_rate(WADAS) == 0.512
+    assert hitting_caps.slash_line(WADAS) == {"BA": ".321", "SLG": ".540", "OBP": ".401"}
+
+
+def test_sidebar_stats_falls_back_to_compute_when_missing(monkeypatch):
+    """With no rollup row, the reads fall back to on-the-fly compute (correct,
+    just slower) so correctness never depends on a rebuild having run."""
+    from app.data import precalc
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b: None)
+    out = hitting_caps.sidebar_stats(WADAS)
+    assert set(out) == {"qab", "BA", "SLG", "OBP"}
+    assert out["BA"] != "" and out["OBP"] != ""
+    # matches the compute path directly
+    comp = hitting_caps._compute_season_rollup(WADAS)
+    assert out == {"qab": comp["qab_pct"], "BA": comp["ba"],
+                   "SLG": comp["slg"], "OBP": comp["obp"]}

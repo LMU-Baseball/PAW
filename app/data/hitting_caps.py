@@ -127,21 +127,22 @@ def scoreboard(game_id):
             "game_type": "" if pd.isna(r["GameType"]) else str(r["GameType"])}
 
 
+def _season_rollup(batter_id) -> dict:
+    """Phase 4: read the precalc season rollup (1-row); fall back to on-the-fly
+    compute when the row is absent (pre-rebuild, unbuilt player, or table not
+    yet created) so correctness never depends on a rebuild having run."""
+    from app.data import precalc  # lazy: precalc imports hitting_caps for rebuild
+    row = precalc.read_hitting_season(int(batter_id))
+    return row if row is not None else _compute_season_rollup(batter_id)
+
+
 def season_qab_rate(batter_id) -> float | None:
-    df = season_pitches(batter_id)
-    if df.empty:
-        return None
-    q = qab_frame(df)
-    total = len(q)
-    return round(q["QAB"].sum() / total, 3) if total else None
+    return _season_rollup(batter_id)["qab_pct"]
 
 
 def slash_line(batter_id) -> dict:
-    df = season_pitches(batter_id)
-    if df.empty:
-        return {"BA": "—", "SLG": "—", "OBP": "—"}
-    pas = qab_frame(df)
-    return _slash_from_pas(pas)
+    r = _season_rollup(batter_id)
+    return {"BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 
 def _compute_season_rollup(batter_id) -> dict:
@@ -178,14 +179,10 @@ def _compute_season_rollup(batter_id) -> dict:
 
 
 def sidebar_stats(batter_id):
-    """QAB% + slash line from a single season load (fixes the 3.2s double-load)."""
-    df = season_pitches(batter_id)          # ONE query (+ 1 sibling lookup), not two full loads
-    if df.empty:
-        return {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"}
-    q = qab_frame(df); total = len(q)
-    qab = round(q["QAB"].sum() / total, 3) if total else None
-    slash = _slash_from_pas(q)              # shared slash math
-    return {"qab": qab, **slash}
+    """QAB% + slash line as a single precalc 1-row read (fixes the profiled 3.2s
+    full-season double-load); compute fallback when the rollup row is absent."""
+    r = _season_rollup(batter_id)
+    return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 
 def player_profile(batter_id):
