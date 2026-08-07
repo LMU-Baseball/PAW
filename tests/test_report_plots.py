@@ -1,11 +1,11 @@
 import base64
 import matplotlib.pyplot as plt
-from app.data import pitching as P
+from app.data import pitching_caps as PC
 from app.reports import plots
 
 
 def _df():
-    return P.game_pitches(166, 1)
+    return PC.game_pitches(166, 1000365469)
 
 
 def _is_png_uri(uri):

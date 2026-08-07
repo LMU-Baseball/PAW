@@ -1,14 +1,16 @@
-"""Transforms feeding the one-page pitcher report. Fixture: game 166, pitcher 1
-(live warehouse). Value assertions check invariants/ranges; the LMU-specific
-metrics (ea/pre2k/twok_kill/barrel) are provisional so they're only range-checked."""
+"""Transforms feeding the one-page pitcher report. Fixture: game 166, pitcher
+1000365469 (raw GAMES.PitcherId, via the CAPS layer). Value assertions check
+invariants/ranges; the LMU-specific metrics (ea/pre2k/twok_kill/barrel) are
+provisional so they're only range-checked."""
 import pandas as pd
 from app.data import pitching as P
+from app.data import pitching_caps as PC
 
-GAME_ID, PITCHER_ID = 166, 1
+GAME_ID, PITCHER_ID = 166, 1000365469
 
 
 def _df():
-    return P.game_pitches(GAME_ID, PITCHER_ID)
+    return PC.game_pitches(GAME_ID, PITCHER_ID)
 
 
 def test_pa_count_matches_distinct_inning_pa():
