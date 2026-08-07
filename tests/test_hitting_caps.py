@@ -35,3 +35,24 @@ def test_range_pitches_matches_season_pitch_count():
     old = hitting_wh.wh_season_pitches(WADAS)
     new = hitting_caps.season_pitches(WADAS)
     assert len(new) == len(old)
+
+
+def test_games_for_batter_matches_labels_and_order():
+    old = hitting_wh.wh_games_for_batter(WADAS)[["game_id", "GameLabel"]].reset_index(drop=True)
+    new = hitting_caps.games_for_batter(WADAS)[["game_id", "GameLabel"]].reset_index(drop=True)
+    pd.testing.assert_frame_equal(new, old, check_dtype=False)
+
+
+def test_scoreboard_matches_warehouse():
+    gid = _first_game(WADAS)
+    old = hitting_wh.wh_scoreboard(gid)
+    new = hitting_caps.scoreboard(gid)
+    assert new == old
+
+
+def test_player_profile_matches_warehouse():
+    old = hitting_wh.wh_player_profile(WADAS)
+    new = hitting_caps.player_profile(WADAS)
+    assert new["name"] == old["name"]
+    assert new["bats"] == old["bats"]
+    assert new == old
