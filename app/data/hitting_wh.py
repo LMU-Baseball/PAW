@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from app.db import query_df
-from app.data.hitting import _add_pitch_category, qab_frame
+from app.data.hitting import _add_pitch_category, qab_frame, _slash_from_pas
 from app.data.roster_media import player_media
 
 LMU_TEAM_ID = 78
@@ -199,69 +199,18 @@ def wh_season_qab_rate(batter_tm_id) -> float | None:
     return round(q["QAB"].sum() / total, 3) if total else None
 
 
-_HITS = {"Single", "Double", "Triple", "HomeRun"}
-_TOTAL_BASES = {"Single": 1, "Double": 2, "Triple": 3, "HomeRun": 4}
-_AB_OUTS = {"Out", "Error", "FieldersChoice", "Strikeout"}  # non-hit at-bats
-
-
-def _fmt_avg(v) -> str:
-    """Baseball three-decimal string, leading zero dropped for < 1 (e.g. .326)."""
-    if v is None:
-        return "—"
-    s = f"{v:.3f}"
-    return s[1:] if 0 <= v < 1 else s
-
-
 def wh_slash_line(batter_tm_id) -> dict:
     """Season BA/SLG/OBP computed from warehouse game plate appearances.
 
-    PROVISIONAL definitions (one place to change; confirm with coaches):
-      * one row per PA = last pitch of the PA (via qab_frame).
-      * Walk = KorBB=='Walk'; HBP = last PitchCall=='HitByPitch';
-        Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
-      * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
-      * AB = a completed PA that is not a walk/HBP/sacrifice.
-      * BA = H/AB ; SLG = TotalBases/AB ; OBP = (H+BB+HBP)/(AB+BB+HBP+SF).
-    Returns display strings ("—" when undefined).
+    Slash math lives in the shared `hitting._slash_from_pas` helper (see its
+    docstring for the PROVISIONAL definitions) so this stays byte-identical
+    with `hitting_caps.slash_line`, which sources PAs from GAMES instead.
     """
-    blank = {"BA": "—", "SLG": "—", "OBP": "—"}
     df = wh_season_pitches(batter_tm_id)
     if df.empty:
-        return blank
+        return {"BA": "—", "SLG": "—", "OBP": "—"}
     pas = qab_frame(df)
-    if pas.empty:
-        return blank
-
-    ab = h = tb = bb = hbp = sf = 0
-    for _, r in pas.iterrows():
-        korbb = r.get("KorBB")
-        pr = r.get("PlayResult")
-        pc = r.get("PitchCall")
-        is_walk = korbb == "Walk"
-        is_hbp = pc == "HitByPitch"
-        is_sac = isinstance(pr, str) and pr.startswith("Sac")
-        if is_walk:
-            bb += 1
-            continue
-        if is_hbp:
-            hbp += 1
-            continue
-        if is_sac:
-            sf += 1
-            continue
-        if pr in _HITS:
-            ab += 1
-            h += 1
-            tb += _TOTAL_BASES[pr]
-        elif pr in _AB_OUTS or korbb == "Strikeout":
-            ab += 1
-        # else: undefined/incomplete PA — not counted
-
-    ba = h / ab if ab else None
-    slg = tb / ab if ab else None
-    ob_denom = ab + bb + hbp + sf
-    obp = (h + bb + hbp) / ob_denom if ob_denom else None
-    return {"BA": _fmt_avg(ba), "SLG": _fmt_avg(slg), "OBP": _fmt_avg(obp)}
+    return _slash_from_pas(pas)
 
 
 def _roster_lookup(name_last_first: str) -> tuple[str, str]:

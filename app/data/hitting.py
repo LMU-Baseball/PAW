@@ -308,6 +308,70 @@ def qab_frame(df: pd.DataFrame) -> pd.DataFrame:
     return last
 
 
+_HITS = {"Single", "Double", "Triple", "HomeRun"}
+_TOTAL_BASES = {"Single": 1, "Double": 2, "Triple": 3, "HomeRun": 4}
+_AB_OUTS = {"Out", "Error", "FieldersChoice", "Strikeout"}  # non-hit at-bats
+
+
+def _fmt_avg(v) -> str:
+    """Baseball three-decimal string, leading zero dropped for < 1 (e.g. .326)."""
+    if v is None:
+        return "—"
+    s = f"{v:.3f}"
+    return s[1:] if 0 <= v < 1 else s
+
+
+def _slash_from_pas(pas_df: pd.DataFrame) -> dict:
+    """Season BA/SLG/OBP from a one-row-per-PA frame (qab_frame output).
+
+    Pure function shared by hitting_wh.wh_slash_line and hitting_caps.slash_line
+    so both compute season slash the same way regardless of data source.
+
+    PROVISIONAL definitions (one place to change; confirm with coaches):
+      * one row per PA = last pitch of the PA (via qab_frame).
+      * Walk = KorBB=='Walk'; HBP = last PitchCall=='HitByPitch';
+        Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
+      * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
+      * AB = a completed PA that is not a walk/HBP/sacrifice.
+      * BA = H/AB ; SLG = TotalBases/AB ; OBP = (H+BB+HBP)/(AB+BB+HBP+SF).
+    Returns display strings ("—" when undefined).
+    """
+    blank = {"BA": "—", "SLG": "—", "OBP": "—"}
+    if pas_df.empty:
+        return blank
+
+    ab = h = tb = bb = hbp = sf = 0
+    for _, r in pas_df.iterrows():
+        korbb = r.get("KorBB")
+        pr = r.get("PlayResult")
+        pc = r.get("PitchCall")
+        is_walk = korbb == "Walk"
+        is_hbp = pc == "HitByPitch"
+        is_sac = isinstance(pr, str) and pr.startswith("Sac")
+        if is_walk:
+            bb += 1
+            continue
+        if is_hbp:
+            hbp += 1
+            continue
+        if is_sac:
+            sf += 1
+            continue
+        if pr in _HITS:
+            ab += 1
+            h += 1
+            tb += _TOTAL_BASES[pr]
+        elif pr in _AB_OUTS or korbb == "Strikeout":
+            ab += 1
+        # else: undefined/incomplete PA — not counted
+
+    ba = h / ab if ab else None
+    slg = tb / ab if ab else None
+    ob_denom = ab + bb + hbp + sf
+    obp = (h + bb + hbp) / ob_denom if ob_denom else None
+    return {"BA": _fmt_avg(ba), "SLG": _fmt_avg(slg), "OBP": _fmt_avg(obp)}
+
+
 def season_qab_rate(batter_id: int, since: str = "2025-02-14") -> float | None:
     """Season QAB% = TotalQAB / TotalAB (R `qab` tile), from Date >= `since`."""
     df = query_df(

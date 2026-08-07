@@ -7,7 +7,7 @@ from __future__ import annotations
 import pandas as pd
 from app.db import query_df
 from app.data.hitting_wh import _finish, _in_clause, _roster_lookup   # pure/param helpers, reused
-from app.data.hitting import qab_frame
+from app.data.hitting import qab_frame, _slash_from_pas
 from app.data.roster_media import player_media
 
 LMU_BATTER_TEAM = "LOY_LIO"
@@ -95,6 +95,34 @@ def scoreboard(game_id):
             "loc": "vs" if lmu_home else "@",
             "opp": "" if pd.isna(opp) else str(opp),
             "game_type": "" if pd.isna(r["GameType"]) else str(r["GameType"])}
+
+
+def season_qab_rate(batter_id) -> float | None:
+    df = season_pitches(batter_id)
+    if df.empty:
+        return None
+    q = qab_frame(df)
+    total = len(q)
+    return round(q["QAB"].sum() / total, 3) if total else None
+
+
+def slash_line(batter_id) -> dict:
+    df = season_pitches(batter_id)
+    if df.empty:
+        return {"BA": "—", "SLG": "—", "OBP": "—"}
+    pas = qab_frame(df)
+    return _slash_from_pas(pas)
+
+
+def sidebar_stats(batter_id):
+    """QAB% + slash line from a single season load (fixes the 3.2s double-load)."""
+    df = season_pitches(batter_id)          # ONE query (+ 1 sibling lookup), not two full loads
+    if df.empty:
+        return {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"}
+    q = qab_frame(df); total = len(q)
+    qab = round(q["QAB"].sum() / total, 3) if total else None
+    slash = _slash_from_pas(q)              # shared warehouse slash math
+    return {"qab": qab, **slash}
 
 
 def player_profile(batter_id):

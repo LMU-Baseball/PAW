@@ -76,3 +76,26 @@ def test_player_profile_matches_warehouse():
     assert new["name"] == old["name"]
     assert new["bats"] == old["bats"]
     assert new == old
+
+
+def test_season_qab_rate_matches_warehouse():
+    old = hitting_wh.wh_season_qab_rate(WADAS)
+    new = hitting_caps.season_qab_rate(WADAS)
+    assert new == old
+
+
+def test_slash_line_matches_warehouse():
+    old = hitting_wh.wh_slash_line(WADAS)
+    new = hitting_caps.slash_line(WADAS)
+    assert new == old
+
+
+def test_sidebar_stats_matches_qab_and_slash():
+    qab = hitting_caps.season_qab_rate(WADAS)
+    slash = hitting_caps.slash_line(WADAS)
+    sidebar = hitting_caps.sidebar_stats(WADAS)
+    assert set(sidebar) == {"qab", "BA", "SLG", "OBP"}
+    assert sidebar["qab"] == qab
+    assert sidebar["BA"] == slash["BA"]
+    assert sidebar["SLG"] == slash["SLG"]
+    assert sidebar["OBP"] == slash["OBP"]
