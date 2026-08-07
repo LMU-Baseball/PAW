@@ -6,7 +6,7 @@ and passed in, keeping this module testable in isolation. Ids are batter_tm_id.
 """
 from __future__ import annotations
 
-from app.data import hitting_wh
+from app.data import hitting_caps
 
 
 def resolve_batter(requested_id, *, is_coach: bool, own_trackman_id):
@@ -19,12 +19,12 @@ def resolve_batter(requested_id, *, is_coach: bool, own_trackman_id):
 def hitter_options(*, is_coach: bool, own_trackman_id) -> list[dict]:
     """Dropdown options for the hitter selector (value = batter_tm_id)."""
     if is_coach:
-        df = hitting_wh.wh_lmu_hitters()
+        df = hitting_caps.lmu_hitters()
         return [{"label": str(r.Batter), "value": int(r.BatterId)}
                 for r in df.itertuples()]
     if own_trackman_id is None:
         return []
-    prof = hitting_wh.wh_player_profile(int(own_trackman_id))
+    prof = hitting_caps.player_profile(int(own_trackman_id))
     return [{"label": prof["name"] or str(own_trackman_id),
              "value": int(own_trackman_id)}]
 
@@ -33,6 +33,6 @@ def game_options(batter_tm_id) -> list[dict]:
     """Dropdown options (newest first) for a batter's games (value = game_id)."""
     if batter_tm_id is None:
         return []
-    df = hitting_wh.wh_games_for_batter(int(batter_tm_id))
+    df = hitting_caps.games_for_batter(int(batter_tm_id))
     return [{"label": str(r.GameLabel), "value": int(r.game_id)}
             for r in df.itertuples()]

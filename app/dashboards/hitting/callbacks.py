@@ -7,7 +7,7 @@ import pandas as pd
 from dash import ALL, Input, Output, State, ctx, dcc, html
 from flask_login import current_user
 
-from app.data import hitting_wh
+from app.data import hitting_caps
 from app.data import video as videodata
 from app.data import dev_plans
 from app.dashboards import date_range as dr, notes_ui, video as videotab
@@ -25,7 +25,7 @@ def _resolve_gids(sel):
     if bid is None:
         return []
     if gid == dr.ALL_IN_RANGE:
-        g = hitting_wh.wh_games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
+        g = hitting_caps.games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
         return [int(x) for x in g["game_id"]] if not g.empty else []
     if gid is None:
         return []
@@ -39,11 +39,11 @@ def _load_game_df(store) -> pd.DataFrame:
     if gid == dr.ALL_IN_RANGE:
         if not store.get("start") or not store.get("end"):
             return pd.DataFrame()
-        return hitting_wh.wh_range_pitches(int(store["batter_id"]),
-                                           store["start"], store["end"])
+        return hitting_caps.range_pitches(int(store["batter_id"]),
+                                          store["start"], store["end"])
     if gid is None:
         return pd.DataFrame()
-    return hitting_wh.wh_game_pitches(int(gid), int(store["batter_id"]))
+    return hitting_caps.game_pitches(int(gid), int(store["batter_id"]))
 
 
 def _read_game_df(data_json):
@@ -93,7 +93,7 @@ def register_callbacks(dash_app) -> None:
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
-        g = hitting_wh.wh_games_for_batter(bid) if bid else None
+        g = hitting_caps.games_for_batter(bid) if bid else None
         if g is None or g.empty:
             return no_update, no_update, show
         anchor = str(g["game_date"].max())
@@ -113,7 +113,7 @@ def register_callbacks(dash_app) -> None:
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
         if not bid or not start or not end:
             return [], None
-        g = hitting_wh.wh_games_for_batter(bid, start=start, end=end)
+        g = hitting_caps.games_for_batter(bid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, batter_id=bid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
@@ -130,7 +130,7 @@ def register_callbacks(dash_app) -> None:
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
         if game_id == dr.ALL_IN_RANGE:
-            g = hitting_wh.wh_games_for_batter(bid, start=start, end=end) if bid else None
+            g = hitting_caps.games_for_batter(bid, start=start, end=end) if bid else None
             sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
         else:
             sb = layout.scoreboard(game_id)
@@ -159,16 +159,16 @@ def register_callbacks(dash_app) -> None:
             bid = sel.get("batter_id")
             if bid is None:
                 return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
-            bip = hitting_wh.wh_bip_points(int(bid), _resolve_gids(sel))
+            bip = hitting_caps.bip_points(int(bid), _resolve_gids(sel))
             return balls_in_play.render(bip)
         if tab == "last27":
             sel = sel or {}
             bid = sel.get("batter_id")
             if bid is None:
                 return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
-            last = hitting_wh.wh_last_n_pas(int(bid), 27)
+            last = hitting_caps.last_n_pas(int(bid), 27)
             gids = sorted({int(g) for g in last["GameID"]}) if not last.empty else []
-            bip = hitting_wh.wh_bip_points(int(bid), gids)
+            bip = hitting_caps.bip_points(int(bid), gids)
             if not last.empty and not bip.empty:
                 keys = set(zip(last["GameID"].astype(int), last["Inning"].astype(int),
                                last["PAofInning"].astype(int)))
@@ -183,7 +183,7 @@ def register_callbacks(dash_app) -> None:
                 return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
-                g = hitting_wh.wh_games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
+                g = hitting_caps.games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
                 gids = [int(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})
@@ -236,7 +236,7 @@ def register_callbacks(dash_app) -> None:
         bid = sel.get("batter_id")
         if bid is None:
             return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
-        bip = hitting_wh.wh_bip_points(int(bid), _resolve_gids(sel))
+        bip = hitting_caps.bip_points(int(bid), _resolve_gids(sel))
         if active is not None and not bip.empty:
             bip = bip[bip["hit_type"].isin(active)]
         return balls_in_play.body(bip)

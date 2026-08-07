@@ -64,7 +64,7 @@ def test_resolve_batter_coach_passes_through():
 
 def test_hitter_options_coach_lists_all(monkeypatch):
     from app.dashboards.hitting import selectors
-    monkeypatch.setattr("app.data.hitting_wh.wh_lmu_hitters",
+    monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
                         lambda: pd.DataFrame(
                             [{"Batter": "Doe, John", "BatterId": 1},
                              {"Batter": "Roe, Jane", "BatterId": 2}]))
@@ -74,7 +74,7 @@ def test_hitter_options_coach_lists_all(monkeypatch):
 
 def test_hitter_options_player_is_single_self(monkeypatch):
     from app.dashboards.hitting import selectors
-    monkeypatch.setattr("app.data.hitting_wh.wh_player_profile",
+    monkeypatch.setattr("app.data.hitting_caps.player_profile",
                         lambda b: {"name": "Wadas, Zach", "bats": "Right",
                                    "class_year": "", "position": "", "photo": "",
                                    "jersey": ""})
@@ -341,17 +341,16 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
-    monkeypatch.setattr("app.data.hitting_wh.wh_lmu_hitters",
+    monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
                         lambda: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
-    monkeypatch.setattr("app.data.hitting_wh.wh_games_for_batter",
+    monkeypatch.setattr("app.data.hitting_caps.games_for_batter",
                         lambda b: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
-    monkeypatch.setattr("app.data.hitting_wh.wh_player_profile",
+    monkeypatch.setattr("app.data.hitting_caps.player_profile",
                         lambda b: {"name": "Doe, John", "bats": "Right",
                                    "class_year": "Jr.", "position": "OF",
                                    "photo": "", "jersey": ""})
-    monkeypatch.setattr("app.data.hitting_wh.wh_season_qab_rate", lambda b: 0.42)
-    monkeypatch.setattr("app.data.hitting_wh.wh_slash_line",
-                        lambda b: {"BA": ".321", "SLG": ".500", "OBP": ".410"})
+    monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
+                        lambda b: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
     with server.app_context():
         coach = User(email="c2@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")

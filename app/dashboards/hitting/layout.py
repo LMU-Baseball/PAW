@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import hitting_wh
+from app.data import hitting_caps
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.hitting import selectors
@@ -30,10 +30,10 @@ def _tile(label, value):
 def sidebar(batter_id) -> html.Div:
     if batter_id is None:
         return html.Div("Select a hitter.", style={"padding": "12px"})
-    prof = hitting_wh.wh_player_profile(int(batter_id))
-    qab = hitting_wh.wh_season_qab_rate(int(batter_id))
+    prof = hitting_caps.player_profile(int(batter_id))
+    slash = hitting_caps.sidebar_stats(int(batter_id))
+    qab = slash["qab"]
     qab_txt = f"{round(qab * 100, 1)}%" if qab is not None else "—"
-    slash = hitting_wh.wh_slash_line(int(batter_id))
     photo = prof["photo"] or _PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"],
@@ -61,7 +61,7 @@ def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
                                "fontSize": "20px", "alignSelf": "center"})
     if not game_id:
         return html.Div()
-    sb = hitting_wh.wh_scoreboard(int(game_id))
+    sb = hitting_caps.scoreboard(int(game_id))
     parts = [p for p in (sb["date"], f"{sb['loc']} {sb['opp']}".strip(),
                          sb["game_type"]) if p]
     return html.Div(" · ".join(parts),
@@ -78,7 +78,7 @@ def serve_layout() -> html.Div:
     default_batter = selectors.resolve_batter(
         hitters[0]["value"] if hitters else None,
         is_coach=is_coach, own_trackman_id=own)
-    games_df = hitting_wh.wh_games_for_batter(default_batter) if default_batter else None
+    games_df = hitting_caps.games_for_batter(default_batter) if default_batter else None
     if games_df is not None and not games_df.empty:
         min_bound = str(games_df["game_date"].min())
         max_bound = str(games_df["game_date"].max())
