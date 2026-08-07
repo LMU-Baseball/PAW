@@ -387,11 +387,11 @@ def _fmt_avg(v) -> str:
     return s[1:] if 0 <= v < 1 else s
 
 
-def _slash_from_pas(pas_df: pd.DataFrame) -> dict:
-    """Season BA/SLG/OBP from a one-row-per-PA frame (qab_frame output).
-
-    Pure function shared by hitting_wh.wh_slash_line and hitting_caps.slash_line
-    so both compute season slash the same way regardless of data source.
+def _slash_counts(pas_df: pd.DataFrame) -> dict:
+    """Int counting components behind the slash line, from a one-row-per-PA
+    frame (qab_frame output). Single source of truth for the AB/H/BB/HBP/SF
+    definitions (so `_slash_from_pas` and the Phase 4 precalc rollup can't
+    drift), and additionally breaks out doubles/triples/hr/so and pa.
 
     PROVISIONAL definitions (one place to change; confirm with coaches):
       * one row per PA = last pitch of the PA (via qab_frame).
@@ -399,38 +399,54 @@ def _slash_from_pas(pas_df: pd.DataFrame) -> dict:
         Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
       * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
       * AB = a completed PA that is not a walk/HBP/sacrifice.
-      * BA = H/AB ; SLG = TotalBases/AB ; OBP = (H+BB+HBP)/(AB+BB+HBP+SF).
-    Returns display strings ("—" when undefined).
+      * SO = KorBB=='Strikeout'.
     """
-    blank = {"BA": "—", "SLG": "—", "OBP": "—"}
+    c = {"pa": int(len(pas_df)), "ab": 0, "h": 0, "tb": 0, "bb": 0, "hbp": 0,
+         "sf": 0, "doubles": 0, "triples": 0, "hr": 0, "so": 0}
     if pas_df.empty:
-        return blank
-
-    ab = h = tb = bb = hbp = sf = 0
+        return c
     for _, r in pas_df.iterrows():
         korbb = r.get("KorBB")
         pr = r.get("PlayResult")
         pc = r.get("PitchCall")
-        is_walk = korbb == "Walk"
-        is_hbp = pc == "HitByPitch"
-        is_sac = isinstance(pr, str) and pr.startswith("Sac")
-        if is_walk:
-            bb += 1
+        if korbb == "Strikeout":
+            c["so"] += 1
+        if korbb == "Walk":
+            c["bb"] += 1
             continue
-        if is_hbp:
-            hbp += 1
+        if pc == "HitByPitch":
+            c["hbp"] += 1
             continue
-        if is_sac:
-            sf += 1
+        if isinstance(pr, str) and pr.startswith("Sac"):
+            c["sf"] += 1
             continue
         if pr in _HITS:
-            ab += 1
-            h += 1
-            tb += _TOTAL_BASES[pr]
+            c["ab"] += 1
+            c["h"] += 1
+            c["tb"] += _TOTAL_BASES[pr]
+            if pr == "Double":
+                c["doubles"] += 1
+            elif pr == "Triple":
+                c["triples"] += 1
+            elif pr == "HomeRun":
+                c["hr"] += 1
         elif pr in _AB_OUTS or korbb == "Strikeout":
-            ab += 1
+            c["ab"] += 1
         # else: undefined/incomplete PA — not counted
+    return c
 
+
+def _slash_from_pas(pas_df: pd.DataFrame) -> dict:
+    """Season BA/SLG/OBP display strings from a one-row-per-PA frame.
+
+    Pure function shared by hitting_caps.slash_line and the Phase 4 precalc
+    rebuild so both format season slash the same way. Delegates the counting to
+    `_slash_counts` (the single source of truth for the definitions).
+      * BA = H/AB ; SLG = TotalBases/AB ; OBP = (H+BB+HBP)/(AB+BB+HBP+SF).
+    Returns display strings ("—" when undefined).
+    """
+    c = _slash_counts(pas_df)
+    ab, h, tb, bb, hbp, sf = c["ab"], c["h"], c["tb"], c["bb"], c["hbp"], c["sf"]
     ba = h / ab if ab else None
     slg = tb / ab if ab else None
     ob_denom = ab + bb + hbp + sf

@@ -199,3 +199,23 @@ def test_transforms_handle_empty():
     assert len(hitting.swing_decisions_by_zone(empty)) == 4  # 4 zone rows, zeros
     assert hitting.plate_discipline(empty, by="zone").empty
     assert hitting.spray_coordinates(empty).empty
+
+
+def test_slash_counts_matches_slash_from_pas_and_breaks_out_extra_bases():
+    """_slash_counts (Phase 4 precalc) returns the int counts behind the slash
+    line, sharing _slash_from_pas's exact AB/H/BB definitions so precalc can't
+    drift, and additionally breaks out doubles/triples/hr/so/pa."""
+    pas = pd.DataFrame([
+        {"KorBB": "Walk",      "PlayResult": None,      "PitchCall": "BallCalled"},
+        {"KorBB": None,        "PlayResult": "Single",  "PitchCall": "InPlay"},
+        {"KorBB": None,        "PlayResult": "HomeRun", "PitchCall": "InPlay"},
+        {"KorBB": None,        "PlayResult": "Double",  "PitchCall": "InPlay"},
+        {"KorBB": "Strikeout", "PlayResult": "Out",     "PitchCall": "StrikeSwinging"},
+        {"KorBB": None,        "PlayResult": "Out",     "PitchCall": "InPlay"},
+    ])
+    c = hitting._slash_counts(pas)
+    assert c["pa"] == 6 and c["ab"] == 5 and c["h"] == 3
+    assert c["doubles"] == 1 and c["triples"] == 0 and c["hr"] == 1
+    assert c["bb"] == 1 and c["so"] == 1 and c["tb"] == 1 + 4 + 2
+    # _slash_from_pas display is unchanged (delegates to the same counts).
+    assert hitting._slash_from_pas(pas) == {"BA": ".600", "SLG": "1.400", "OBP": ".667"}
