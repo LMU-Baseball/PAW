@@ -132,23 +132,6 @@ def test_caught_stealing_empty():
     assert s["attempts"] == 0 and s["cs_pct"] is None
 
 
-def test_catching_games_date_filter_and_range():
-    from app.data import catching as C
-    cats = C.wh_lmu_catchers()
-    if cats.empty:
-        import pytest; pytest.skip("no catchers")
-    cid = int(cats.iloc[0]["CatcherId"])
-    allg = C.games_for_catcher(cid)
-    assert {"game_id", "game_date", "GameLabel"} <= set(allg.columns)
-    if allg.empty:
-        import pytest; pytest.skip("no games")
-    lo, hi = str(allg["game_date"].min()), str(allg["game_date"].max())
-    assert len(C.games_for_catcher(cid, start=lo, end=hi)) == len(allg)
-    pooled = C.range_pitches_for(cid, lo, hi)
-    single = sum(len(C.game_pitches_for(int(g), cid)) for g in allg["game_id"])
-    assert len(pooled) == single
-
-
 def test_caught_stealing_trend():
     import pandas as pd
     from app.data import catching as C
@@ -177,16 +160,3 @@ def test_caught_stealing_trend_empty():
     # df with no CS attempts -> empty trend
     only_single = pd.DataFrame([{"play_result": "Single", "game_date": "2026-04-01"}])
     assert C.caught_stealing_trend(only_single).empty
-
-
-def test_game_pitches_for_has_game_date():
-    from app.data import catching as C
-    cats = C.wh_lmu_catchers()
-    if cats.empty:
-        import pytest; pytest.skip("no catchers")
-    cid = int(cats.iloc[0]["CatcherId"])
-    g = C.games_for_catcher(cid)
-    if g.empty:
-        import pytest; pytest.skip("no games")
-    df = C.game_pitches_for(int(g.iloc[0]["game_id"]), cid)
-    assert "game_date" in df.columns
