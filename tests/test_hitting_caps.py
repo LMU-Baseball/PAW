@@ -1,6 +1,8 @@
+import math
+
 import pandas as pd
 from app.db import query_df
-from app.data import hitting_wh, hitting_caps
+from app.data import hitting_caps
 from app.data.hitting import game_batting_line, swing_decisions_by_zone, plate_discipline
 
 WADAS = 806253
@@ -15,67 +17,69 @@ VETERAN = 801956  # "Danos, Luca"
 
 
 def _first_game(bid):
-    g = hitting_wh.wh_games_for_batter(bid)
+    g = hitting_caps.games_for_batter(bid)
     return int(g.iloc[0]["game_id"])
 
 
-def test_game_pitches_matches_warehouse_batting_line():
+# NOTE: these were originally *_matches_warehouse parity tests comparing
+# hitting_caps against the hitting_wh oracle. That oracle was the build-time
+# proof and has since been deleted (Phase 3 warehouse drop), so each now makes
+# a lightweight BEHAVIORAL assertion on the caps output for the Wadas fixture
+# rather than comparing against exact warehouse numbers.
+
+
+def test_game_pitches_feeds_batting_line():
     gid = _first_game(WADAS)
-    old = hitting_wh.wh_game_pitches(gid, WADAS)
-    new = hitting_caps.game_pitches(gid, WADAS)
-    # same number of pitches, same core columns
-    assert len(new) == len(old)
-    # semantic parity: the batting line the UI shows is identical
-    # (game_batting_line returns a dict, not a DataFrame -- compare directly)
-    assert game_batting_line(new) == game_batting_line(old)
+    df = hitting_caps.game_pitches(gid, WADAS)
+    assert not df.empty
+    line = game_batting_line(df)
+    assert set(line) >= {"PA", "H", "SO", "BB", "QAB"}
+    assert line["PA"] >= 1
+    assert all(isinstance(v, int) for v in line.values())
 
 
-def test_game_pitches_matches_plate_discipline_and_zone():
+def test_game_pitches_feeds_plate_discipline_and_zone():
     gid = _first_game(WADAS)
-    old = hitting_wh.wh_game_pitches(gid, WADAS)
-    new = hitting_caps.game_pitches(gid, WADAS)
-    pd.testing.assert_frame_equal(plate_discipline(new).reset_index(drop=True),
-                                  plate_discipline(old).reset_index(drop=True), check_dtype=False)
-    pd.testing.assert_frame_equal(swing_decisions_by_zone(new).reset_index(drop=True),
-                                  swing_decisions_by_zone(old).reset_index(drop=True), check_dtype=False)
+    df = hitting_caps.game_pitches(gid, WADAS)
+    pd_out = plate_discipline(df)                 # must not raise
+    assert list(pd_out.columns) == ["Zone", "Total", "Swing %", "Whiff %",
+                                    "Take %", "Contact %"]
+    zone_out = swing_decisions_by_zone(df)        # must not raise
+    assert list(zone_out["Zone"]) == ["Heart", "Shadow", "Chase", "Waste"]
+    assert zone_out["Total"].sum() >= 1
 
 
-def test_range_pitches_matches_season_pitch_count():
-    old = hitting_wh.wh_season_pitches(WADAS)
-    new = hitting_caps.season_pitches(WADAS)
-    assert len(new) == len(old)
+def test_season_pitches_non_empty():
+    df = hitting_caps.season_pitches(WADAS)
+    assert not df.empty
+    assert "PlateLocSide" in df.columns
 
 
-def test_range_pitches_matches_warehouse():
-    # Real parity (not just a length check, unlike
-    # test_range_pitches_matches_season_pitch_count above): drive both sides
-    # over Wadas's full season span so the range covers every one of his
-    # games, then assert the batting line transform agrees, plus row count.
-    g = hitting_wh.wh_games_for_batter(WADAS)
+def test_range_pitches_over_full_span():
+    # Drive range_pitches over Wadas's full season span so the range covers
+    # every one of his games, then assert the batting line transform agrees
+    # shape-wise and the frame carries pitches.
+    g = hitting_caps.games_for_batter(WADAS)
     start, end = g["game_date"].min(), g["game_date"].max()
-    old = hitting_wh.wh_range_pitches(WADAS, start, end)
-    new = hitting_caps.range_pitches(WADAS, start, end)
-    assert len(new) == len(old)
-    assert game_batting_line(new) == game_batting_line(old)
+    df = hitting_caps.range_pitches(WADAS, start, end)
+    assert not df.empty
+    line = game_batting_line(df)
+    assert set(line) >= {"PA", "H", "SO", "BB", "QAB"}
+    assert line["PA"] >= 1
 
 
-def test_games_for_batter_matches_labels():
-    # Order-independent: the warehouse oracle (wh_games_for_batter) has no
-    # secondary ORDER BY, so its same-date (doubleheader) tie order is
-    # DB-planner incidental, not a real contract -- comparing after sorting
-    # both sides by game_id asserts the real parity (same games, same labels)
-    # without depending on that noise.
-    old = (hitting_wh.wh_games_for_batter(WADAS)[["game_id", "GameLabel"]]
-           .sort_values("game_id").reset_index(drop=True))
-    new = (hitting_caps.games_for_batter(WADAS)[["game_id", "GameLabel"]]
-           .sort_values("game_id").reset_index(drop=True))
-    pd.testing.assert_frame_equal(new, old, check_dtype=False)
+def test_games_for_batter_labels():
+    df = hitting_caps.games_for_batter(WADAS)
+    assert {"game_id", "game_date", "GameLabel"} <= set(df.columns)
+    assert len(df) >= 1
+    # every label is a non-empty formatted string like "05/12/24 vs Pepperdine"
+    assert df["GameLabel"].map(lambda s: isinstance(s, str) and bool(s)).all()
 
 
 def test_games_for_batter_is_deterministically_ordered():
     # hitting_caps-only property (no oracle): rows are sorted by game_date
     # descending, and within an equal date, by game_id descending. This is an
-    # intentional improvement over the warehouse oracle, which has no
+    # intentional improvement over the old warehouse oracle, which had no
     # secondary sort key at all.
     df = hitting_caps.games_for_batter(WADAS)
     dates = pd.to_datetime(df["game_date"])
@@ -85,31 +89,39 @@ def test_games_for_batter_is_deterministically_ordered():
         assert ids == sorted(ids, reverse=True)
 
 
-def test_scoreboard_matches_warehouse():
+def test_scoreboard_shape():
     gid = _first_game(WADAS)
-    old = hitting_wh.wh_scoreboard(gid)
-    new = hitting_caps.scoreboard(gid)
-    assert new == old
+    sb = hitting_caps.scoreboard(gid)
+    assert set(sb) == {"date", "loc", "opp", "game_type"}
+    assert sb["loc"] in ("vs", "@")
+    assert isinstance(sb["date"], str) and sb["date"]
 
 
-def test_player_profile_matches_warehouse():
-    old = hitting_wh.wh_player_profile(WADAS)
-    new = hitting_caps.player_profile(WADAS)
-    assert new["name"] == old["name"]
-    assert new["bats"] == old["bats"]
-    assert new == old
+def test_player_profile_shape():
+    prof = hitting_caps.player_profile(WADAS)
+    assert set(prof) == {"name", "bats", "class_year", "position", "photo", "jersey"}
+    assert prof["name"]                # non-empty for a real batter
+    # photo/jersey come from the scraped roster_media.json (may or may not have
+    # run); either way they must be strings, not None.
+    assert isinstance(prof["photo"], str) and isinstance(prof["jersey"], str)
 
 
-def test_season_qab_rate_matches_warehouse():
-    old = hitting_wh.wh_season_qab_rate(WADAS)
-    new = hitting_caps.season_qab_rate(WADAS)
-    assert new == old
+def test_season_qab_rate_is_sane():
+    r = hitting_caps.season_qab_rate(WADAS)
+    assert r is None or 0.0 <= r <= 1.0
 
 
-def test_slash_line_matches_warehouse():
-    old = hitting_wh.wh_slash_line(WADAS)
-    new = hitting_caps.slash_line(WADAS)
-    assert new == old
+def test_slash_line_shape_and_values():
+    sl = hitting_caps.slash_line(WADAS)
+    assert set(sl) == {"BA", "SLG", "OBP"}
+    for k, v in sl.items():
+        assert isinstance(v, str)
+        if v != "—":
+            float(v)  # parses as a number (e.g. ".326" or "1.021")
+
+
+def test_slash_line_no_data_is_dashes():
+    assert hitting_caps.slash_line(-1) == {"BA": "—", "SLG": "—", "OBP": "—"}
 
 
 def test_sidebar_stats_matches_qab_and_slash():
@@ -123,24 +135,20 @@ def test_sidebar_stats_matches_qab_and_slash():
     assert sidebar["OBP"] == slash["OBP"]
 
 
-def test_lmu_hitters_matches_warehouse():
-    # NOT a byte-identical row-set, by design (fix-round 1 decision): GAMES
-    # holds full CAPS history back to 2022, while fact_tm_game_pitch (the
-    # wh_lmu_hitters source) only covers the current warehouse-synced season
-    # (2025-11-22+). An earlier version of hitting_caps.lmu_hitters() was
-    # unscoped and leaked 50+ retired alumni into the list, so it's now
-    # windowed to the last ~12 months of GAMES data (anchored to the newest
-    # GAMES date, not "today" -- see lmu_hitters docstring for why).
-    #
-    # Three real invariants, all confirmed live:
-    old = hitting_wh.wh_lmu_hitters()
+def test_lmu_hitters_shape_and_window():
+    # Was a *_matches_warehouse superset/sibling parity test. The oracle is
+    # gone, so this keeps only the caps-native invariants (all confirmed live):
     new = hitting_caps.lmu_hitters()
 
-    # 1. SUPERSET: every current-season warehouse hitter is present.
-    assert set(old["Batter"]) <= set(new["Batter"])
+    # 1. SHAPE: one deduped row per hitter name, canonical int BatterId.
+    assert list(new.columns) == ["Batter", "BatterId"]
+    assert new["Batter"].is_unique
+    assert new["BatterId"].is_unique
+    assert WADAS in set(new["BatterId"])
 
-    # 2. WINDOW BOUND: the window is doing real work (33 caps vs 80 unscoped)
-    # and a known pre-window alumnus (last game 2022-03-11) does not leak in.
+    # 2. WINDOW BOUND: the ~12-month window is doing real work (fewer than the
+    # full all-time LMU roster held in GAMES) and a known pre-window alumnus
+    # (last game 2022-03-11) does not leak in.
     all_time = query_df(
         "SELECT COUNT(DISTINCT Batter) n FROM GAMES "
         "WHERE BatterTeam = :t AND BatterId IS NOT NULL",
@@ -148,21 +156,6 @@ def test_lmu_hitters_matches_warehouse():
     ).iloc[0]["n"]
     assert len(new) < all_time
     assert "Hackman, Owen" not in set(new["Batter"])
-
-    # 3. canonical-id sibling check: for hitters the warehouse DOES know, its
-    # chosen id must be a valid *sibling* of the id hitting_caps picked as
-    # canonical for that name -- downstream stats (game_pitches/
-    # season_pitches/etc.) resolve any of a name's ids to the same sibling-id
-    # union via _sibling_ids, so which specific id wins hitting_caps's
-    # "most-tracked" tiebreak is interchangeable. (Windowing the COUNT(*)
-    # tiebreak to the last 12 months also fixed a quirk found in the unscoped
-    # version, where Dunn, JD and Casale, Johnny got an old pre-2025 id
-    # because GAMES had more career pitches under it -- both now resolve to
-    # their current-season id, matching the warehouse exactly.)
-    new_by_name = dict(zip(new["Batter"], new["BatterId"]))
-    for _, row in old.iterrows():
-        siblings = hitting_caps._sibling_ids(int(row["BatterId"]))
-        assert new_by_name[row["Batter"]] in siblings
 
 
 def test_lmu_hitters_all_have_numeric_game_id_rows():
@@ -184,26 +177,31 @@ def test_lmu_hitters_all_have_numeric_game_id_rows():
 
 
 def _first_bip_game(bid):
-    """First game (by wh_games_for_batter order) with >=1 ball in play."""
-    for gid in hitting_wh.wh_games_for_batter(bid)["game_id"]:
-        if not hitting_wh.wh_bip_points(bid, int(gid)).empty:
+    """First game (by games_for_batter order) with >=1 ball in play."""
+    for gid in hitting_caps.games_for_batter(bid)["game_id"]:
+        if not hitting_caps.bip_points(bid, int(gid)).empty:
             return int(gid)
     raise AssertionError("no BIP game found for WADAS fixture")
 
 
-def test_bip_points_matches_warehouse_math():
+def test_bip_points_shape_and_math():
     # GAMES stores a real launch angle in `Angle` (unlike the pitch-level
-    # transforms, which NaN it via _finish) so the warehouse's spray/radial
-    # math should reproduce exactly here -- x/y/rx/ry must match, not just
-    # be close-ish.
+    # transforms, which NaN it via _finish) so bip_points reads it directly.
+    # Assert the spray coordinate math (x = sin(bearing)*distance) for a
+    # fully-populated row rather than comparing against a deleted oracle.
     gid = _first_bip_game(WADAS)
-    old = hitting_wh.wh_bip_points(WADAS, gid)
-    new = hitting_caps.bip_points(WADAS, gid)
-    assert len(new) == len(old) > 0
-    cols = ["hit_type", "x", "y", "rx", "ry"]
-    pd.testing.assert_frame_equal(
-        new[cols].reset_index(drop=True), old[cols].reset_index(drop=True),
-        check_dtype=False)
+    df = hitting_caps.bip_points(WADAS, gid)
+    assert len(df) > 0
+    for c in ["hit_type", "x", "y", "rx", "ry", "exit_speed", "la"]:
+        assert c in df.columns
+    row = df.dropna(subset=["bearing", "distance"]).iloc[0]
+    exp_x = math.sin(math.radians(row["bearing"])) * row["distance"]
+    assert abs(row["x"] - exp_x) < 1e-6
+
+
+def test_bip_points_empty_game_list():
+    df = hitting_caps.bip_points(WADAS, [])
+    assert df.empty and "hit_type" in df.columns
 
 
 def test_veteran_fixture_has_both_numeric_and_legacy_game_ids():
@@ -253,12 +251,11 @@ def test_last_n_pas_does_not_crash_for_veteran_with_legacy_game_ids():
     assert not df.empty
 
 
-def test_last_n_pas_matches_warehouse_keys():
-    old = hitting_wh.wh_last_n_pas(WADAS, 27)
-    new = hitting_caps.last_n_pas(WADAS, 27)
-    assert len(new) == len(old)
-    old_keys = set(zip(old["GameID"].astype(int), old["Inning"].astype(int),
-                        old["PAofInning"].astype(int)))
-    new_keys = set(zip(new["GameID"].astype(int), new["Inning"].astype(int),
-                        new["PAofInning"].astype(int)))
-    assert new_keys == old_keys
+def test_last_n_pas_shape():
+    df = hitting_caps.last_n_pas(WADAS, 27)
+    # same column shape as a game df (goes through _finish)
+    assert "PlateLocSide" in df.columns and "PAofInning" in df.columns
+    # at most 27 distinct PAs
+    if not df.empty:
+        pas = df[["GameID", "Inning", "PAofInning"]].drop_duplicates()
+        assert len(pas) <= 27

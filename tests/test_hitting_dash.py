@@ -5,28 +5,34 @@ import pandas as pd
 import pytest
 
 from app import create_app
-from app.data import hitting_wh
+from app.data import hitting_caps
 from app.db import query_df
 from config import Config
 
 
 @pytest.fixture(scope="module")
 def real_batter():
+    # Restrict to numeric GameIDs so the most-tracked batter we pick is a
+    # current hitter with real (int-castable) games -- the all-time top
+    # BatterId in GAMES is a retired alumnus whose rows are all legacy
+    # composite-string GameIDs, for whom games_for_batter returns empty and
+    # the game_df fixture below would crash on iloc[0].
     cand = query_df(
         """
-        SELECT batter_tm_id FROM fact_tm_game_pitch
-         WHERE batter_team = 'LOY_LIO' AND batter_tm_id IS NOT NULL
-         GROUP BY batter_tm_id ORDER BY COUNT(*) DESC LIMIT 1
+        SELECT BatterId FROM GAMES
+         WHERE BatterTeam = 'LOY_LIO' AND BatterId IS NOT NULL
+           AND GameID REGEXP '^[0-9]+$'
+         GROUP BY BatterId ORDER BY COUNT(*) DESC LIMIT 1
         """
     )
-    return int(cand.loc[0, "batter_tm_id"])
+    return int(cand.loc[0, "BatterId"])
 
 
 @pytest.fixture(scope="module")
 def game_df(real_batter):
-    games = hitting_wh.wh_games_for_batter(real_batter)
+    games = hitting_caps.games_for_batter(real_batter)
     gid = int(games.iloc[0]["game_id"])
-    return hitting_wh.wh_game_pitches(gid, real_batter)
+    return hitting_caps.game_pitches(gid, real_batter)
 
 
 @pytest.fixture
@@ -407,20 +413,20 @@ def test_read_game_df_roundtrip_no_futurewarning():
 def test_hitting_range_pooled_render_live():
     from app import create_app
     from config import Config
-    from app.data import hitting_wh as H
+    from app.data import hitting_caps as H
     from app.dashboards.hitting.tabs import game_level, plate_appearances as pa, zone_location as zl
     class T(Config):
         TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
     with create_app(T).app_context():
-        hitters = H.wh_lmu_hitters()
+        hitters = H.lmu_hitters()
         if hitters.empty:
             import pytest; pytest.skip("no hitters")
         bid = int(hitters.iloc[0]["BatterId"])
-        g = H.wh_games_for_batter(bid)
+        g = H.games_for_batter(bid)
         if g.empty:
             import pytest; pytest.skip("no games")
         lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
-        pooled = H.wh_range_pitches(bid, lo, hi)
+        pooled = H.range_pitches(bid, lo, hi)
         if pooled.empty:
             import pytest; pytest.skip("no pooled")
         assert game_level.render(pooled) is not None

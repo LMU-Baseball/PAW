@@ -62,19 +62,30 @@ def test_load_roster_media_missing_file_is_empty(tmp_path, monkeypatch):
 
 # --------------------------- profile merge --------------------------------
 
-def test_wh_player_profile_merges_media(monkeypatch):
-    from app.data import hitting_wh
+def test_player_profile_merges_media(monkeypatch):
+    # hitting_caps.player_profile pulls name/bats from GAMES (query_df), class
+    # year/position from hitting._roster_lookup, and photo/jersey from
+    # roster_media.player_media, then merges all three into one profile dict.
+    # player_profile binds these three names into the hitting_caps namespace at
+    # import time (`from ... import`), so they must be patched there to take
+    # effect.
+    from app.data import hitting_caps
     import pandas as pd
-    monkeypatch.setattr("app.data.hitting_wh.query_df",
+    monkeypatch.setattr("app.data.hitting_caps.query_df",
                         lambda *a, **k: pd.DataFrame(
-                            [{"batter_name": "Wadas, Zach", "batter_side": "Left"}]))
-    monkeypatch.setattr("app.data.hitting_wh._roster_lookup", lambda n: ("Junior", "OF/1B"))
-    monkeypatch.setattr("app.data.hitting_wh.player_media",
+                            [{"Batter": "Wadas, Zach", "BatterSide": "Left"}]))
+    monkeypatch.setattr("app.data.hitting_caps._roster_lookup",
+                        lambda n: ("Junior", "OF/1B"))
+    monkeypatch.setattr("app.data.hitting_caps.player_media",
                         lambda b: {"jersey": "34", "photo_url": "https://x/w.jpg"})
-    prof = hitting_wh.wh_player_profile(806253)
+    prof = hitting_caps.player_profile(806253)
+    # all three sources merged into one profile dict
+    assert prof["name"] == "Wadas, Zach"
+    assert prof["bats"] == "Left"
+    assert prof["class_year"] == "Junior"
+    assert prof["position"] == "OF/1B"
     assert prof["photo"] == "https://x/w.jpg"
     assert prof["jersey"] == "34"
-    assert prof["name"] == "Wadas, Zach"
 
 
 # --------------------------- roster scrape: players + collisions ----------
