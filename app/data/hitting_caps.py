@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from app.db import query_df
-from app.data.hitting_wh import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers, reused
+from app.data.hitting import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers (moved from hitting_wh in Phase 3)
 from app.data.hitting import qab_frame, _slash_from_pas
 from app.data.roster_media import player_media
 

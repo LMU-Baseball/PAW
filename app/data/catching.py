@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from app.db import query_df
-from app.data.hitting_wh import attack_zone
+from app.data.hitting import attack_zone
 
 LMU_TEAM_ID = 78
 LMU_PITCHER_TEAM = "LOY_LIO"  # catcher is on the pitching team

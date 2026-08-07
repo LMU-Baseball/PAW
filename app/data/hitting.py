@@ -265,6 +265,72 @@ def plate_discipline(df: pd.DataFrame, by: str = "zone") -> pd.DataFrame:
     return out
 
 
+# --- shared helpers (moved from the deleted hitting_wh warehouse module in
+#     Phase 3; reused by hitting_caps and catching, so they live here in the
+#     CAPS-reading module). All are pure except _roster_lookup, which reads the
+#     surviving roster_players table (not a warehouse table). -----------------
+
+def attack_zone(side_ft, height_ft) -> str:
+    """Heart/Shadow/Chase/Waste from plate coords (inches; zone-box boundaries).
+
+    Missing coords (None/NaN) return "" so untracked pitches are excluded from
+    zone-based tables rather than being miscounted as genuine "Waste" pitches.
+    """
+    if side_ft is None or height_ft is None or pd.isna(side_ft) or pd.isna(height_ft):
+        return ""
+    x = abs(float(side_ft) * 12)
+    y = abs(float(height_ft) * 12 - 30)
+    if x <= 7.25 and y <= 8.75:
+        return "Heart"
+    if x <= 13.5 and y <= 15.125:
+        return "Shadow"
+    if x <= 20.5 and y <= 25.5:
+        return "Chase"
+    return "Waste"
+
+
+def _finish(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    df["Zone"] = [attack_zone(s, h)
+                  for s, h in zip(df["PlateLocSide"], df["PlateLocHeight"])]
+    for c in ("QC", "PathQ", "Angle"):
+        df[c] = np.nan
+    return _add_pitch_category(df)
+
+
+def _in_clause(ids) -> tuple[str, dict]:
+    """Build a parameterized `IN (...)` fragment + params dict for a list of ids."""
+    ph = ", ".join(f":id{i}" for i in range(len(ids)))
+    return ph, {f"id{i}": int(v) for i, v in enumerate(ids)}
+
+
+def _roster_lookup(name_last_first: str) -> tuple[str, str]:
+    """Best-effort class_year/position from roster_players (name is 'First Last')."""
+    if "," not in name_last_first:
+        return "", ""
+    last, first = (p.strip() for p in name_last_first.split(",", 1))
+    df = query_df(
+        """
+        SELECT class_year, position FROM roster_players
+         WHERE season LIKE '2025%' AND player_name = :n LIMIT 1
+        """,
+        {"n": f"{first} {last}"},
+    )
+    if df.empty:
+        return "", ""
+    r = df.iloc[0]
+    cy = "" if pd.isna(r["class_year"]) else str(r["class_year"])
+    pos = "" if pd.isna(r["position"]) else str(r["position"])
+    return cy, pos
+
+
+_BIP_COLS = ["hit_type", "exit_speed", "la", "bearing", "distance",
+             "x", "y", "rx", "ry", "Count", "Result", "PitchType", "Pitcher",
+             "GameID", "Inning", "PAofInning"]
+
+
 def qab_frame(df: pd.DataFrame) -> pd.DataFrame:
     """One row per plate appearance (last pitch) with a QAB flag.
 
