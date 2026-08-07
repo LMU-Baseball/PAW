@@ -8,14 +8,16 @@ from config import Config
 
 @pytest.fixture(scope="module")
 def real_pitcher():
+    # RAW GAMES.PitcherId (== a player's trackman_id) -- the id space the
+    # dashboard now uses everywhere (no warehouse surrogate mapping).
     df = query_df(
         """
-        SELECT pitcher_id FROM fact_tm_game_pitch
-         WHERE pitcher_team = 'LOY_LIO' AND pitcher_id IS NOT NULL
-         GROUP BY pitcher_id ORDER BY COUNT(*) DESC LIMIT 1
+        SELECT PitcherId FROM GAMES
+         WHERE PitcherTeam = 'LOY_LIO' AND PitcherId IS NOT NULL
+         GROUP BY PitcherId ORDER BY COUNT(*) DESC LIMIT 1
         """
     )
-    return int(df.loc[0, "pitcher_id"])
+    return int(df.loc[0, "PitcherId"])
 
 
 @pytest.fixture
@@ -29,16 +31,22 @@ def server(tmp_path):
 
 def test_resolve_pitcher_player_is_self_only():
     from app.dashboards.pitching import selectors
-    # A player ignores the requested id and gets their own.
+    # A player ignores the requested id and gets their own (RAW trackman id --
+    # GAMES.PitcherId IS the trackman id, so no surrogate mapping happens).
     assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=None) is None
-    assert selectors.resolve_pitcher(999, is_coach=True, own_trackman_id=None) == 999
+    assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=555) == 555
 
 
-def test_resolve_pitcher_player_discards_requested_id(monkeypatch):
+def test_resolve_pitcher_coach_passes_through():
     from app.dashboards.pitching import selectors
-    monkeypatch.setattr(selectors, "_pitcher_id_for_tm", lambda tm: 4242)
+    assert selectors.resolve_pitcher(999, is_coach=True, own_trackman_id=None) == 999
+    assert selectors.resolve_pitcher(None, is_coach=True, own_trackman_id=None) is None
+
+
+def test_resolve_pitcher_player_discards_requested_id():
+    from app.dashboards.pitching import selectors
     got = selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=555)
-    assert got == 4242  # own id, NOT the requested 999
+    assert got == 555  # own raw id, NOT the requested 999
 
 
 def test_pitcher_options_coach_nonempty():
@@ -61,10 +69,10 @@ def test_build_pitching_dash_mounts(server):
 
 @pytest.fixture(scope="module")
 def outing_df(real_pitcher):
-    from app.data import pitching as P
-    g = P.games_for_pitcher(real_pitcher)
+    from app.data import pitching_caps
+    g = pitching_caps.games_for_pitcher(real_pitcher)
     gid = int(g.iloc[0]["game_id"])
-    return P.game_pitches(gid, real_pitcher)
+    return pitching_caps.game_pitches(gid, real_pitcher)
 
 
 def test_pitch_breakdown_render(outing_df):
@@ -85,30 +93,30 @@ def test_location_movement_render_has_chip_filter(outing_df):
 
 
 def test_last_outings_render(real_pitcher):
-    from app.data import pitching as P
+    from app.data import pitching_caps
     from app.dashboards.pitching.tabs import last_outings
-    gid = int(P.games_for_pitcher(real_pitcher).iloc[0]["game_id"])
+    gid = int(pitching_caps.games_for_pitcher(real_pitcher).iloc[0]["game_id"])
     assert last_outings.render(real_pitcher, gid, 5) is not None
 
 
 def test_pitching_aggregate_load_live():
     from app import create_app
     from config import Config
-    from app.data import pitching as P
+    from app.data import pitching_caps
     from app.dashboards.date_range import ALL_IN_RANGE
     class T(Config):
         TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
     app = create_app(T)
     with app.app_context():
-        pit = P.wh_lmu_pitchers()
+        pit = pitching_caps.lmu_pitchers()
         if pit.empty:
             import pytest; pytest.skip("no pitchers")
         pid = int(pit.iloc[0]["PitcherId"])
-        g = P.games_for_pitcher(pid)
+        g = pitching_caps.games_for_pitcher(pid)
         if g.empty:
             import pytest; pytest.skip("no games")
         lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
-        pooled = P.range_pitches_for(pid, lo, hi)
+        pooled = pitching_caps.range_pitches_for(pid, lo, hi)
         assert not pooled.empty
         # sentinel is what the callback routes on
         assert ALL_IN_RANGE == "__all_in_range__"
@@ -123,7 +131,7 @@ def test_outings_anchor_passthrough_concrete_game_id():
 def test_outings_anchor_sentinel_resolves_to_most_recent_in_range_game():
     from app import create_app
     from config import Config
-    from app.data import pitching as P
+    from app.data import pitching_caps
     from app.dashboards.date_range import ALL_IN_RANGE
     from app.dashboards.pitching.callbacks import _outings_anchor
 
@@ -131,11 +139,11 @@ def test_outings_anchor_sentinel_resolves_to_most_recent_in_range_game():
         TESTING = True; SECRET_KEY = "t"; SQLALCHEMY_DATABASE_URI = "sqlite://"
     app = create_app(T)
     with app.app_context():
-        pit = P.wh_lmu_pitchers()
+        pit = pitching_caps.lmu_pitchers()
         if pit.empty:
             pytest.skip("no pitchers")
         pid = int(pit.iloc[0]["PitcherId"])
-        g = P.games_for_pitcher(pid)
+        g = pitching_caps.games_for_pitcher(pid)
         if g.empty:
             pytest.skip("no games")
         lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
@@ -194,8 +202,8 @@ def test_pitching_tabs_include_pitch_level():
 
 def test_sidebar_shows_five_range_tiles(real_pitcher):
     from app.dashboards.pitching import layout
-    from app.data import pitching as P
-    g = P.games_for_pitcher(real_pitcher)
+    from app.data import pitching_caps
+    g = pitching_caps.games_for_pitcher(real_pitcher)
     start, end = str(g["game_date"].min()), str(g["game_date"].max())
     s = str(layout.sidebar(real_pitcher, start, end))
     for label in ("APP", "IP", "K%", "BB%", "Barrel%"):

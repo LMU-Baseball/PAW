@@ -8,6 +8,7 @@ from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
 from app.data import pitching as P
+from app.data import pitching_caps
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.pitching import layout, selectors
@@ -29,7 +30,7 @@ def _outings_anchor(sel):
         pid = sel.get("pitcher_id")
         if not pid or not sel.get("start") or not sel.get("end"):
             return None
-        g = P.games_for_pitcher(int(pid), start=sel["start"], end=sel["end"])
+        g = pitching_caps.games_for_pitcher(int(pid), start=sel["start"], end=sel["end"])
         return int(g.iloc[0]["game_id"]) if not g.empty else None
     return gid
 
@@ -50,7 +51,7 @@ def register_callbacks(dash_app) -> None:
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
-        g = P.games_for_pitcher(pid) if pid else None
+        g = pitching_caps.games_for_pitcher(pid) if pid else None
         if g is None or g.empty:
             return no_update, no_update, show
         anchor = str(g["game_date"].max())
@@ -69,7 +70,7 @@ def register_callbacks(dash_app) -> None:
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
         if not pid or not start or not end:
             return [], None
-        g = P.games_for_pitcher(pid, start=start, end=end)
+        g = pitching_caps.games_for_pitcher(pid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, pitcher_id=pid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None
         return opts, value
@@ -85,7 +86,7 @@ def register_callbacks(dash_app) -> None:
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
         if game_id == dr.ALL_IN_RANGE:
-            g = P.games_for_pitcher(pid, start=start, end=end) if pid else None
+            g = pitching_caps.games_for_pitcher(pid, start=start, end=end) if pid else None
             sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
         else:
             sb = layout.scoreboard(game_id)
@@ -100,11 +101,11 @@ def register_callbacks(dash_app) -> None:
         if gid == dr.ALL_IN_RANGE:
             if not sel.get("start") or not sel.get("end"):
                 return None
-            df = P.range_pitches_for(int(sel["pitcher_id"]), sel["start"], sel["end"])
+            df = pitching_caps.range_pitches_for(int(sel["pitcher_id"]), sel["start"], sel["end"])
         elif gid is None:
             return None
         else:
-            df = P.game_pitches_for(int(gid), int(sel["pitcher_id"]))
+            df = pitching_caps.game_pitches_for(int(gid), int(sel["pitcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(
@@ -124,7 +125,7 @@ def register_callbacks(dash_app) -> None:
                 return html.Div("Select a pitcher.", style={"padding": "12px", "color": "#555"})
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
-                g = P.games_for_pitcher(int(pid), start=sel.get("start"), end=sel.get("end"))
+                g = pitching_caps.games_for_pitcher(int(pid), start=sel.get("start"), end=sel.get("end"))
                 gids = [int(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select an outing.", style={"padding": "12px", "color": "#555"})

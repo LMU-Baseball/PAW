@@ -4,6 +4,7 @@ from __future__ import annotations
 from dash import dcc, html
 
 from app.data import pitching as P
+from app.data import pitching_caps
 from app.dashboards.pitching import tables
 from app.dashboards.shell import section
 
@@ -19,7 +20,7 @@ COUNT_OPTIONS = [{"label": "Last 3", "value": 3}, {"label": "Last 5", "value": 5
 def body(pitcher_id, game_id, n) -> html.Div:
     if pitcher_id is None or game_id is None:
         return html.Div("No outing selected.")
-    recent = P.recent_outings(int(pitcher_id), int(game_id), int(n))
+    recent = pitching_caps.recent_outings(int(pitcher_id), int(game_id), int(n))
     if recent.empty:
         return html.Div("No prior outings.")
     show = recent[[c for c in _COLS if c in recent.columns]].rename(columns=_COLS)

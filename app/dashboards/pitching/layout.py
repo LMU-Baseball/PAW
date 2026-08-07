@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import pitching as P
+from app.data import pitching_caps
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -24,8 +24,8 @@ def _tile(label, value):
 def sidebar(pitcher_id, start=None, end=None) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style={"padding": "12px"})
-    prof = P.pitcher_profile(int(pitcher_id))
-    summ = P.range_summary(int(pitcher_id), start, end)
+    prof = pitching_caps.pitcher_profile(int(pitcher_id))
+    summ = pitching_caps.range_summary(int(pitcher_id), start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"],
@@ -55,7 +55,7 @@ def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
     if not game_id:
         return html.Div()
     try:
-        ctx = P.game_context(int(game_id))
+        ctx = pitching_caps.game_context(int(game_id))
     except Exception:
         return html.Div()
     opp = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
@@ -75,7 +75,7 @@ def serve_layout() -> html.Div:
     default_pitcher = selectors.resolve_pitcher(
         pitchers[0]["value"] if pitchers else None,
         is_coach=is_coach, own_trackman_id=own)
-    games_df = P.games_for_pitcher(default_pitcher) if default_pitcher else None
+    games_df = pitching_caps.games_for_pitcher(default_pitcher) if default_pitcher else None
     if games_df is not None and not games_df.empty:
         min_bound = str(games_df["game_date"].min())
         max_bound = str(games_df["game_date"].max())
