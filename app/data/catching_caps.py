@@ -98,3 +98,155 @@ def game_pitches_season(catcher_id) -> pd.DataFrame:
 def game_context(game_id) -> dict:
     """Reuse pitching_caps's game context (already on GAMES)."""
     return pitching_caps.game_context(game_id)
+
+
+# ======================= IDENTITY + ROSTER ==================================
+#
+# Catcher identity here is RAW GAMES.CatcherId (== a player's trackman_id),
+# unlike catching.py's warehouse surrogate catcher_id. GAMES.Catcher is
+# verified live as "Last, First" (e.g. "Lyall, Jake") -- the SAME format
+# catching.catcher_name already builds from tm_player, so (unlike the
+# pitching slice's First/Last reorder) catcher_name here reads GAMES.Catcher
+# as-is, with no reformatting.
+
+def lmu_catchers() -> pd.DataFrame:
+    """One row per LMU catcher (name deduped; canonical id = most-tracked id
+    within the window), scoped to the same ~12-month recent-data window
+    pitching_caps.lmu_pitchers uses (shared clause: GAMES/PitcherTeam is the
+    same table/column for both slices, so the window is identical).
+
+    Mirrors catching.wh_lmu_catchers's dedup logic, but over GAMES/CatcherId
+    instead of fact_tm_game_pitch/catcher_id -- windowed for the same reason:
+    GAMES holds full CAPS history back to 2022, so an unscoped version would
+    surface retired alumni the warehouse (current-season-only) never has.
+    """
+    df = query_df(
+        f"""
+        SELECT CatcherId, Catcher FROM (
+          SELECT CatcherId, Catcher,
+                 ROW_NUMBER() OVER (PARTITION BY Catcher
+                                    ORDER BY COUNT(*) DESC, CatcherId) AS rn
+            FROM GAMES
+           WHERE PitcherTeam = :team AND CatcherId IS NOT NULL
+             AND {pitching_caps._RECENT_WINDOW_CLAUSE}
+           GROUP BY CatcherId, Catcher
+        ) t WHERE rn = 1 ORDER BY Catcher
+        """,
+        {"team": LMU_PITCHER_TEAM},
+    )
+    if not df.empty:
+        df["CatcherId"] = df["CatcherId"].astype(int)
+    return df
+
+
+def catcher_name(catcher_id) -> str:
+    """"Last, First" straight from GAMES.Catcher -- matches
+    catching.catcher_name's format exactly (also "Last, First", built from
+    tm_player there), so no reordering is needed (unlike pitcher_name)."""
+    df = query_df(
+        "SELECT Catcher FROM GAMES WHERE CatcherId = :c LIMIT 1",
+        {"c": int(catcher_id)},
+    )
+    if df.empty:
+        return str(catcher_id)
+    return str(df.iloc[0]["Catcher"])
+
+
+def catcher_tm_id_for(catcher_id):
+    """Identity: GAMES.CatcherId already IS the raw trackman id. Kept for API
+    compat with the report/dashboard/video's role-gating code."""
+    return int(catcher_id)
+
+
+def catcher_profile(catcher_id) -> dict:
+    """Name + position 'C' + jersey/photo (roster_media, by raw id directly --
+    no catcher_tm_id_for mapping needed, unlike the oracle)."""
+    from app.data import roster_media
+    name = catcher_name(catcher_id)
+    media = roster_media.player_media(int(catcher_id))
+    return {"name": name, "class_year": "", "position": "C",
+            "throws": "", "jersey": media.get("jersey", ""),
+            "photo": media.get("photo_url", "")}
+
+
+def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
+    """A catcher's games, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'.
+    Optional start/end (inclusive) bound game_date. Sibling-id union, matching
+    catching.games_for_catcher's shape/format exactly.
+
+    Restricted to numeric GameIDs (see `_NUMERIC_GAME_ID_CLAUSE`): GAMES also
+    holds pre-CAPS-migration scrimmage rows under composite string GameIDs
+    that predate the warehouse's synced season -- excluding them reproduces
+    the oracle's season boundary exactly and guards the int-cast below from a
+    legacy string GameID (mirroring pitching_caps.games_for_pitcher).
+    """
+    ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
+    date_clause = ""
+    if start is not None and end is not None:
+        date_clause = " AND Date BETWEEN :start AND :end"
+        idp["start"] = str(start)
+        idp["end"] = str(end)
+    df = query_df(
+        f"""
+        SELECT DISTINCT GameID AS game_id, Date AS game_date,
+               HomeTeam AS home_team, AwayTeam AS away_team,
+               HomeTeamForeignID AS home_team_id
+          FROM GAMES
+         WHERE CatcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}{date_clause}
+        """,
+        idp,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
+    df["game_id"] = df["game_id"].astype(int)
+    df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
+    lmu_home = df["home_team_id"] == LMU_TEAM_ID
+    opp = df["away_team"].where(lmu_home, df["home_team"])
+    loc = pd.Series("vs", index=df.index).where(lmu_home, "@")
+    df["GameLabel"] = (df["game_date"].astype(str) + " " + loc + " " + opp.fillna("?"))
+    return df[["game_id", "game_date", "GameLabel"]].reset_index(drop=True)
+
+
+# ============================ SEASON TILES ===================================
+
+def framing_season_tiles(catcher_id) -> dict:
+    """Season sidebar tiles: games, pitches, net strikes, steal% -- SQL
+    aggregate over GAMES (sibling-id union), mirroring catching's warehouse
+    version exactly (same keys/format/InZone box). No game_id-driven date
+    bound, so guarded by `_NUMERIC_GAME_ID_CLAUSE` (see games_for_catcher)
+    to keep pre-CAPS-migration composite-GameID rows out of "whole career"
+    totals -- verified live to reproduce the oracle's totals exactly for the
+    fixture catcher.
+    """
+    from app.data.catching import _pct
+    ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
+    df = query_df(
+        f"""
+        SELECT COUNT(DISTINCT GameID) AS games,
+               COUNT(*) AS pitches,
+               SUM(PitchCall='StrikeCalled'
+                   AND NOT (ABS(PlateLocSide*12) <= 10
+                            AND ABS(PlateLocHeight*12 - 30) <= 13)) AS stolen,
+               SUM(PitchCall='BallCalled'
+                   AND (ABS(PlateLocSide*12) <= 10
+                        AND ABS(PlateLocHeight*12 - 30) <= 13)) AS lost,
+               SUM(PlateLocSide IS NOT NULL
+                   AND PlateLocHeight IS NOT NULL) AS valid_loc
+          FROM GAMES
+         WHERE CatcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}
+        """,
+        idp,
+    )
+    if df.empty:
+        return {"games": "—", "pitches": "—", "net_strikes": "—", "steal_pct": "—"}
+    r = df.iloc[0]
+    stolen = int(r["stolen"] or 0)
+    lost = int(r["lost"] or 0)
+    valid_loc = int(r["valid_loc"] or 0)
+    steal = _pct(lost, valid_loc)
+    return {
+        "games": str(int(r["games"] or 0)),
+        "pitches": str(int(r["pitches"] or 0)),
+        "net_strikes": str(stolen - lost),
+        "steal_pct": "—" if steal is None else f"{steal}%",
+    }
