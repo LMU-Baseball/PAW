@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import catching as C
+from app.data import catching_caps
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -24,8 +24,8 @@ def _tile(label, value):
 def sidebar(catcher_id) -> html.Div:
     if catcher_id is None:
         return html.Div("Select a catcher.", style={"padding": "12px"})
-    prof = C.catcher_profile(int(catcher_id))
-    summ = C.framing_season_tiles(int(catcher_id))
+    prof = catching_caps.catcher_profile(int(catcher_id))
+    summ = catching_caps.framing_season_tiles(int(catcher_id))
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"]) if x])
@@ -54,7 +54,7 @@ def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
     if not game_id:
         return html.Div()
     try:
-        ctx = C.game_context(int(game_id))
+        ctx = catching_caps.game_context(int(game_id))
     except Exception:
         return html.Div()
     opp = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
@@ -74,7 +74,7 @@ def serve_layout() -> html.Div:
     default_catcher = selectors.resolve_catcher(
         catchers[0]["value"] if catchers else None,
         is_coach=is_coach, own_trackman_id=own)
-    games_df = C.games_for_catcher(default_catcher) if default_catcher else None
+    games_df = catching_caps.games_for_catcher(default_catcher) if default_catcher else None
     if games_df is not None and not games_df.empty:
         min_bound = str(games_df["game_date"].min())
         max_bound = str(games_df["game_date"].max())

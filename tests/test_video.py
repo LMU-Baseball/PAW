@@ -9,26 +9,27 @@ from app.db import query_df
 
 @pytest.fixture(scope="module")
 def sample():
-    """A (game_id, pitcher_tm_id, batter_id, catcher_id) that has video.
+    """A (game_id, pitcher_tm_id, batter_tm_id, catcher_tm_id) that has video.
 
-    pitcher_tm_id is the RAW trackman id (== GAMES.PitcherId, what the
-    pitching dashboard/report pass post-cutover) -- NOT the warehouse
-    surrogate f.pitcher_id, which video._sibling_ids no longer accepts for
-    the pitcher subject (see test_sibling_ids_pitcher_uses_raw_column_and_
-    pitching_caps below).
+    pitcher_tm_id/catcher_tm_id are the RAW trackman ids (== GAMES.PitcherId/
+    GAMES.CatcherId, what the pitching/catching dashboards+report pass
+    post-cutover) -- NOT the warehouse surrogate f.pitcher_id/f.catcher_id,
+    which video._sibling_ids no longer accepts for either subject (see
+    test_sibling_ids_pitcher_uses_raw_column_and_pitching_caps and
+    test_sibling_ids_catcher_uses_raw_column_and_catching_caps below).
     """
     row = query_df(
         """
-        SELECT f.game_id, f.pitcher_tm_id, f.batter_tm_id, f.catcher_id
+        SELECT f.game_id, f.pitcher_tm_id, f.batter_tm_id, f.catcher_tm_id
           FROM vw_pitch_video v
           JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
-         WHERE f.catcher_id IS NOT NULL AND f.batter_tm_id IS NOT NULL
+         WHERE f.catcher_tm_id IS NOT NULL AND f.batter_tm_id IS NOT NULL
            AND f.pitcher_tm_id IS NOT NULL
          LIMIT 1
         """
     ).iloc[0]
     return dict(game_id=int(row["game_id"]), pitcher_tm_id=int(row["pitcher_tm_id"]),
-                batter_tm_id=int(row["batter_tm_id"]), catcher_id=int(row["catcher_id"]))
+                batter_tm_id=int(row["batter_tm_id"]), catcher_tm_id=int(row["catcher_tm_id"]))
 
 
 def test_constants_shape():
@@ -52,14 +53,14 @@ def test_pitcher_filter_one_row_per_pitch(sample):
 
 def test_batter_and_catcher_filters(sample):
     b = video.pitch_video_df(sample["game_id"], batter_id=sample["batter_tm_id"])
-    c = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_id"])
+    c = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_tm_id"])
     assert not b.empty and b["pitch_uid"].is_unique
     assert not c.empty and c["pitch_uid"].is_unique
 
 
 def test_game_id_list_unions(sample):
-    one = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_id"])
-    many = video.pitch_video_df([sample["game_id"]], catcher_id=sample["catcher_id"])
+    one = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_tm_id"])
+    many = video.pitch_video_df([sample["game_id"]], catcher_id=sample["catcher_tm_id"])
     assert len(one) == len(many)
 
 
@@ -113,3 +114,25 @@ def test_pitcher_video_returns_data_for_raw_trackman_id(sample):
     assert not df.empty
     assert sample["game_id"] in video.games_with_video(
         [sample["game_id"]], pitcher_id=sample["pitcher_tm_id"])
+
+
+def test_sibling_ids_catcher_uses_raw_column_and_catching_caps(sample):
+    """Regression: the catcher subject must resolve siblings via catching_caps
+    (raw GAMES.CatcherId space) and filter fact_tm_game_pitch.catcher_tm_id --
+    not the warehouse surrogate catcher_id column, which a raw trackman id
+    (what the post-cutover catching dashboard now passes) would never match.
+    That mismatch would silently blank the Outing Video tab + the game
+    dropdown's "has video" badge for every catcher."""
+    col, sib = video._sibling_ids(batter_id=None, pitcher_id=None,
+                                  catcher_id=sample["catcher_tm_id"])
+    assert col == "catcher_tm_id"
+    assert sample["catcher_tm_id"] in sib
+
+
+def test_catcher_video_returns_data_for_raw_trackman_id(sample):
+    """End-to-end regression for the id-space flip: a RAW catcher id (what the
+    catching dashboard now passes post-cutover) must still find video."""
+    df = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_tm_id"])
+    assert not df.empty
+    assert sample["game_id"] in video.games_with_video(
+        [sample["game_id"]], catcher_id=sample["catcher_tm_id"])

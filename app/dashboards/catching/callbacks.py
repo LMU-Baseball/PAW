@@ -7,7 +7,7 @@ import pandas as pd
 from dash import ALL, Input, Output, State, ctx, html
 from flask_login import current_user
 
-from app.data import catching as C
+from app.data import catching_caps
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui, video as videotab
 from app.dashboards.catching import charts, layout, selectors
@@ -36,7 +36,7 @@ def register_callbacks(dash_app) -> None:
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
-        g = C.games_for_catcher(cid) if cid else None
+        g = catching_caps.games_for_catcher(cid) if cid else None
         if g is None or g.empty:
             return no_update, no_update, show
         anchor = str(g["game_date"].max())
@@ -55,7 +55,7 @@ def register_callbacks(dash_app) -> None:
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
         if not cid or not start or not end:
             return [], None
-        g = C.games_for_catcher(cid, start=start, end=end)
+        g = catching_caps.games_for_catcher(cid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, catcher_id=cid))
         value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
         return opts, value
@@ -71,7 +71,7 @@ def register_callbacks(dash_app) -> None:
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
         if game_id == dr.ALL_IN_RANGE:
-            g = C.games_for_catcher(cid, start=start, end=end) if cid else None
+            g = catching_caps.games_for_catcher(cid, start=start, end=end) if cid else None
             sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
         else:
             sb = layout.scoreboard(game_id)
@@ -86,11 +86,11 @@ def register_callbacks(dash_app) -> None:
         if gid == dr.ALL_IN_RANGE:
             if not sel.get("start") or not sel.get("end"):
                 return None
-            df = C.range_pitches_for(int(sel["catcher_id"]), sel["start"], sel["end"])
+            df = catching_caps.range_pitches_for(int(sel["catcher_id"]), sel["start"], sel["end"])
         elif gid is None:
             return None
         else:
-            df = C.game_pitches_for(int(gid), int(sel["catcher_id"]))
+            df = catching_caps.game_pitches_for(int(gid), int(sel["catcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(
@@ -106,7 +106,7 @@ def register_callbacks(dash_app) -> None:
                 return html.Div("Select a catcher.", style={"padding": "12px", "color": "#555"})
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
-                g = C.games_for_catcher(int(cid), start=sel.get("start"), end=sel.get("end"))
+                g = catching_caps.games_for_catcher(int(cid), start=sel.get("start"), end=sel.get("end"))
                 gids = [int(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})

@@ -55,21 +55,28 @@ def _sample_df():
 
 def test_resolve_catcher_player_is_self_only():
     from app.dashboards.catching import selectors
+    # A player ignores the requested id and gets their own (RAW trackman id --
+    # GAMES.CatcherId IS the trackman id, so no surrogate mapping happens).
     assert selectors.resolve_catcher(999, is_coach=False, own_trackman_id=None) is None
-    assert selectors.resolve_catcher(999, is_coach=True, own_trackman_id=None) == 999
+    assert selectors.resolve_catcher(999, is_coach=False, own_trackman_id=555) == 555
 
 
-def test_resolve_catcher_player_discards_requested_id(monkeypatch):
+def test_resolve_catcher_coach_passes_through():
     from app.dashboards.catching import selectors
-    monkeypatch.setattr(selectors, "_catcher_id_for_tm", lambda tm: 4242)
+    assert selectors.resolve_catcher(999, is_coach=True, own_trackman_id=None) == 999
+    assert selectors.resolve_catcher(None, is_coach=True, own_trackman_id=None) is None
+
+
+def test_resolve_catcher_player_discards_requested_id():
+    from app.dashboards.catching import selectors
     got = selectors.resolve_catcher(999, is_coach=False, own_trackman_id=555)
-    assert got == 4242
+    assert got == 555  # own raw id, NOT the requested 999
 
 
 def test_catcher_options_coach(monkeypatch):
     from app.dashboards.catching import selectors
     monkeypatch.setattr(
-        "app.data.catching.wh_lmu_catchers",
+        "app.data.catching_caps.lmu_catchers",
         lambda: pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1},
                               {"Catcher": "Roe, Jane", "CatcherId": 2}]),
     )
@@ -154,22 +161,31 @@ def test_framing_facets_empty_df():
 
 @pytest.fixture(scope="module")
 def real_catcher():
-    """Live-DB fixture (unguarded when DB is up; skips if unreachable/empty)."""
+    """Live-DB fixture (unguarded when DB is up; skips if unreachable/empty).
+
+    RAW GAMES.CatcherId (== a player's trackman_id) -- the id space the
+    dashboard now uses everywhere (no warehouse surrogate mapping). Scoped to
+    numeric GameIDs (see pitching_caps._NUMERIC_GAME_ID_CLAUSE): GAMES also
+    holds pre-CAPS-migration rows under composite string GameIDs, and a
+    catcher whose *only* appearances are pre-migration would have zero games
+    in catching_caps.games_for_catcher (which applies this same guard).
+    """
     from sqlalchemy.exc import OperationalError
     from app.db import query_df
     try:
         df = query_df(
             """
-            SELECT catcher_id FROM fact_tm_game_pitch
-             WHERE pitcher_team = 'LOY_LIO' AND catcher_id IS NOT NULL
-             GROUP BY catcher_id ORDER BY COUNT(*) DESC LIMIT 1
+            SELECT CatcherId FROM GAMES
+             WHERE PitcherTeam = 'LOY_LIO' AND CatcherId IS NOT NULL
+               AND GameID REGEXP '^[0-9]+$'
+             GROUP BY CatcherId ORDER BY COUNT(*) DESC LIMIT 1
             """
         )
     except OperationalError as e:
         pytest.skip(f"Analytics DB unreachable: {e}")
     if df.empty:
-        pytest.skip("No LMU catcher rows in warehouse")
-    return int(df.loc[0, "catcher_id"])
+        pytest.skip("No LMU catcher rows in GAMES")
+    return int(df.loc[0, "CatcherId"])
 
 
 def test_catcher_options_coach_live(real_catcher):
@@ -186,13 +202,13 @@ def test_game_options_for_real_catcher(real_catcher):
 
 
 def test_all_tabs_render_live(real_catcher):
-    from app.data import catching as C
+    from app.data import catching_caps
     from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
-    games = C.games_for_catcher(real_catcher)
+    games = catching_caps.games_for_catcher(real_catcher)
     if games.empty:
         pytest.skip("No games found for live catcher")
     gid = int(games.iloc[0]["game_id"])
-    df = C.game_pitches_for(gid, real_catcher)
+    df = catching_caps.game_pitches_for(gid, real_catcher)
     if df.empty:
         pytest.skip("No pitch rows for live catcher's game")
     assert framing.render(df) is not None
@@ -224,13 +240,13 @@ def test_caught_stealing_render_empty():
 
 
 def test_catching_range_pooled_render_live(real_catcher):
-    from app.data import catching as C
+    from app.data import catching_caps
     from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
-    g = C.games_for_catcher(real_catcher)
+    g = catching_caps.games_for_catcher(real_catcher)
     if g.empty:
         import pytest; pytest.skip("no games")
     lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
-    pooled = C.range_pitches_for(real_catcher, lo, hi)
+    pooled = catching_caps.range_pitches_for(real_catcher, lo, hi)
     if pooled.empty:
         import pytest; pytest.skip("no pooled pitches")
     assert framing.render(pooled) is not None
