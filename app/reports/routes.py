@@ -7,7 +7,7 @@ from flask import Blueprint, Response, abort, render_template, request
 from flask_login import current_user, login_required
 
 from app.auth.access import can_view_pitcher_report, can_view_bullpen
-from app.data import pitching as P
+from app.data import pitching_caps
 from app.data import bullpen as BULL
 from app.reports.pitcher_postgame import ReportDataError, build_pitcher_postgame
 from app.reports.bullpen_report import build_bullpen_report
@@ -24,7 +24,7 @@ def _safe(text: str) -> str:
 @login_required
 def pitching_landing():
     """Pick a recent game, then download any of that game's pitcher reports."""
-    games = P.recent_games(limit=25)
+    games = pitching_caps.recent_games(limit=25)
     game_id = request.args.get("game_id", type=int)
     sort = request.args.get("sort", "pitch")
     if sort not in ("pitch", "alpha"):
@@ -36,7 +36,7 @@ def pitching_landing():
         match = games[games["game_id"] == game_id]
         if not match.empty:
             selected = match.iloc[0].to_dict()
-        pitchers = P.pitchers_for_game(game_id, sort=sort).to_dict("records")
+        pitchers = pitching_caps.pitchers_for_game(game_id, sort=sort).to_dict("records")
 
     return render_template(
         "reports/pitching_landing.html",
@@ -78,7 +78,7 @@ def pitching_all_zip(game_id: int):
     if sort not in ("pitch", "alpha"):
         sort = "pitch"
 
-    pitchers = P.pitchers_for_game(game_id, sort=sort).to_dict("records")
+    pitchers = pitching_caps.pitchers_for_game(game_id, sort=sort).to_dict("records")
     viewable = [p for p in pitchers
                 if can_view_pitcher_report(current_user, p["player_id"])]
     if not viewable:
@@ -106,7 +106,7 @@ def pitching_all_zip(game_id: int):
     # Friendly zip name: LMU_pitching_<date>_vs_<opp>.zip when context is available.
     zip_name = f"LMU_pitching_reports_game_{game_id}.zip"
     try:
-        ctx = P.game_context(game_id)
+        ctx = pitching_caps.game_context(game_id)
         opp = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
         zip_name = f"LMU_pitching_{_safe(ctx['game_date'])}_vs_{_safe(opp)}.zip"
     except Exception:  # noqa: BLE001 -- name is cosmetic; never fail the download

@@ -9,6 +9,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.data import pitching as P
+from app.data import pitching_caps
 from app.reports.pdf import html_to_pdf
 from app.reports import plots
 from app.reports.report_goals import apply_goals
@@ -59,7 +60,7 @@ def _inline_fonts(css_text: str) -> str:
 
 def _build_html(game_id: int, pitcher_id: int) -> str:
     """Render the one-page pitcher report to an HTML string (no PDF step)."""
-    df = P.game_pitches(game_id, pitcher_id)
+    df = pitching_caps.game_pitches(game_id, pitcher_id)
     if df.empty:
         raise ReportDataError(f"No pitches for game_id={game_id}, pitcher_id={pitcher_id}")
 
@@ -71,7 +72,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
             f"pitcher_id={pitcher_id} in game_id={game_id} is not an LMU pitcher "
             f"(team {teams}); reports are LMU-only")
 
-    context = P.game_context(game_id)
+    context = pitching_caps.game_context(game_id)
     # Handedness from the pitcher's throwing side; fall back to RHP.
     hand = "RHP"
     if "pitcher_throws" in df.columns:
@@ -105,7 +106,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
     }
 
     return _env.get_template("pitcher_onepager.html").render(
-        pitcher=P.pitcher_name(pitcher_id),
+        pitcher=pitching_caps.pitcher_name(pitcher_id),
         hand=hand,
         context=context,
         line=P.header_stat_line(df),
@@ -124,7 +125,7 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
 # Bump this whenever the report's layout/content changes so previously cached
 # PDFs (keyed by DATA version) don't keep serving the old design. The data
 # version alone can't detect a code change — see MEMORY §3j.
-_CODE_VERSION = "2026-08-polish-2"
+_CODE_VERSION = "2026-08-polish-2-caps"
 
 
 def _cache_path(game_id: int, pitcher_id: int, version: str) -> Path:
@@ -136,7 +137,7 @@ def build_pitcher_postgame(game_id: int, pitcher_id: int) -> bytes:
     # Serve a cached PDF when one exists for this exact data version. The
     # version token advances when the pitcher gets new data, so a cached report
     # can never show a stale season velo-trend — it just rebuilds.
-    version = P.report_data_version(pitcher_id)
+    version = pitching_caps.report_data_version(pitcher_id)
     cache_file = _cache_path(game_id, pitcher_id, version)
     if cache_file.exists():
         return cache_file.read_bytes()

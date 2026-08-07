@@ -74,9 +74,17 @@ def test_fig_to_data_uri_embeds_png():
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+# Behrens, Adam: raw GAMES.PitcherId 823008, GameID 315 (2026-05-15, LMU @ USD,
+# 106 pitches) -- same live fixture test_pitching_caps.py uses to prove the
+# GAMES-backed queries this report now reads (pitching_caps) match the old
+# warehouse oracle. Ids are RAW trackman ids post-caps-cutover, not the old
+# warehouse surrogate ids these tests used before Task 7.
+GAME_ID, PITCHER_ID = 315, 823008
+
+
 def test_build_pitcher_postgame_smoke():
     from app.reports.pitcher_postgame import build_pitcher_postgame
-    pdf = build_pitcher_postgame(166, 1)
+    pdf = build_pitcher_postgame(GAME_ID, PITCHER_ID)
     assert pdf[:5] == b"%PDF-"
     assert len(pdf) > 5000
 
@@ -85,12 +93,12 @@ def test_build_raises_on_empty():
     from app.reports.pitcher_postgame import build_pitcher_postgame, ReportDataError
     import pytest
     with pytest.raises(ReportDataError):
-        build_pitcher_postgame(166, 99999999)
+        build_pitcher_postgame(GAME_ID, 99999999)
 
 
 def test_build_html_renders_onepager_sections():
     from app.reports.pitcher_postgame import _build_html
-    html = _build_html(166, 1)
+    html = _build_html(GAME_ID, PITCHER_ID)
     for token in ("Process Metrics", "Outcome Metrics", "Pitch Usage",
                   "Movement Summary", "vRHH Zone", "vLHH Zone",
                   "data:image/png;base64,"):

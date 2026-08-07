@@ -12,7 +12,7 @@ import app.reports.pitcher_postgame as PP
 def _patch(monkeypatch, tmp_path, version, build_counter):
     """Point the cache at tmp_path and stub out the version + heavy build."""
     monkeypatch.setattr(PP, "_CACHE_DIR", Path(tmp_path))
-    monkeypatch.setattr(PP.P, "report_data_version", lambda pid: version["v"])
+    monkeypatch.setattr(PP.pitching_caps, "report_data_version", lambda pid: version["v"])
     monkeypatch.setattr(PP, "_build_html", lambda gid, pid: "<html>report</html>")
 
     def _fake_pdf(html):

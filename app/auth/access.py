@@ -32,7 +32,7 @@ def can_view_pitcher_report(user, pitcher_id) -> bool:
         return False
     if user.role == "coach":
         return True
-    from app.data.pitching import pitcher_tm_id_for
+    from app.data.pitching_caps import pitcher_tm_id_for
     tm_id = pitcher_tm_id_for(pitcher_id)
     return tm_id is not None and str(user.trackman_id) == str(tm_id)
 

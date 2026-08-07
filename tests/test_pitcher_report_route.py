@@ -76,10 +76,12 @@ class _StubUser:
 
 
 # NOTE: can_view_pitcher_report imports pitcher_tm_id_for *inside* the function
-# body (`from app.data.pitching import pitcher_tm_id_for`), so the name is
-# resolved from app.data.pitching at call time -- that is the correct patch
+# body (`from app.data.pitching_caps import pitcher_tm_id_for`), so the name is
+# resolved from app.data.pitching_caps at call time -- that is the correct patch
 # target (patching app.auth.access.pitcher_tm_id_for would have no effect,
-# since no such module-level name exists there).
+# since no such module-level name exists there). pitching_caps.pitcher_tm_id_for
+# is identity (raw pitcher_id == trackman_id), but these tests still stub it to
+# keep the gate's comparison logic under test independent of that fact.
 def test_can_view_anonymous_is_false():
     assert can_view_pitcher_report(_StubUser(is_authenticated=False), 1) is False
 
@@ -87,12 +89,12 @@ def test_can_view_anonymous_is_false():
 def test_can_view_coach_is_true_without_db(monkeypatch):
     def _boom(pid):  # pragma: no cover - must never be called for a coach
         raise AssertionError("coach path must not hit the warehouse")
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", _boom)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", _boom)
     assert can_view_pitcher_report(_StubUser(role="coach"), 1) is True
 
 
 def test_can_view_player_matching_id_is_true(monkeypatch):
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: 694990)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 694990)
     assert can_view_pitcher_report(
         _StubUser(role="player", trackman_id=694990), 1) is True
 
@@ -100,19 +102,19 @@ def test_can_view_player_matching_id_is_true(monkeypatch):
 def test_can_view_player_matching_id_str_int_coerces(monkeypatch):
     # trackman_id stored as int, tm_id looked up as str (or vice versa) -- the
     # str()-cast comparison must still match.
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: "694990")
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: "694990")
     assert can_view_pitcher_report(
         _StubUser(role="player", trackman_id=694990), 1) is True
 
 
 def test_can_view_player_mismatched_id_is_false(monkeypatch):
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: 111111)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 111111)
     assert can_view_pitcher_report(
         _StubUser(role="player", trackman_id=694990), 1) is False
 
 
 def test_can_view_player_no_tm_id_is_false(monkeypatch):
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: None)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: None)
     assert can_view_pitcher_report(
         _StubUser(role="player", trackman_id=694990), 1) is False
 
@@ -121,7 +123,7 @@ def test_can_view_player_no_tm_id_is_false(monkeypatch):
 
 def test_player_gets_403_for_other_pitcher(app_ctx, monkeypatch):
     # Player's trackman_id is 694990; this pitcher maps to a different tm id.
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: 111111)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 111111)
     client = app_ctx.test_client()
     _login(client, "p@lmu.edu")
     with patch("app.reports.routes.build_pitcher_postgame", return_value=b"%PDF-mock"):
@@ -131,7 +133,7 @@ def test_player_gets_403_for_other_pitcher(app_ctx, monkeypatch):
 
 def test_player_gets_pdf_for_own_pitcher(app_ctx, monkeypatch):
     # This pitcher maps to the player's own trackman_id -> allowed.
-    monkeypatch.setattr("app.data.pitching.pitcher_tm_id_for", lambda pid: 694990)
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 694990)
     client = app_ctx.test_client()
     _login(client, "p@lmu.edu")
     with patch("app.reports.routes.build_pitcher_postgame", return_value=b"%PDF-mock"):

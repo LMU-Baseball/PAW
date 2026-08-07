@@ -60,7 +60,7 @@ def test_anonymous_redirects(app_ctx):
 
 
 def test_landing_lists_games(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching")
@@ -71,7 +71,7 @@ def test_landing_lists_games(app_ctx, monkeypatch):
 
 
 def test_landing_has_white_header_back_link(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     body = client.get("/reports/pitching").get_data(as_text=True)
@@ -81,8 +81,8 @@ def test_landing_has_white_header_back_link(app_ctx, monkeypatch):
 
 
 def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
@@ -97,8 +97,8 @@ def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
 
 
 def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
@@ -114,12 +114,12 @@ def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypa
 
 
 def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
     seen = {}
     def _fake(gid, sort="pitch"):
         seen["sort"] = sort
         return _PITCHERS
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game", _fake)
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game", _fake)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching?game_id=166&sort=alpha")
@@ -128,8 +128,8 @@ def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
 
 
 def test_landing_shows_download_all_button(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
@@ -140,12 +140,12 @@ def test_landing_shows_download_all_button(app_ctx, monkeypatch):
 
 
 def test_download_all_zip_bundles_reports(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     monkeypatch.setattr("app.reports.routes.build_pitcher_postgame",
                         lambda gid, pid: f"PDF-{gid}-{pid}".encode())
     monkeypatch.setattr(
-        "app.data.pitching.game_context",
+        "app.data.pitching_caps.game_context",
         lambda gid: {"game_date": "2026-05-10", "home_team": "LMU",
                      "away_team": "SMC", "lmu_is_home": True})
     client = app_ctx.test_client()
@@ -163,7 +163,7 @@ def test_download_all_zip_bundles_reports(app_ctx, monkeypatch):
 
 def test_download_all_respects_per_pitcher_access(app_ctx, monkeypatch):
     """A user only gets reports they're allowed to view (player self-only)."""
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     monkeypatch.setattr("app.reports.routes.build_pitcher_postgame",
                         lambda gid, pid: f"PDF-{pid}".encode())
@@ -178,7 +178,7 @@ def test_download_all_respects_per_pitcher_access(app_ctx, monkeypatch):
 
 
 def test_download_all_404_when_nothing_viewable(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.pitchers_for_game",
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     monkeypatch.setattr("app.reports.routes.can_view_pitcher_report",
                         lambda user, pid: False)
@@ -189,7 +189,7 @@ def test_download_all_404_when_nothing_viewable(app_ctx, monkeypatch):
 
 
 def test_landing_renders_hero_banner(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching")

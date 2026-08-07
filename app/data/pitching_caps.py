@@ -32,7 +32,11 @@ _NUMERIC_GAME_ID_CLAUSE = "GameID REGEXP '^[0-9]+$'"
 # PlateLocHeight (paired with PlateLocSide) even though it isn't in the plan's
 # aliasing list verbatim -- pitching.py's fig_location/fig_heatmap read
 # plate_loc_height alongside plate_loc_side, and this module's loaders are the
-# only place that can supply it.
+# only place that can supply it. Also includes pitcher_team (Task 7: the
+# postgame report's LMU-only defense-in-depth guard reads this column off the
+# loaded pitch df) and pitcher_throws (Task 7: the report's handedness
+# detection reads this when present) -- both added columns, additive-only, so
+# they don't affect any existing parity assertion.
 _PITCH_SELECT = """
     PitchCall AS pitch_call, RelSpeed AS rel_speed, PlateLocSide AS plate_loc_side,
     PlateLocHeight AS plate_loc_height, InducedVertBreak AS induced_vert_break,
@@ -44,7 +48,8 @@ _PITCH_SELECT = """
     RunsScored AS runs_scored, BatterSide AS batter_side, SpinRate AS spin_rate,
     RelHeight AS rel_height, RelSide AS rel_side, Extension AS extension,
     ExitSpeed AS exit_speed, Zone AS izt_zone, GameID AS game_id,
-    PitcherId AS pitcher_id, `Top.Bottom` AS top_bottom
+    PitcherId AS pitcher_id, `Top.Bottom` AS top_bottom,
+    PitcherTeam AS pitcher_team, PitcherThrows AS pitcher_throws
 """
 
 
