@@ -11,6 +11,7 @@ import click
 
 from app.db import get_engine
 from app.ingest.add_game_type import backfill_game_type
+from app.ingest.backfill_zone import backfill_zone
 from app.ingest.bullpen import load_bullpen
 from app.ingest.config import hittrax_cfg, trackman_cfg
 from app.ingest.connections import open_ftps, open_sftp
@@ -101,6 +102,20 @@ def backfill_game_type_command(dry_run: bool):
     result = backfill_game_type(engine, dry_run=dry_run)
     click.echo(
         f"GAMES.GameType backfill: would_update={result['would_update']} dry_run={dry_run}"
+    )
+
+
+@ingest_cli.command("backfill-zone")
+@click.option(
+    "--dry-run/--no-dry-run", default=True,
+    help="Preview only, write nothing (default). Use --no-dry-run to actually update.",
+)
+def backfill_zone_command(dry_run: bool):
+    """One-time: backfill GAMES.Zone from fact_tm_game_pitch.izt_zone (joined on PitchUID)."""
+    engine = get_engine()
+    result = backfill_zone(engine, dry_run=dry_run)
+    click.echo(
+        f"GAMES.Zone backfill: would_update={result['would_update']} dry_run={dry_run}"
     )
 
 
