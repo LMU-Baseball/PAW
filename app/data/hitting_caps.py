@@ -189,6 +189,15 @@ def lmu_hitters() -> pd.DataFrame:
     total career pitches under an old pre-2025 BatterId than under their
     current one, so the unscoped tiebreak picked the stale id. Windowing
     removes the old id's rows from the count entirely.
+
+    Also guarded by the numeric-GameID filter (mirroring games_for_batter's
+    inline REGEXP form): a hitter can have in-window rows that are ALL legacy
+    composite-GameID (pre-CAPS-migration) games -- such a "ghost" would be
+    listed here but every numeric-GameID-guarded data function
+    (games_for_batter, season_pitches's downstream consumers, etc.) returns
+    empty for them, producing a blank dashboard. Restricting to numeric-
+    GameID rows keeps the dropdown consistent with what the data functions
+    can actually show.
     """
     df = query_df(
         f"""
@@ -198,7 +207,7 @@ def lmu_hitters() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, BatterId) AS rn
             FROM GAMES
            WHERE BatterTeam = :team AND BatterId IS NOT NULL
-             AND {_RECENT_WINDOW_CLAUSE}
+             AND {_RECENT_WINDOW_CLAUSE} AND GameID REGEXP '^[0-9]+$'
            GROUP BY Batter, BatterId
         ) t WHERE rn = 1 ORDER BY Batter
         """,

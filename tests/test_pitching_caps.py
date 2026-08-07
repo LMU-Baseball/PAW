@@ -306,6 +306,24 @@ def test_lmu_pitchers_columns():
     assert list(df.columns) == ["PitcherId", "Pitcher"]
 
 
+def test_lmu_pitchers_all_have_numeric_game_id_rows():
+    # No-ghost property (mirrors catching_caps/hitting_caps's regression):
+    # lmu_pitchers used to scope purely by the date-only _RECENT_WINDOW_CLAUSE,
+    # so a pitcher whose only in-window games carried legacy composite-string
+    # GameIDs would be listed while every numeric-GameID-guarded data function
+    # (games_for_pitcher, season_summary, range_summary, velo views) returned
+    # empty for them. Checked as a single SQL set-membership query rather than
+    # N per-id round trips.
+    ids = set(pitching_caps.lmu_pitchers()["PitcherId"].astype(int))
+    current_ids = set(query_df(
+        "SELECT DISTINCT PitcherId FROM GAMES "
+        "WHERE PitcherTeam = :t AND PitcherId IS NOT NULL "
+        f"AND {pitching_caps._NUMERIC_GAME_ID_CLAUSE}",
+        {"t": pitching_caps.LMU_PITCHER_TEAM},
+    )["PitcherId"].astype(int))
+    assert ids <= current_ids
+
+
 def test_games_for_pitcher_unbounded_matches_labels():
     # GAMES carries this raw id's rows back to 2024 via pre-CAPS-migration
     # composite string GameIDs (e.g. "20241019-LoyolaMarymount-1") that

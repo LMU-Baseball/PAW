@@ -212,3 +212,40 @@ def test_framing_season_tiles_zero_for_unknown_catcher():
     new = catching_caps.framing_season_tiles(999999999)
     assert new == old == {"games": "0", "pitches": "0",
                            "net_strikes": "0", "steal_pct": "—"}
+
+
+# ------------------------- ghost-player regression ---------------------------
+#
+# lmu_catchers scoped its list with a date-only _RECENT_WINDOW_CLAUSE but,
+# before this fix, no numeric-GameID guard -- so a catcher whose only
+# in-window GAMES rows carry legacy composite-string GameIDs (pre-CAPS-
+# migration) would be LISTED here while every numeric-GameID-guarded data
+# function (games_for_catcher, framing_season_tiles) returned empty for them:
+# a coach picking that name from the dropdown got a blank dashboard.
+
+def test_lmu_catchers_excludes_ghost_with_only_legacy_games():
+    # CatcherId 801901 ("Ayers, Robbie") has 13,398 in-window GAMES rows (max
+    # Date 2025-05-16, just inside the ~12-month window), ALL under legacy
+    # composite GameIDs, and zero numeric-GameID rows -- verified live.
+    GHOST_ID = 801901
+    ids = catching_caps.lmu_catchers()["CatcherId"].values
+    assert GHOST_ID not in ids
+    # Confirm he really WAS a ghost (the data function is empty for him), not
+    # merely absent from the roster for some unrelated reason.
+    assert catching_caps.games_for_catcher(GHOST_ID).empty
+
+
+def test_lmu_catchers_all_have_numeric_game_id_rows():
+    # No-ghost property, as a single SQL set-membership check rather than N
+    # per-id queries: every id lmu_catchers lists must have at least one
+    # numeric-GameID GAMES row -- the exact universe games_for_catcher/
+    # framing_season_tiles can actually serve.
+    from app.db import query_df
+    ids = set(catching_caps.lmu_catchers()["CatcherId"].astype(int))
+    current_ids = set(query_df(
+        "SELECT DISTINCT CatcherId FROM GAMES "
+        "WHERE PitcherTeam = :t AND CatcherId IS NOT NULL "
+        f"AND {catching_caps._NUMERIC_GAME_ID_CLAUSE}",
+        {"t": catching_caps.LMU_PITCHER_TEAM},
+    )["CatcherId"].astype(int))
+    assert ids <= current_ids

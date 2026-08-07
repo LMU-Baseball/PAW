@@ -165,6 +165,24 @@ def test_lmu_hitters_matches_warehouse():
         assert new_by_name[row["Batter"]] in siblings
 
 
+def test_lmu_hitters_all_have_numeric_game_id_rows():
+    # No-ghost property (mirrors catching_caps/pitching_caps's regression):
+    # lmu_hitters used to scope purely by the date-only _RECENT_WINDOW_CLAUSE,
+    # so a hitter whose only in-window games carried legacy composite-string
+    # GameIDs would be listed while every numeric-GameID-guarded data function
+    # (games_for_batter, season_pitches, etc.) returned empty for them.
+    # Checked as a single SQL set-membership query rather than N per-id round
+    # trips.
+    ids = set(hitting_caps.lmu_hitters()["BatterId"].astype(int))
+    current_ids = set(query_df(
+        "SELECT DISTINCT BatterId FROM GAMES "
+        "WHERE BatterTeam = :t AND BatterId IS NOT NULL "
+        "AND GameID REGEXP '^[0-9]+$'",
+        {"t": hitting_caps.LMU_BATTER_TEAM},
+    )["BatterId"].astype(int))
+    assert ids <= current_ids
+
+
 def _first_bip_game(bid):
     """First game (by wh_games_for_batter order) with >=1 ball in play."""
     for gid in hitting_wh.wh_games_for_batter(bid)["game_id"]:

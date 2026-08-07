@@ -316,6 +316,15 @@ def lmu_pitchers() -> pd.DataFrame:
     hitting_caps.lmu_hitters is: GAMES holds full CAPS history back to 2022,
     so an unscoped version would surface retired alumni the warehouse
     (current-season-only) never has.
+
+    Also guarded by `_NUMERIC_GAME_ID_CLAUSE`: a pitcher can have in-window
+    rows that are ALL legacy composite-GameID (pre-CAPS-migration) games --
+    such a "ghost" would be listed here but every numeric-GameID-guarded data
+    function (games_for_pitcher, season_summary, range_summary, velo views)
+    returns empty for them, producing a blank dashboard. Restricting to
+    numeric-GameID rows keeps the dropdown consistent with what the data
+    functions can actually show, and also means the COUNT(*) dedup tiebreak
+    is computed over current-era rows only.
     """
     df = query_df(
         f"""
@@ -325,7 +334,7 @@ def lmu_pitchers() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, PitcherId) AS rn
             FROM GAMES
            WHERE PitcherTeam = :team AND PitcherId IS NOT NULL
-             AND {_RECENT_WINDOW_CLAUSE}
+             AND {_RECENT_WINDOW_CLAUSE} AND {_NUMERIC_GAME_ID_CLAUSE}
            GROUP BY PitcherId, Pitcher
         ) t WHERE rn = 1 ORDER BY Pitcher
         """,

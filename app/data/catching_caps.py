@@ -119,6 +119,14 @@ def lmu_catchers() -> pd.DataFrame:
     instead of fact_tm_game_pitch/catcher_id -- windowed for the same reason:
     GAMES holds full CAPS history back to 2022, so an unscoped version would
     surface retired alumni the warehouse (current-season-only) never has.
+
+    Also guarded by `_NUMERIC_GAME_ID_CLAUSE`: a catcher can have in-window
+    rows that are ALL legacy composite-GameID (pre-CAPS-migration) games --
+    such a "ghost" would be listed here but every numeric-GameID-guarded data
+    function (games_for_catcher, framing_season_tiles) returns empty for
+    them, producing a blank dashboard (confirmed live for CatcherId 801901,
+    "Ayers, Robbie"). Restricting to numeric-GameID rows keeps the dropdown
+    consistent with what the data functions can actually show.
     """
     df = query_df(
         f"""
@@ -129,6 +137,7 @@ def lmu_catchers() -> pd.DataFrame:
             FROM GAMES
            WHERE PitcherTeam = :team AND CatcherId IS NOT NULL
              AND {pitching_caps._RECENT_WINDOW_CLAUSE}
+             AND {_NUMERIC_GAME_ID_CLAUSE}
            GROUP BY CatcherId, Catcher
         ) t WHERE rn = 1 ORDER BY Catcher
         """,
