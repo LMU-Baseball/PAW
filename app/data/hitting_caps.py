@@ -4,9 +4,10 @@ GAMES stores columns under the legacy names the app/data/hitting.py transforms
 expect, so no aliasing is needed -- SELECT the columns and hand to _finish.
 """
 from __future__ import annotations
+import numpy as np
 import pandas as pd
 from app.db import query_df
-from app.data.hitting_wh import _finish, _in_clause, _roster_lookup   # pure/param helpers, reused
+from app.data.hitting_wh import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers, reused
 from app.data.hitting import qab_frame, _slash_from_pas
 from app.data.roster_media import player_media
 
@@ -139,3 +140,109 @@ def player_profile(batter_id):
     media = player_media(int(batter_id))  # scraped headshot + jersey (blanks if none)
     return {"name": name, "bats": bats, "class_year": cy, "position": pos,
             "photo": media["photo_url"], "jersey": media["jersey"]}
+
+
+def lmu_hitters() -> pd.DataFrame:
+    """One row per LMU hitter (name deduped; canonical id = most-tracked id).
+
+    Mirrors hitting_wh.wh_lmu_hitters, but over GAMES/BatterId instead of
+    fact_tm_game_pitch/batter_tm_id.
+    """
+    df = query_df(
+        """
+        SELECT Batter, BatterId FROM (
+          SELECT Batter, BatterId,
+                 ROW_NUMBER() OVER (PARTITION BY Batter
+                                    ORDER BY COUNT(*) DESC, BatterId) AS rn
+            FROM GAMES
+           WHERE BatterTeam = :team AND BatterId IS NOT NULL
+           GROUP BY Batter, BatterId
+        ) t WHERE rn = 1 ORDER BY Batter
+        """,
+        {"team": LMU_BATTER_TEAM},
+    )
+    if not df.empty:
+        df["BatterId"] = df["BatterId"].astype(int)
+    return df
+
+
+def bip_points(batter_id, game_id) -> pd.DataFrame:
+    """Balls-in-play landing (x,y) + launch-radial (rx,ry) for a batter and
+    game(s). `game_id` is an int or a list. Empty full-column frame when none.
+
+    Mirrors hitting_wh.wh_bip_points's spray/radial math exactly. Unlike the
+    pitch-level transforms (_finish), which NaN out Angle, GAMES stores a real
+    launch angle there -- so this reads Angle directly instead of routing
+    through _finish.
+    """
+    gids = [int(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
+    if not gids:
+        return pd.DataFrame(columns=_BIP_COLS)
+    ph, idp = _in_clause(_sibling_ids(batter_id))
+    gph = ", ".join(f":g{i}" for i in range(len(gids)))
+    idp.update({f"g{i}": g for i, g in enumerate(gids)})
+    df = query_df(
+        f"""
+        SELECT TaggedHitType AS hit_type, ExitSpeed AS exit_speed, Angle AS la,
+               Bearing AS bearing, Distance AS distance,
+               PlayResult, PitchCall, TaggedPitchType AS PitchType, Pitcher,
+               Balls, Strikes, GameID, Inning, PAofInning
+          FROM GAMES
+         WHERE GameID IN ({gph}) AND BatterId IN ({ph})
+           AND PitchCall = 'InPlay'
+         ORDER BY GameID, PitchNo
+        """,
+        idp,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=_BIP_COLS)
+    df["hit_type"] = df["hit_type"].fillna("Undefined").replace("", "Undefined")
+    br = np.radians(df["bearing"].astype(float))
+    df["x"] = np.sin(br) * df["distance"].astype(float)
+    df["y"] = np.cos(br) * df["distance"].astype(float)
+    la = np.radians(df["la"].astype(float))
+    ev = df["exit_speed"].astype(float)
+    df["rx"] = ev / 120.0 * np.cos(la)
+    df["ry"] = ev / 120.0 * np.sin(la)
+    df["Count"] = (df["Balls"].astype("Int64").astype(str) + "-"
+                   + df["Strikes"].astype("Int64").astype(str))
+    undefined = df["PlayResult"].isna() | df["PlayResult"].isin(["Undefined"])
+    df["Result"] = np.where(undefined, df["PitchCall"],
+                            df["hit_type"] + " - " + df["PlayResult"].astype(str))
+    return df[_BIP_COLS]
+
+
+def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
+    """The batter's most recent `n` plate appearances (across all games),
+    returned through _finish so the shared hitting transforms apply.
+
+    GameID is stored as text in GAMES (see games_for_batter), so the
+    most-recent-PA window is sorted by numeric GameID (CAST ... AS UNSIGNED),
+    not the lexicographic default -- mirrors wh_last_n_pas's date/game/inning/
+    PA ordering over the warehouse's integer game_id.
+    """
+    ph, idp = _in_clause(_sibling_ids(batter_id))
+    pas = query_df(
+        f"""
+        SELECT d.GameID, d.Inning, d.PAofInning FROM (
+          SELECT DISTINCT GameID, Inning, PAofInning, Date
+            FROM GAMES
+           WHERE BatterId IN ({ph})
+        ) d
+        ORDER BY d.Date DESC, CAST(d.GameID AS UNSIGNED) DESC,
+                 d.Inning DESC, d.PAofInning DESC
+        LIMIT {int(n)}
+        """,
+        idp,
+    )
+    all_df = _finish(query_df(
+        f"SELECT {_PITCH_COLS} FROM GAMES WHERE BatterId IN ({ph}) "
+        f"ORDER BY GameID, PitchNo", idp,
+    ))
+    if all_df.empty or pas.empty:
+        return all_df
+    keys = set(zip(pas["GameID"].astype(int), pas["Inning"].astype(int),
+                   pas["PAofInning"].astype(int)))
+    mask = [(int(g), int(i), int(p)) in keys
+            for g, i, p in zip(all_df["GameID"], all_df["Inning"], all_df["PAofInning"])]
+    return all_df[mask].reset_index(drop=True)
