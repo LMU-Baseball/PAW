@@ -37,10 +37,30 @@ def test_range_pitches_matches_season_pitch_count():
     assert len(new) == len(old)
 
 
-def test_games_for_batter_matches_labels_and_order():
-    old = hitting_wh.wh_games_for_batter(WADAS)[["game_id", "GameLabel"]].reset_index(drop=True)
-    new = hitting_caps.games_for_batter(WADAS)[["game_id", "GameLabel"]].reset_index(drop=True)
+def test_games_for_batter_matches_labels():
+    # Order-independent: the warehouse oracle (wh_games_for_batter) has no
+    # secondary ORDER BY, so its same-date (doubleheader) tie order is
+    # DB-planner incidental, not a real contract -- comparing after sorting
+    # both sides by game_id asserts the real parity (same games, same labels)
+    # without depending on that noise.
+    old = (hitting_wh.wh_games_for_batter(WADAS)[["game_id", "GameLabel"]]
+           .sort_values("game_id").reset_index(drop=True))
+    new = (hitting_caps.games_for_batter(WADAS)[["game_id", "GameLabel"]]
+           .sort_values("game_id").reset_index(drop=True))
     pd.testing.assert_frame_equal(new, old, check_dtype=False)
+
+
+def test_games_for_batter_is_deterministically_ordered():
+    # hitting_caps-only property (no oracle): rows are sorted by game_date
+    # descending, and within an equal date, by game_id descending. This is an
+    # intentional improvement over the warehouse oracle, which has no
+    # secondary sort key at all.
+    df = hitting_caps.games_for_batter(WADAS)
+    dates = pd.to_datetime(df["game_date"])
+    assert list(dates) == sorted(dates, reverse=True)
+    for _, grp in df.groupby("game_date"):
+        ids = list(grp["game_id"])
+        assert ids == sorted(ids, reverse=True)
 
 
 def test_scoreboard_matches_warehouse():

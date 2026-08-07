@@ -69,7 +69,10 @@ def games_for_batter(batter_id, start=None, end=None):
     df["game_id"] = df["game_id"].astype(int)
     # GameID is stored as text, so sort numerically in pandas rather than via SQL
     # ORDER BY (which would sort lexicographically). Same-date ties (doubleheaders)
-    # break by game_id DESC to match the warehouse's observed tie order.
+    # break by game_id DESC: a deliberate, deterministic tiebreak -- the warehouse
+    # oracle (wh_games_for_batter) has no secondary ORDER BY at all, so its
+    # same-date order is DB-planner incidental/non-deterministic, not a contract
+    # we should copy.
     df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
     lmu_home = df["HomeTeamForeignID"] == LMU_TEAM_ID
     df["loc"] = lmu_home.map({True: "vs", False: "@"})
