@@ -103,7 +103,7 @@ def test_sibling_ids_pitcher_uses_raw_column_and_pitching_caps(sample):
     dropdown's "has video" badge for every pitcher."""
     col, sib = video._sibling_ids(batter_id=None, pitcher_id=sample["pitcher_tm_id"],
                                   catcher_id=None)
-    assert col == "pitcher_tm_id"
+    assert col == "PitcherId"
     assert sample["pitcher_tm_id"] in sib
 
 
@@ -125,7 +125,7 @@ def test_sibling_ids_catcher_uses_raw_column_and_catching_caps(sample):
     dropdown's "has video" badge for every catcher."""
     col, sib = video._sibling_ids(batter_id=None, pitcher_id=None,
                                   catcher_id=sample["catcher_tm_id"])
-    assert col == "catcher_tm_id"
+    assert col == "CatcherId"
     assert sample["catcher_tm_id"] in sib
 
 
@@ -136,3 +136,38 @@ def test_catcher_video_returns_data_for_raw_trackman_id(sample):
     assert not df.empty
     assert sample["game_id"] in video.games_with_video(
         [sample["game_id"]], catcher_id=sample["catcher_tm_id"])
+
+
+def test_video_source_is_caps_only():
+    """After the CAPS cutover, video.py must not reference any warehouse
+    object. This is the Phase-3 unblocker: video is the last module off tm_*."""
+    import inspect
+    from app.data import video as _v
+    src = inspect.getsource(_v)
+    for forbidden in ("vw_pitch_video", "fact_tm_game_pitch", "hitting_wh"):
+        assert forbidden not in src, f"video.py still references {forbidden}"
+
+
+def test_parity_caps_matches_warehouse_oracle(sample):
+    """CAPS output == the old warehouse path, row-for-row, for each subject.
+
+    The oracle SQL below is the pre-migration query; it is deliberately the
+    LAST warehouse dependency in the video tests and is deleted in Phase 3
+    together with tm_*/vw_pitch_video.
+    """
+    for subj_col, subj_kw, sib_val in [
+        ("batter_tm_id", "batter_id", sample["batter_tm_id"]),
+        ("pitcher_tm_id", "pitcher_id", sample["pitcher_tm_id"]),
+        ("catcher_tm_id", "catcher_id", sample["catcher_tm_id"]),
+    ]:
+        oracle_uids = set(query_df(
+            f"""
+            SELECT DISTINCT v.pitch_uid
+              FROM vw_pitch_video v
+              JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
+             WHERE f.game_id = :g AND f.{subj_col} = :s
+            """,
+            {"g": sample["game_id"], "s": sib_val},
+        )["pitch_uid"])
+        new_df = video.pitch_video_df(sample["game_id"], **{subj_kw: sib_val})
+        assert set(new_df["pitch_uid"]) == oracle_uids

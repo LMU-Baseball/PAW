@@ -1,9 +1,12 @@
 # app/data/video.py
 """Pitch-level video: one row per pitch with the four camera-angle S3 URLs.
 
-Source = vw_pitch_video (public S3 .mp4 urls, Spring 2026 onward) joined to
-fact_tm_game_pitch on pitch_uid for the surrogate game_id, catcher_id, velo,
-plate zone, and batter_side that the video view does not carry.
+Source = video_clips (base table: pitch_uid/angle/s3_url/game_date, public S3
+.mp4 urls) joined to GAMES on PitchUID for the pitch metadata (velo, plate
+zone, count, result, batter side) and the surrogate GameID. Fully on CAPS --
+no legacy warehouse (view/fact) dependency, so video survives the tm_* drop.
+(The `test_video_source_is_caps_only` guard enforces the absence of any
+warehouse-object reference in this module.)
 """
 from __future__ import annotations
 
@@ -46,23 +49,19 @@ def _result(pitch_call, play_result) -> str:
 
 
 def _sibling_ids(*, batter_id, pitcher_id, catcher_id):
-    """(subject fact column, sibling id list) for whichever subject was passed.
+    """(subject GAMES column, sibling id list) for whichever subject was passed.
 
-    Pitcher subject: the dashboard/report now pass the RAW `GAMES.PitcherId`
-    (== trackman_id, per the pitching_caps cutover), so siblings are resolved
-    via `pitching_caps._sibling_pitcher_ids` (raw id space) and matched against
-    fact_tm_game_pitch's RAW `pitcher_tm_id` column -- NOT the warehouse
-    surrogate `pitcher_id` column, which a raw id would never match.
-
-    Catcher subject: same story, per the catching_caps cutover -- the
-    dashboard now passes the RAW `GAMES.CatcherId` (== trackman_id), so
-    siblings are resolved via `catching_caps._sibling_catcher_ids` (raw id
-    space) and matched against fact_tm_game_pitch's RAW `catcher_tm_id`
-    column -- NOT the warehouse surrogate `catcher_id` column.
+    All three subjects use the RAW trackman id space (== GAMES.BatterId /
+    GAMES.PitcherId / GAMES.CatcherId), matching what the post-cutover
+    dashboards/report pass. Siblings are resolved in that same raw space --
+    batter via `hitting_caps._sibling_ids`, pitcher via
+    `pitching_caps._sibling_pitcher_ids`, catcher via
+    `catching_caps._sibling_catcher_ids` -- and filtered against the GAMES
+    column named in the first tuple element.
     """
-    given = [("batter_tm_id", batter_id, "app.data.hitting_wh", "_sibling_ids"),
-             ("pitcher_tm_id", pitcher_id, "app.data.pitching_caps", "_sibling_pitcher_ids"),
-             ("catcher_tm_id", catcher_id, "app.data.catching_caps", "_sibling_catcher_ids")]
+    given = [("BatterId", batter_id, "app.data.hitting_caps", "_sibling_ids"),
+             ("PitcherId", pitcher_id, "app.data.pitching_caps", "_sibling_pitcher_ids"),
+             ("CatcherId", catcher_id, "app.data.catching_caps", "_sibling_catcher_ids")]
     active = [(col, val, mod, fn) for col, val, mod, fn in given if val is not None]
     if len(active) != 1:
         raise ValueError("pass exactly one of batter_id / pitcher_id / catcher_id")
@@ -83,18 +82,18 @@ def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=No
         return set()
     gph = ", ".join(f":g{i}" for i in range(len(gids)))
     sph = ", ".join(f":s{i}" for i in range(len(sib)))
-    params = {f"g{i}": g for i, g in enumerate(gids)}
+    params = {f"g{i}": str(g) for i, g in enumerate(gids)}
     params.update({f"s{i}": s for i, s in enumerate(sib)})
     df = query_df(
         f"""
-        SELECT DISTINCT f.game_id
-          FROM vw_pitch_video v
-          JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
-         WHERE f.game_id IN ({gph}) AND f.{subj_col} IN ({sph})
+        SELECT DISTINCT g.GameID
+          FROM video_clips v
+          JOIN GAMES g ON g.PitchUID = v.pitch_uid
+         WHERE g.GameID IN ({gph}) AND g.{subj_col} IN ({sph})
         """,
         params,
     )
-    return set() if df.empty else {int(g) for g in df["game_id"]}
+    return set() if df.empty else {int(g) for g in df["GameID"]}
 
 
 def video_game_ids(games_df, **subject) -> set:
@@ -120,18 +119,21 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
 
     gph = ", ".join(f":g{i}" for i in range(len(gids)))
     sph = ", ".join(f":s{i}" for i in range(len(sib)))
-    params = {f"g{i}": g for i, g in enumerate(gids)}
+    params = {f"g{i}": str(g) for i, g in enumerate(gids)}
     params.update({f"s{i}": s for i, s in enumerate(sib)})
 
     raw = query_df(
         f"""
-        SELECT v.pitch_uid, v.pitch_no, v.inning, v.balls, v.strikes,
-               v.tagged_pitch_type, v.pitch_call, v.play_result, v.game_date,
+        SELECT v.pitch_uid, g.PitchNo AS pitch_no, g.Inning AS inning,
+               g.Balls AS balls, g.Strikes AS strikes,
+               g.TaggedPitchType AS tagged_pitch_type, g.PitchCall AS pitch_call,
+               g.PlayResult AS play_result, v.game_date,
                v.angle, v.s3_url,
-               f.rel_speed, f.izt_zone, f.batter_side
-          FROM vw_pitch_video v
-          JOIN fact_tm_game_pitch f ON f.pitch_uid = v.pitch_uid
-         WHERE f.game_id IN ({gph}) AND f.{subj_col} IN ({sph})
+               g.RelSpeed AS rel_speed, g.Zone AS izt_zone,
+               g.BatterSide AS batter_side
+          FROM video_clips v
+          JOIN GAMES g ON g.PitchUID = v.pitch_uid
+         WHERE g.GameID IN ({gph}) AND g.{subj_col} IN ({sph})
         """,
         params,
     )
