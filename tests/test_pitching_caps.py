@@ -362,3 +362,60 @@ def test_recent_games_matches_warehouse():
     assert list(new["season_label"]) == list(old["season_label"])
     assert list(new["home_team"]) == list(old["home_team"])
     assert list(new["away_team"]) == list(old["away_team"])
+
+
+# --------------------------- season / range summaries -----------------------
+#
+# Unlike the velo views / games_for_pitcher, season_summary and range_summary
+# have NO game_id-driven date bound, so GAMES's pre-CAPS-migration composite-
+# string-GameID scrimmage rows (see games_for_pitcher's docstring) would
+# otherwise inflate whole-career totals beyond the warehouse oracle's synced-
+# season scope. Both apply the same numeric-GameID restriction
+# games_for_pitcher uses -- verified live for this fixture pitcher (raw id
+# 823008) that doing so reproduces the oracle's totals exactly (1296 pitches/
+# 20 apps/56 K/19 BB either way), so these are real equality assertions, not
+# documented divergence.
+
+def test_season_summary_matches_warehouse():
+    old = pitching.season_summary(SURROGATE_PID)
+    new = pitching_caps.season_summary(RAW_PID)
+    assert new == old == {"appearances": "20", "pitches": "1296", "k": "56", "bb": "19"}
+
+
+def test_season_summary_zero_for_unknown_pitcher():
+    old = pitching.season_summary(999999999)
+    new = pitching_caps.season_summary(999999999)
+    assert new == old == {"appearances": "0", "pitches": "0", "k": "—", "bb": "—"}
+
+
+def test_range_summary_matches_warehouse_for_full_span():
+    games = pitching.games_for_pitcher(SURROGATE_PID)
+    start, end = games["game_date"].min(), games["game_date"].max()
+    old = pitching.range_summary(SURROGATE_PID, start, end)
+    new = pitching_caps.range_summary(RAW_PID, start, end)
+    assert new == old
+
+
+def test_range_summary_unbounded_matches_warehouse():
+    # No start/end: both sides fall back to their respective "whole career"
+    # scope, which -- for this fixture -- coincides exactly with the bounded
+    # span above (the warehouse fact table and GAMES's numeric-GameID rows
+    # cover the same seasons for this pitcher).
+    old = pitching.range_summary(SURROGATE_PID)
+    new = pitching_caps.range_summary(RAW_PID)
+    assert new == old
+
+
+def test_range_summary_empty_for_unknown_pitcher():
+    old = pitching.range_summary(999999999)
+    new = pitching_caps.range_summary(999999999)
+    expected = {"appearances": "—", "ip": "—", "k_pct": "—",
+                "bb_pct": "—", "barrel_pct": "—"}
+    assert new == old == expected
+
+
+def test_report_data_version_present():
+    # Confirms Task 3 already wired this up; Task 5 just double-checks it's
+    # still here alongside the new summaries.
+    assert hasattr(pitching_caps, "report_data_version")
+    assert pitching_caps.report_data_version(RAW_PID) != "none"

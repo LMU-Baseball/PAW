@@ -12,10 +12,20 @@ from __future__ import annotations
 
 import pandas as pd
 
+from app.data.pitching import bb_pct, barrel_pct_ev, format_ip, k_pct
 from app.db import query_df
 
 LMU_TEAM_ID = 78  # GAMES.HomeTeamForeignID/AwayTeamForeignID for LMU.
 LMU_PITCHER_TEAM = "LOY_LIO"  # GAMES.PitcherTeam code for LMU (same as the fact table's).
+
+# GAMES also holds pre-CAPS-migration scrimmage rows under composite string
+# GameIDs (e.g. "20241019-LoyolaMarymount-1") that predate the warehouse's
+# synced season -- see games_for_pitcher. Restricting to numeric GameIDs
+# conveniently reproduces the oracle's season boundary exactly wherever a
+# query has no other date bound (verified live for season_summary/
+# range_summary's whole-career branches: with this filter, totals for a real
+# fixture pitcher are byte-identical to pitching.py's warehouse-scoped ones).
+_NUMERIC_GAME_ID_CLAUSE = "GameID REGEXP '^[0-9]+$'"
 
 # GAMES CamelCase -> the exact snake_case names app.data.pitching's transforms
 # read, so those transforms run unchanged over a GAMES-sourced frame. Includes
@@ -382,7 +392,7 @@ def games_for_pitcher(pitcher_id, start=None, end=None) -> pd.DataFrame:
                HomeTeam AS home_team, AwayTeam AS away_team,
                HomeTeamForeignID AS home_team_id
           FROM GAMES
-         WHERE PitcherId IN ({ph}) AND GameID REGEXP '^[0-9]+$'{date_clause}
+         WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}{date_clause}
         """,
         idp,
     )
@@ -448,3 +458,63 @@ def recent_games(limit: int = 25) -> pd.DataFrame:
                                       "game_type", "home_team", "away_team"])
     df["season_label"] = df["game_date"].apply(_season_label)
     return df[["game_id", "game_date", "season_label", "game_type", "home_team", "away_team"]]
+
+
+# ======================== SEASON / RANGE SUMMARIES ==========================
+#
+# Both mirror pitching.py's warehouse versions exactly (same keys/format),
+# scoped to a raw pitcher_id's sibling-id union. Neither takes a game_id, so
+# there's no natural date bound to keep GAMES's pre-CAPS-migration composite-
+# string-GameID scrimmage rows (see games_for_pitcher) out of "whole career"
+# totals -- both apply the same _NUMERIC_GAME_ID_CLAUSE games_for_pitcher
+# uses, which happens to reproduce the warehouse's synced-season boundary
+# exactly (verified live: with the filter, a real fixture pitcher's totals
+# are byte-identical to the oracle's).
+
+def season_summary(pitcher_id) -> dict:
+    """Coarse season tiles: appearances (distinct games) + total pitches + K + BB."""
+    ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
+    df = query_df(
+        f"""
+        SELECT COUNT(DISTINCT GameID) AS apps, COUNT(*) AS pitches,
+               SUM(KorBB = 'Strikeout') AS k, SUM(KorBB = 'Walk') AS bb
+          FROM GAMES
+         WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}
+        """,
+        idp,
+    )
+    if df.empty:
+        return {"appearances": "—", "pitches": "—", "k": "—", "bb": "—"}
+    r = df.iloc[0]
+    def _s(v):
+        return "—" if v is None or pd.isna(v) else str(int(v))
+    return {"appearances": _s(r["apps"]), "pitches": _s(r["pitches"]),
+            "k": _s(r["k"]), "bb": _s(r["bb"])}
+
+
+def range_summary(pitcher_id, start=None, end=None) -> dict:
+    """Date-range-scoped sidebar tiles: Appearances / IP / K% / Walk% / Barrel%.
+
+    Loads the date-bounded pitch df (whole-career, numeric-GameID-only, when
+    start/end are missing) and computes via the transforms shared with
+    pitching.py (imported unchanged)."""
+    pid = int(pitcher_id)
+    if start and end:
+        df = range_pitches_for(pid, start, end)
+    else:
+        ph, idp = _in_clause(_sibling_pitcher_ids(pid))
+        df = query_df(
+            f"SELECT {_PITCH_SELECT} FROM GAMES "
+            f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}",
+            idp,
+        )
+    if df is None or df.empty:
+        return {"appearances": "—", "ip": "—", "k_pct": "—",
+                "bb_pct": "—", "barrel_pct": "—"}
+    return {
+        "appearances": str(int(df["game_id"].nunique())),
+        "ip": format_ip(int(df["outs_on_play"].sum())),
+        "k_pct": f"{k_pct(df)[0]:.1f}%",
+        "bb_pct": f"{bb_pct(df)[0]:.1f}%",
+        "barrel_pct": f"{barrel_pct_ev(df)[0]:.1f}%",
+    }
