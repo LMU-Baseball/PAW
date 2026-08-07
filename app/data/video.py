@@ -46,9 +46,16 @@ def _result(pitch_call, play_result) -> str:
 
 
 def _sibling_ids(*, batter_id, pitcher_id, catcher_id):
-    """(subject fact column, sibling id list) for whichever subject was passed."""
+    """(subject fact column, sibling id list) for whichever subject was passed.
+
+    Pitcher subject: the dashboard/report now pass the RAW `GAMES.PitcherId`
+    (== trackman_id, per the pitching_caps cutover), so siblings are resolved
+    via `pitching_caps._sibling_pitcher_ids` (raw id space) and matched against
+    fact_tm_game_pitch's RAW `pitcher_tm_id` column -- NOT the warehouse
+    surrogate `pitcher_id` column, which a raw id would never match.
+    """
     given = [("batter_tm_id", batter_id, "app.data.hitting_wh", "_sibling_ids"),
-             ("pitcher_id", pitcher_id, "app.data.pitching", "_sibling_pitcher_ids"),
+             ("pitcher_tm_id", pitcher_id, "app.data.pitching_caps", "_sibling_pitcher_ids"),
              ("catcher_id", catcher_id, "app.data.catching", "_sibling_catcher_ids")]
     active = [(col, val, mod, fn) for col, val, mod, fn in given if val is not None]
     if len(active) != 1:
