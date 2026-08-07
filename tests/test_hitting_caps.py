@@ -259,3 +259,20 @@ def test_last_n_pas_shape():
     if not df.empty:
         pas = df[["GameID", "Inning", "PAofInning"]].drop_duplicates()
         assert len(pas) <= 27
+
+
+def test_compute_season_rollup_matches_current_compute():
+    """_compute_season_rollup (Phase 4 rollup source) reproduces the current
+    on-the-fly compute exactly, so precalc == compute is guaranteed."""
+    from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
+    r = hitting_caps._compute_season_rollup(WADAS)
+    assert r["batter_id"] == WADAS and r["batter_name"]
+    q = qab_frame(hitting_caps.season_pitches(WADAS))
+    slash = _slash_from_pas(q)
+    counts = _slash_counts(q)
+    assert (r["ba"], r["obp"], r["slg"]) == (slash["BA"], slash["OBP"], slash["SLG"])
+    assert r["qab_pct"] == (round(float(q["QAB"].sum()) / len(q), 3) if len(q) else None)
+    for k in ("pa", "ab", "h", "doubles", "triples", "hr", "bb", "so"):
+        assert r[k] == counts[k], k
+    assert r["pa"] >= r["ab"] >= 0
+    assert r["h"] >= r["doubles"] + r["triples"] + r["hr"]

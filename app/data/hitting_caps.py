@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from app.db import query_df
 from app.data.hitting import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers (moved from hitting_wh in Phase 3)
-from app.data.hitting import qab_frame, _slash_from_pas
+from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
 from app.data.roster_media import player_media
 
 LMU_BATTER_TEAM = "LOY_LIO"
@@ -144,6 +144,39 @@ def slash_line(batter_id) -> dict:
     return _slash_from_pas(pas)
 
 
+def _compute_season_rollup(batter_id) -> dict:
+    """The Phase 4 hitting season rollup for one batter, computed from raw CAPS.
+
+    Single source of truth for the rollup: runs the SAME season load + PA-frame
+    the sidebar/summary use (`season_pitches` -> `qab_frame`), then the shared
+    `_slash_counts`/`_slash_from_pas`. `precalc.rebuild_hitting` writes this dict
+    to `precalc_hitting_player_season`; `sidebar_stats` et al. read it back (with
+    this function as the compute fallback). No metric is redefined here.
+    """
+    bid = int(batter_id)
+    meta = query_df(
+        "SELECT Batter, Date FROM GAMES WHERE BatterId = :b "
+        "AND GameID REGEXP '^[0-9]+$' ORDER BY Date DESC LIMIT 1", {"b": bid})
+    name = "" if meta.empty or pd.isna(meta.iloc[0]["Batter"]) else str(meta.iloc[0]["Batter"])
+    season_label = ""
+    if not meta.empty and not pd.isna(meta.iloc[0]["Date"]):
+        season_label = str(pd.to_datetime(meta.iloc[0]["Date"]).year)
+
+    df = season_pitches(bid)
+    q = qab_frame(df)
+    counts = _slash_counts(q)
+    slash = _slash_from_pas(q)
+    total = len(q)
+    qab_pct = round(float(q["QAB"].sum()) / total, 3) if total else None
+    return {
+        "batter_id": bid, "batter_name": name, "season_label": season_label,
+        "qab_pct": qab_pct, "ba": slash["BA"], "obp": slash["OBP"], "slg": slash["SLG"],
+        "pa": counts["pa"], "ab": counts["ab"], "h": counts["h"],
+        "doubles": counts["doubles"], "triples": counts["triples"], "hr": counts["hr"],
+        "bb": counts["bb"], "so": counts["so"],
+    }
+
+
 def sidebar_stats(batter_id):
     """QAB% + slash line from a single season load (fixes the 3.2s double-load)."""
     df = season_pitches(batter_id)          # ONE query (+ 1 sibling lookup), not two full loads
@@ -151,7 +184,7 @@ def sidebar_stats(batter_id):
         return {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"}
     q = qab_frame(df); total = len(q)
     qab = round(q["QAB"].sum() / total, 3) if total else None
-    slash = _slash_from_pas(q)              # shared warehouse slash math
+    slash = _slash_from_pas(q)              # shared slash math
     return {"qab": qab, **slash}
 
 
