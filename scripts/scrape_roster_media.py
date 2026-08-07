@@ -70,19 +70,22 @@ def lmu_players() -> list[tuple[int, str, int]]:
     """(raw_tm_id, name, n_tracked) for LMU batters AND pitchers, so pitchers get
     their own roster card. n_tracked is that (id,name) identity's row count, used
     to break same-id collisions (a stray 1-row identity loses to the real one)."""
+    # Phase 3: read GAMES (CAPS) instead of the retired fact_tm_game_pitch.
+    # GAMES.Batter/Pitcher hold the same name strings (backfilled from the
+    # warehouse), and BatterId/PitcherId are the same raw Trackman ids.
     bat = query_df(
         """
-        SELECT batter_tm_id AS id, batter_name AS name, COUNT(*) AS n
-          FROM fact_tm_game_pitch
-         WHERE batter_team = :team AND batter_tm_id IS NOT NULL
-         GROUP BY batter_tm_id, batter_name
+        SELECT BatterId AS id, Batter AS name, COUNT(*) AS n
+          FROM GAMES
+         WHERE BatterTeam = :team AND BatterId IS NOT NULL
+         GROUP BY BatterId, Batter
         """, {"team": LMU_BATTER_TEAM})
     pit = query_df(
         """
-        SELECT pitcher_tm_id AS id, pitcher_name AS name, COUNT(*) AS n
-          FROM fact_tm_game_pitch
-         WHERE pitcher_team = :team AND pitcher_tm_id IS NOT NULL
-         GROUP BY pitcher_tm_id, pitcher_name
+        SELECT PitcherId AS id, Pitcher AS name, COUNT(*) AS n
+          FROM GAMES
+         WHERE PitcherTeam = :team AND PitcherId IS NOT NULL
+         GROUP BY PitcherId, Pitcher
         """, {"team": LMU_BATTER_TEAM})
     rows = [(int(r.id), str(r.name), int(r.n)) for r in bat.itertuples()]
     rows += [(int(r.id), str(r.name), int(r.n)) for r in pit.itertuples()]
