@@ -143,10 +143,23 @@ def player_profile(batter_id):
 
 
 def lmu_hitters() -> pd.DataFrame:
-    """One row per LMU hitter (name deduped; canonical id = most-tracked id).
+    """One row per LMU hitter (name deduped; canonical id = most-tracked id),
+    scoped to a ~12-month recent-data window.
 
-    Mirrors hitting_wh.wh_lmu_hitters, but over GAMES/BatterId instead of
-    fact_tm_game_pitch/batter_tm_id.
+    Mirrors hitting_wh.wh_lmu_hitters's dedup logic, but over GAMES/BatterId
+    instead of fact_tm_game_pitch/batter_tm_id -- with one deliberate
+    addition: GAMES holds the FULL CAPS history back to 2022, so an unscoped
+    version of this query would surface 50+ retired alumni the warehouse
+    (current-season-only) never has. The window is anchored to the newest
+    GAMES date, not to today's date -- during the offseason "today" would put
+    the anchor after the season ends and empty the whole list.
+
+    The COUNT(*) DESC dedup tiebreak is computed over the WINDOWED rows only,
+    which incidentally fixes a canonical-id quirk found in the unscoped
+    version: two current hitters (Dunn, JD and Casale, Johnny) have MORE
+    total career pitches under an old pre-2025 BatterId than under their
+    current one, so the unscoped tiebreak picked the stale id. Windowing
+    removes the old id's rows from the count entirely.
     """
     df = query_df(
         """
@@ -156,6 +169,13 @@ def lmu_hitters() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, BatterId) AS rn
             FROM GAMES
            WHERE BatterTeam = :team AND BatterId IS NOT NULL
+             AND Date >= (
+               SELECT DATE_FORMAT(
+                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
+                        '%Y-%m-%d')
+                 FROM GAMES
+                WHERE BatterTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+             )
            GROUP BY Batter, BatterId
         ) t WHERE rn = 1 ORDER BY Batter
         """,

@@ -1,4 +1,5 @@
 import pandas as pd
+from app.db import query_df
 from app.data import hitting_wh, hitting_caps
 from app.data.hitting import game_batting_line, swing_decisions_by_zone, plate_discipline
 
@@ -102,26 +103,41 @@ def test_sidebar_stats_matches_qab_and_slash():
 
 
 def test_lmu_hitters_matches_warehouse():
-    # NOT a byte-identical row-set: GAMES holds full CAPS history back to
-    # 2022, while fact_tm_game_pitch (the wh_lmu_hitters source) only covers
-    # the current warehouse-synced season (2025-11-22+) -- so hitting_caps
-    # legitimately returns MORE hitters (historical alumni the warehouse
-    # never saw). Confirmed live: 80 caps names vs 25 warehouse names, with
-    # every warehouse name present in the caps set (real invariant below).
+    # NOT a byte-identical row-set, by design (fix-round 1 decision): GAMES
+    # holds full CAPS history back to 2022, while fact_tm_game_pitch (the
+    # wh_lmu_hitters source) only covers the current warehouse-synced season
+    # (2025-11-22+). An earlier version of hitting_caps.lmu_hitters() was
+    # unscoped and leaked 50+ retired alumni into the list, so it's now
+    # windowed to the last ~12 months of GAMES data (anchored to the newest
+    # GAMES date, not "today" -- see lmu_hitters docstring for why).
     #
-    # The other real invariant: for hitters the warehouse DOES know, its
+    # Three real invariants, all confirmed live:
+    old = hitting_wh.wh_lmu_hitters()
+    new = hitting_caps.lmu_hitters()
+
+    # 1. SUPERSET: every current-season warehouse hitter is present.
+    assert set(old["Batter"]) <= set(new["Batter"])
+
+    # 2. WINDOW BOUND: the window is doing real work (33 caps vs 80 unscoped)
+    # and a known pre-window alumnus (last game 2022-03-11) does not leak in.
+    all_time = query_df(
+        "SELECT COUNT(DISTINCT Batter) n FROM GAMES "
+        "WHERE BatterTeam = :t AND BatterId IS NOT NULL",
+        {"t": hitting_caps.LMU_BATTER_TEAM},
+    ).iloc[0]["n"]
+    assert len(new) < all_time
+    assert "Hackman, Owen" not in set(new["Batter"])
+
+    # 3. canonical-id sibling check: for hitters the warehouse DOES know, its
     # chosen id must be a valid *sibling* of the id hitting_caps picked as
     # canonical for that name -- downstream stats (game_pitches/
     # season_pitches/etc.) resolve any of a name's ids to the same sibling-id
     # union via _sibling_ids, so which specific id wins hitting_caps's
-    # "most-tracked" tiebreak is interchangeable. (Confirmed live: 2 of 25
-    # hitters -- Dunn, JD and Casale, Johnny -- get an *older* canonical id in
-    # hitting_caps because GAMES has more historical pitches under their prior
-    # id than under their current-season one; that's a genuine, benign
-    # consequence of GAMES's wider history, not a bug.)
-    old = hitting_wh.wh_lmu_hitters()
-    new = hitting_caps.lmu_hitters()
-    assert set(old["Batter"]) <= set(new["Batter"])
+    # "most-tracked" tiebreak is interchangeable. (Windowing the COUNT(*)
+    # tiebreak to the last 12 months also fixed a quirk found in the unscoped
+    # version, where Dunn, JD and Casale, Johnny got an old pre-2025 id
+    # because GAMES had more career pitches under it -- both now resolve to
+    # their current-season id, matching the warehouse exactly.)
     new_by_name = dict(zip(new["Batter"], new["BatterId"]))
     for _, row in old.iterrows():
         siblings = hitting_caps._sibling_ids(int(row["BatterId"]))
