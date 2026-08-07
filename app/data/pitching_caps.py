@@ -161,3 +161,104 @@ def game_context(game_id) -> dict:
         "opp_runs": away_runs if lmu_is_home else home_runs,
         "lmu_is_home": lmu_is_home,
     }
+
+
+# ============================ VELO VIEWS ===================================
+#
+# The warehouse's vw_pitcher_appearance_velo aggregates AVG/MAX/MIN(rel_speed)
+# + COUNT(*) per (game, pitcher) FILTERED TO TaggedPitchType IN ('Fastball',
+# 'Sinker') ONLY (verified from the live view definition) -- off-speed pitches
+# don't count toward "velo". vw_pitcher_recent_outings joins that to the
+# active-players roster; vw_pitcher_velo_trend adds a per-pitcher,
+# per-season LAG for velo_change. GAMES has no roster/status table, so caps
+# substitutes the LMU-pitcher filter (PitcherTeam='LOY_LIO', via
+# _sibling_pitcher_ids) for "active roster". This is a PROVISIONAL,
+# coach-confirmable difference: a pitcher who is on the historical LMU roster
+# but not currently "active" would still show up here, where the warehouse
+# view would have excluded them. No current fixture pitcher is affected.
+
+_VELO_APPEARANCE_COLS = [
+    "game_id", "game_date", "game_type", "home_team_name", "away_team_name",
+    "appearance_avg_velo", "appearance_max_velo", "appearance_min_velo",
+    "pitch_count",
+]
+
+
+def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
+    """Per-appearance (game) Fastball/Sinker velo aggregates, sibling-id union.
+
+    Mirrors the warehouse's vw_pitcher_appearance_velo. Adds `season_label`
+    (derived, since GAMES has none) for velo_trend's season-partitioned LAG.
+    """
+    ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
+    df = query_df(
+        f"""
+        SELECT GameID AS game_id, Date AS game_date, GameType AS game_type,
+               HomeTeam AS home_team_name, AwayTeam AS away_team_name,
+               AVG(RelSpeed) AS appearance_avg_velo,
+               MAX(RelSpeed) AS appearance_max_velo,
+               MIN(RelSpeed) AS appearance_min_velo,
+               COUNT(*) AS pitch_count
+          FROM GAMES
+         WHERE PitcherId IN ({ph}) AND TaggedPitchType IN ('Fastball', 'Sinker')
+         GROUP BY GameID, Date, GameType, HomeTeam, AwayTeam
+        """,
+        idp,
+    )
+    if df.empty:
+        return df
+    df["season_label"] = df["game_date"].apply(_season_label)
+    return df
+
+
+def recent_outings(pitcher_id, game_id, n: int = 5) -> pd.DataFrame:
+    """This outing + prior ones, newest first, up to n rows.
+
+    Mirrors `pitching.recent_outings`'s shape/behavior: pulls every
+    Fastball/Sinker appearance for the pitcher, orders newest-first, then
+    (if `game_id` is one of them) drops appearances after that game's date,
+    and caps at `n` rows.
+    """
+    cols = ["game_id", "game_date", "season_label", "game_type",
+            "home_team_name", "away_team_name", "appearance_avg_velo",
+            "appearance_max_velo", "appearance_min_velo", "pitch_count"]
+    df = _pitcher_velo_appearances(pitcher_id)
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.sort_values("game_date", ascending=False, kind="mergesort").reset_index(drop=True)
+    this_date = df.loc[df["game_id"] == int(game_id), "game_date"]
+    if not this_date.empty:
+        df = df[df["game_date"] <= this_date.iloc[0]]
+    return df[cols].head(n).reset_index(drop=True)
+
+
+def velo_trend(pitcher_id) -> pd.DataFrame:
+    """Chronological avg/max velo per appearance, with velo_change vs the
+    pitcher's previous appearance IN THE SAME SEASON (matches the oracle's
+    `PARTITION BY pitcher_id, season_label ORDER BY game_date` LAG -- the
+    first appearance of a season has a null velo_change)."""
+    cols = ["game_date", "avg_velo", "max_velo", "pitch_count", "velo_change"]
+    df = _pitcher_velo_appearances(pitcher_id)
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.sort_values("game_date", kind="mergesort").reset_index(drop=True)
+    df = df.rename(columns={
+        "appearance_avg_velo": "avg_velo",
+        "appearance_max_velo": "max_velo",
+    })
+    df["velo_change"] = df.groupby("season_label")["avg_velo"].diff()
+    return df[cols]
+
+
+def report_data_version(pitcher_id) -> str:
+    """MAX(game_date) of the pitcher's Fastball/Sinker appearances, or 'none'.
+
+    Cache-busting token for the postgame report (see
+    `pitching.report_data_version`): new Fastball/Sinker data -> new max date
+    -> new key -> rebuild; unchanged pitcher -> same key -> serve the cache.
+    """
+    df = _pitcher_velo_appearances(pitcher_id)
+    if df.empty:
+        return "none"
+    v = df["game_date"].max()
+    return "none" if v is None or pd.isna(v) else str(v)

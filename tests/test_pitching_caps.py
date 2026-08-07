@@ -146,3 +146,90 @@ def test_batters_faced_max_equals_pa_count():
     new_bf = int(new["batters_faced"].max())
     assert new_bf == old_bf
     assert new_bf == pitching._pa_count(new)
+
+
+# --------------------------- velo views -----------------------------------
+#
+# NOTE (documented divergence): GAMES carries more historical seasons for
+# this fixture pitcher than the warehouse's fact_tm_game_pitch does (which
+# only goes back to Spring 2026 for pitcher_id=6/823008) -- verified live.
+# recent_outings' n=5 window falls entirely inside the shared season, so it
+# compares row-for-row; velo_trend restricts the comparison to the shared
+# season (Spring 2026) since caps naturally returns more history. This is a
+# data-coverage difference, not a filter-logic bug: for the season+games both
+# id-spaces know about, values match exactly.
+
+def test_recent_outings_matches_warehouse_velo():
+    old = pitching.recent_outings(SURROGATE_PID, GAME_ID)
+    new = pitching_caps.recent_outings(RAW_PID, GAME_ID)
+    assert len(old) == len(new) == 5
+    assert list(old["game_id"].astype(int)) == list(new["game_id"].astype(int))
+    assert [str(d) for d in old["game_date"]] == [str(d) for d in new["game_date"]]
+    for col in ("appearance_avg_velo", "appearance_max_velo",
+                "appearance_min_velo", "pitch_count"):
+        pd.testing.assert_series_equal(
+            old[col].reset_index(drop=True), new[col].reset_index(drop=True),
+            check_names=False, check_dtype=False, rtol=1e-6,
+        )
+
+
+def test_recent_outings_team_names_from_games():
+    new = pitching_caps.recent_outings(RAW_PID, GAME_ID)
+    assert (new["home_team_name"].str.len() > 0).all()
+    assert (new["away_team_name"].str.len() > 0).all()
+
+
+def test_recent_outings_empty_for_unknown_pitcher():
+    df = pitching_caps.recent_outings(999999999, GAME_ID)
+    assert df.empty
+    assert list(df.columns) == [
+        "game_id", "game_date", "season_label", "game_type",
+        "home_team_name", "away_team_name", "appearance_avg_velo",
+        "appearance_max_velo", "appearance_min_velo", "pitch_count",
+    ]
+
+
+def test_velo_trend_matches_warehouse_for_shared_season():
+    old = pitching.velo_trend(SURROGATE_PID).reset_index(drop=True)
+    new = pitching_caps.velo_trend(RAW_PID)
+    start = str(old["game_date"].min())
+    new_shared = new[new["game_date"].astype(str) >= start].reset_index(drop=True)
+    assert len(new_shared) == len(old) > 0
+    for col in ("avg_velo", "max_velo", "velo_change"):
+        pd.testing.assert_series_equal(
+            old[col], new_shared[col], check_names=False, rtol=1e-6,
+        )
+    pd.testing.assert_series_equal(
+        old["pitch_count"], new_shared["pitch_count"],
+        check_names=False, check_dtype=False,
+    )
+    # First appearance of the (only) season in the oracle df has no prior
+    # appearance to diff against; caps resets velo_change the same way at
+    # its own season boundary.
+    assert pd.isna(new_shared["velo_change"].iloc[0])
+
+
+def test_velo_trend_chronological_order():
+    new = pitching_caps.velo_trend(RAW_PID)
+    dates = list(new["game_date"].astype(str))
+    assert dates == sorted(dates)
+
+
+def test_velo_trend_empty_for_unknown_pitcher():
+    df = pitching_caps.velo_trend(999999999)
+    assert df.empty
+    assert list(df.columns) == ["game_date", "avg_velo", "max_velo", "pitch_count", "velo_change"]
+
+
+def test_report_data_version_matches_warehouse_max_date():
+    old = pitching.report_data_version(SURROGATE_PID)
+    new = pitching_caps.report_data_version(RAW_PID)
+    expected = str(pitching_caps._pitcher_velo_appearances(RAW_PID)["game_date"].max())
+    assert new == expected
+    # The oracle's max date (bounded by the warehouse's narrower fact-table
+    # history) must still fall within caps' broader GAMES history.
+    assert old <= new
+
+
+def test_report_data_version_none_for_unknown_pitcher():
+    assert pitching_caps.report_data_version(999999999) == "none"
