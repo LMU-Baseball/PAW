@@ -49,7 +49,7 @@ def sidebar(batter_id) -> html.Div:
                   _tile("SLG", slash["SLG"]), _tile("OBP", slash["OBP"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Slash line = warehouse game data (provisional).",
+        html.Div("Slash line = recent-season game data (provisional).",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 

@@ -38,6 +38,19 @@ def test_range_pitches_matches_season_pitch_count():
     assert len(new) == len(old)
 
 
+def test_range_pitches_matches_warehouse():
+    # Real parity (not just a length check, unlike
+    # test_range_pitches_matches_season_pitch_count above): drive both sides
+    # over Wadas's full season span so the range covers every one of his
+    # games, then assert the batting line transform agrees, plus row count.
+    g = hitting_wh.wh_games_for_batter(WADAS)
+    start, end = g["game_date"].min(), g["game_date"].max()
+    old = hitting_wh.wh_range_pitches(WADAS, start, end)
+    new = hitting_caps.range_pitches(WADAS, start, end)
+    assert len(new) == len(old)
+    assert game_batting_line(new) == game_batting_line(old)
+
+
 def test_games_for_batter_matches_labels():
     # Order-independent: the warehouse oracle (wh_games_for_batter) has no
     # secondary ORDER BY, so its same-date (doubleheader) tie order is

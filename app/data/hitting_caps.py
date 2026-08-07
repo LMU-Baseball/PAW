@@ -14,6 +14,18 @@ from app.data.roster_media import player_media
 LMU_BATTER_TEAM = "LOY_LIO"
 LMU_TEAM_ID = 78
 
+# Shared trailing-~12-month window (anchored to the newest LMU GAMES date, not
+# today's date -- see lmu_hitters docstring for why). Reused by lmu_hitters
+# (which hitter names to list) and season_pitches (which pitches count toward
+# that hitter's season stats) so both are scoped consistently.
+_RECENT_WINDOW_CLAUSE = """Date >= (
+               SELECT DATE_FORMAT(
+                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
+                        '%Y-%m-%d')
+                 FROM GAMES
+                WHERE BatterTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+             )"""
+
 # GAMES columns the transforms consume (already correctly named).
 _PITCH_COLS = (
     "PlateLocSide, PlateLocHeight, PitchCall, PlayResult, KorBB, TaggedHitType, "
@@ -42,9 +54,13 @@ def game_pitches(game_id, batter_id):
     return _finish(df)
 
 def season_pitches(batter_id):
+    """Season pitches, windowed to the trailing ~12 months (see
+    _RECENT_WINDOW_CLAUSE) rather than a batter's full GAMES history."""
     ph, idp = _in_clause(_sibling_ids(batter_id))
+    idp["team"] = LMU_BATTER_TEAM
     df = query_df(
         f"SELECT {_PITCH_COLS} FROM GAMES WHERE BatterId IN ({ph}) "
+        f"AND {_RECENT_WINDOW_CLAUSE} "
         f"ORDER BY GameID, PitchNo", idp)
     return _finish(df)
 
@@ -162,20 +178,14 @@ def lmu_hitters() -> pd.DataFrame:
     removes the old id's rows from the count entirely.
     """
     df = query_df(
-        """
+        f"""
         SELECT Batter, BatterId FROM (
           SELECT Batter, BatterId,
                  ROW_NUMBER() OVER (PARTITION BY Batter
                                     ORDER BY COUNT(*) DESC, BatterId) AS rn
             FROM GAMES
            WHERE BatterTeam = :team AND BatterId IS NOT NULL
-             AND Date >= (
-               SELECT DATE_FORMAT(
-                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
-                        '%Y-%m-%d')
-                 FROM GAMES
-                WHERE BatterTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-             )
+             AND {_RECENT_WINDOW_CLAUSE}
            GROUP BY Batter, BatterId
         ) t WHERE rn = 1 ORDER BY Batter
         """,
@@ -236,10 +246,11 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     """The batter's most recent `n` plate appearances (across all games),
     returned through _finish so the shared hitting transforms apply.
 
-    GameID is stored as text in GAMES (see games_for_batter), so the
-    most-recent-PA window is sorted by numeric GameID (CAST ... AS UNSIGNED),
-    not the lexicographic default -- mirrors wh_last_n_pas's date/game/inning/
-    PA ordering over the warehouse's integer game_id.
+    GameID, Inning, and PAofInning are all stored as text in GAMES, so the
+    most-recent-PA window is sorted by their numeric values (CAST ... AS
+    UNSIGNED), not the lexicographic default -- lexicographic order would
+    mis-rank extra innings (e.g. "10" before "2"). Mirrors wh_last_n_pas's
+    date/game/inning/PA ordering over the warehouse's integer columns.
     """
     ph, idp = _in_clause(_sibling_ids(batter_id))
     pas = query_df(
@@ -250,7 +261,7 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
            WHERE BatterId IN ({ph})
         ) d
         ORDER BY d.Date DESC, CAST(d.GameID AS UNSIGNED) DESC,
-                 d.Inning DESC, d.PAofInning DESC
+                 CAST(d.Inning AS UNSIGNED) DESC, CAST(d.PAofInning AS UNSIGNED) DESC
         LIMIT {int(n)}
         """,
         idp,

@@ -435,8 +435,8 @@ def test_hitting_layout_has_back_link_and_dark_footnote():
     # header called with the /hitting back-link
     assert 'back_href="/hitting"' in src
     # provisional footnote no longer uses the too-light #888
-    assert '"Slash line = warehouse game data (provisional)."' in src
-    footnote_idx = src.index('"Slash line = warehouse game data (provisional)."')
+    assert '"Slash line = recent-season game data (provisional)."' in src
+    footnote_idx = src.index('"Slash line = recent-season game data (provisional)."')
     # the style dict immediately after the footnote uses #555, not #888
     tail = src[footnote_idx:footnote_idx + 300]
     assert '"#555"' in tail and '"#888"' not in tail
