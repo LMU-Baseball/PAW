@@ -401,22 +401,27 @@ def _read_csv_from_sftp(sftp, path: str) -> pd.DataFrame:
 
 
 def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
-               since_days: int | None = None, lmu_only: bool = True) -> LoadResult:
+               since_days: int | None = None, lmu_only: bool = False) -> LoadResult:
     """Walk the Trackman `/v3` tree for game-export CSV files, parse each with
     `parse_game_csv`, dedup rows against GAMES.PitchUID (both already-loaded
     rows and within-run duplicates), and insert the new rows via
     `chunked_insert` (skipped entirely when `dry_run`).
 
     `since_days` prunes the walk to recent upload-date folders (the daily-cron
-    case; see `iter_game_files`). `lmu_only` (default) skips any game CSV in
-    which LMU did not play (`is_lmu_game`), keeping GAMES LMU-only and avoiding
-    ingesting the multi-team `/v3` swamp; such files are counted in
-    `skipped_non_lmu`.
+    case; see `iter_game_files`). `lmu_only` (the pipeline passes True) skips
+    any game CSV in which LMU did not play (`is_lmu_game`), keeping GAMES
+    LMU-only and avoiding ingesting the multi-team `/v3` swamp; such files are
+    counted in `skipped_non_lmu`. Default False preserves the standalone
+    `games` loader's prior all-teams behavior.
 
     Insert-only: never DELETEs or DROPs existing rows. `date_min`/`date_max`
     are computed from the `Date` column of the rows selected for insert.
     """
-    files = iter_game_files(sftp, since_days=since_days)
+    # Call the old positional signature when since_days is None so existing
+    # callers/tests that monkeypatch iter_game_files with a narrow lambda keep
+    # working; only pass the kwarg for the pruned (cron) case.
+    files = (iter_game_files(sftp, since_days=since_days)
+             if since_days is not None else iter_game_files(sftp))
     if limit is not None:
         files = files[:limit]
 
