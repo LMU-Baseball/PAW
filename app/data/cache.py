@@ -13,10 +13,48 @@ Fall 2026).
 from __future__ import annotations
 
 import functools
+import time
 
 import pandas as pd
 
 _STORES: list[dict] = []
+
+# Cross-process invalidation gate (Phase-6 / cron): a separate-process rebuild
+# bumps a DB version stamp; web workers poll it (at most once per _ttl) and
+# clear when it changes. No-op until configured (tests/scripts).
+_version_reader = None
+_ttl = 60.0
+_seen_version = None
+_last_check: float | None = None
+
+
+def configure(version_reader=None, ttl: float = 60.0) -> None:
+    """Install (or clear) the data-version reader used by maybe_invalidate.
+    Called at app startup with precalc.read_data_version; version_reader=None
+    disables the gate (the default, e.g. in tests/CLI scripts)."""
+    global _version_reader, _ttl, _seen_version, _last_check
+    _version_reader = version_reader
+    _ttl = ttl
+    _seen_version = None
+    _last_check = None
+
+
+def maybe_invalidate(now: float | None = None) -> None:
+    """If the data version changed since last seen, clear_all(). Polls the
+    version at most once per _ttl seconds (≈1 cheap round-trip/worker/minute).
+    No-op when no reader is configured."""
+    global _seen_version, _last_check
+    if _version_reader is None:
+        return
+    if now is None:
+        now = time.monotonic()
+    if _last_check is not None and (now - _last_check) < _ttl:
+        return
+    _last_check = now
+    version = _version_reader()
+    if _seen_version is not None and version != _seen_version:
+        clear_all()
+    _seen_version = version
 
 
 def _norm(v):
@@ -35,6 +73,7 @@ def cached(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        maybe_invalidate()  # cross-process version gate (no-op unless configured)
         key = (tuple(_norm(a) for a in args),
                tuple(sorted((k, _norm(v)) for k, v in kwargs.items())))
         if key not in store:

@@ -42,6 +42,12 @@ def create_app(config_object=Config) -> Flask:
     from app.cli import register_cli
     register_cli(server)
 
+    # Cross-process cache invalidation: web workers poll the precalc data-version
+    # stamp and clear their in-process caches when a separate-process rebuild
+    # (the daily cron) bumps it.
+    from app.data import cache, precalc
+    cache.configure(version_reader=precalc.read_data_version)
+
     with server.app_context():
         db.create_all()
 
