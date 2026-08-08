@@ -59,14 +59,23 @@ def _pct(a: int, b: int) -> float:
 
 
 def _pa_count(df: pd.DataFrame) -> int:
-    """Plate appearances = distinct (inning, pa_of_inning) among the pitches.
+    """Plate appearances = distinct (game_id, inning, pa_of_inning) among the
+    pitches.
+
+    game_id is part of the key because (inning, pa_of_inning) repeats across
+    games (every game has an inning-1, pa-1); keying without it conflated PAs
+    across a multi-game range, undercounting the denominator and inflating
+    K%/BB%/Barrel%. Falls back to (inning, pa_of_inning) when game_id is absent
+    (a single-game df / inline fixture, where the pair is already unique).
 
     Split-safe (works on a batter-side subset), unlike batters_faced.max()
     which is a running counter over the whole outing.
     """
     if df.empty:
         return 0
-    return int(df[["inning", "pa_of_inning"]].drop_duplicates().shape[0])
+    cols = ["game_id", "inning", "pa_of_inning"] if "game_id" in df.columns \
+        else ["inning", "pa_of_inning"]
+    return int(df[cols].drop_duplicates().shape[0])
 
 
 def strike_pct(df: pd.DataFrame) -> tuple[float, int]:

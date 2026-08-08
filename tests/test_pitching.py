@@ -257,3 +257,20 @@ def test_header_stat_line_has_strike_and_maxvelo():
     assert "strike_pct" in line and "max_velo" in line
     assert line["max_velo"] == 94.4
     assert 0 <= line["strike_pct"] <= 100
+
+
+def test_pa_count_does_not_conflate_pas_across_games():
+    """Multi-game PA denominator bug: two games each have (inning 1, pa 1); the
+    old dedup on (inning, pa_of_inning) collapsed them to one PA, undercounting
+    the denominator and inflating K%/BB%/Barrel%. game_id must be in the key."""
+    df = pd.DataFrame([
+        {"game_id": 100, "inning": 1, "pa_of_inning": 1, "korbb": "Strikeout"},
+        {"game_id": 100, "inning": 1, "pa_of_inning": 2, "korbb": "Undefined"},
+        {"game_id": 200, "inning": 1, "pa_of_inning": 1, "korbb": "Undefined"},
+        {"game_id": 200, "inning": 1, "pa_of_inning": 2, "korbb": "Undefined"},
+    ])
+    assert P._pa_count(df) == 4          # 2 PAs in each of 2 games (was 2)
+    assert P.k_pct(df) == (25.0, 1)      # 1 K / 4 PA, not inflated to 50%
+    assert P._pa_count(df[df["game_id"] == 100]) == 2   # single game still right
+    # df without a game_id column falls back to the single-game assumption
+    assert P._pa_count(df.drop(columns=["game_id"])) == 2
