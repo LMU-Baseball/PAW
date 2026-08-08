@@ -124,6 +124,13 @@ def _pa_keys(df: pd.DataFrame) -> list[tuple]:
     return sorted(df.groupby(["GameID", "Inning", "PAofInning"]).groups.keys())
 
 
+# Defense-in-depth: never build more than this many PA subplots. The Plate
+# Appearances tab already caps to 12, but a large df from any caller would make
+# make_subplots raise (vertical_spacing > 1/(rows-1)) -- an 88-row season df
+# crashed it. Cap here too so no code path can crash on an oversized selection.
+_MAX_PA_SUBPLOTS = 12
+
+
 def all_pas_figure(df: pd.DataFrame) -> go.Figure:
     """One strike-zone subplot per plate appearance, numbered in game order.
 
@@ -137,6 +144,8 @@ def all_pas_figure(df: pd.DataFrame) -> go.Figure:
         return _empty_pas_figure()
 
     pa_keys = _pa_keys(df)
+    if len(pa_keys) > _MAX_PA_SUBPLOTS:
+        pa_keys = pa_keys[-_MAX_PA_SUBPLOTS:]  # most-recent N; never crash
     n = len(pa_keys)
     if n == 0:
         return _empty_pas_figure()
