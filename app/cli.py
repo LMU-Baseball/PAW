@@ -44,3 +44,20 @@ def register_cli(server):
         targets = list(fns) if module == "all" else [module]
         for m in targets:
             click.echo(f"rebuilt {m}: {fns[m](engine)} rows")
+
+    @server.cli.command("pipeline-load")
+    @click.option("--dry-run/--no-dry-run", default=True,
+                  help="Preview only (default). --no-dry-run writes + rebuilds.")
+    @click.option("--since-days", type=int, default=3,
+                  help="Only walk upload folders from the last N days.")
+    def pipeline_load(dry_run, since_days):
+        """Load newly-uploaded LMU games from SFTP, then rebuild precalc."""
+        from app.ingest.pipeline import run_pipeline
+        from app.db import get_engine
+        out = run_pipeline(get_engine(), dry_run=dry_run, since_days=since_days)
+        r = out["load"]
+        click.echo(
+            f"pipeline-load: files={r.files} inserted={r.inserted} "
+            f"skipped={r.skipped} non_lmu={r.skipped_non_lmu} "
+            f"span={r.date_min}..{r.date_max} dry_run={r.dry_run} "
+            f"rebuilt={out['rebuilt']}")
