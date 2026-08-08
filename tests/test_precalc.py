@@ -92,3 +92,13 @@ def test_catching_read_matches_compute(rebuilt_catching):
     comp = catching_caps._compute_season_rollup(cid)
     for k in ("games", "pitches", "net_strikes", "steal_pct"):
         assert row[k] == comp[k], k
+
+
+def test_data_version_bumps():
+    """The data-version stamp increments so a separate-process cron rebuild
+    can signal web workers to invalidate their caches."""
+    e = get_engine()
+    precalc.ensure_tables(e)
+    v0 = precalc.read_data_version(e)
+    precalc._bump_version(e)
+    assert precalc.read_data_version(e) == v0 + 1

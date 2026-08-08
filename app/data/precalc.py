@@ -31,6 +31,7 @@ from app.data import cache
 HITTING_SEASON_TABLE = "precalc_hitting_player_season"
 PITCHING_SEASON_TABLE = "precalc_pitching_player_season"
 CATCHING_SEASON_TABLE = "precalc_catching_player_season"
+PRECALC_META_TABLE = "precalc_meta"
 
 _DDL = {
     HITTING_SEASON_TABLE: f"""
@@ -60,7 +61,34 @@ _DDL = {
             net_strikes VARCHAR(8), steal_pct VARCHAR(8),
             built_at     DATETIME
         )""",
+    PRECALC_META_TABLE: f"""
+        CREATE TABLE IF NOT EXISTS {PRECALC_META_TABLE} (
+            id INT PRIMARY KEY,
+            version BIGINT,
+            updated_at DATETIME
+        )""",
 }
+
+
+def _bump_version(engine=None) -> None:
+    """Increment the single-row data-version stamp (id=1). Called on every
+    rebuild so a separate-process cron run signals web workers to invalidate."""
+    engine = engine or get_engine()
+    with engine.begin() as conn:
+        conn.execute(text(
+            f"INSERT INTO {PRECALC_META_TABLE} (id, version, updated_at) "
+            f"VALUES (1, 1, :now) "
+            f"ON DUPLICATE KEY UPDATE version = version + 1, updated_at = :now"),
+            {"now": _now()})
+
+
+def read_data_version(engine=None) -> int:
+    """Current data-version (0 if the stamp/table doesn't exist yet)."""
+    try:
+        df = query_df(f"SELECT version FROM {PRECALC_META_TABLE} WHERE id = 1")
+    except Exception:
+        return 0
+    return 0 if df.empty else int(df.iloc[0]["version"])
 
 
 def ensure_tables(engine=None) -> None:
@@ -82,7 +110,8 @@ def _replace_rows(engine, table: str, rows: list[dict]) -> int:
         conn.execute(text(f"DELETE FROM {table}"))
     if rows:
         chunked_insert(engine, table, rows)
-    cache.clear_all()  # readers re-query fresh CAPS after a rebuild
+    cache.clear_all()  # readers re-query fresh CAPS after a rebuild (same process)
+    _bump_version(engine)  # signal other processes (web workers) to invalidate
     return len(rows)
 
 
