@@ -15,6 +15,7 @@ import pandas as pd
 
 from app.data import pitching_caps
 from app.data.pitching_caps import _NUMERIC_GAME_ID_CLAUSE
+from app.data.cache import cached
 from app.db import query_df
 
 LMU_TEAM_ID = 78  # GAMES.HomeTeamForeignID/AwayTeamForeignID for LMU.
@@ -40,6 +41,7 @@ def _in_clause(ids) -> tuple[str, dict]:
     return ph, {f"id{i}": int(v) for i, v in enumerate(ids)}
 
 
+@cached
 def _sibling_catcher_ids(catcher_id) -> list[int]:
     """All LMU GAMES.CatcherId values sharing this id's Catcher name."""
     name = query_df(
@@ -56,6 +58,7 @@ def _sibling_catcher_ids(catcher_id) -> list[int]:
     return [int(x) for x in ids["CatcherId"]] or [int(catcher_id)]
 
 
+@cached
 def game_pitches_for(game_id, catcher_id) -> pd.DataFrame:
     """A catcher's pitches in a game, unioning split Trackman ids (sibling union)."""
     ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
@@ -67,6 +70,7 @@ def game_pitches_for(game_id, catcher_id) -> pd.DataFrame:
     )
 
 
+@cached
 def range_pitches_for(catcher_id, start, end) -> pd.DataFrame:
     """All of a catcher's pitches across in-range games (sibling-id union).
 
@@ -178,6 +182,7 @@ def catcher_profile(catcher_id) -> dict:
             "photo": media.get("photo_url", "")}
 
 
+@cached
 def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
     """A catcher's games, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'.
     Optional start/end (inclusive) bound game_date. Sibling-id union, matching

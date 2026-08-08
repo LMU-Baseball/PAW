@@ -13,6 +13,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.data.pitching import bb_pct, barrel_pct_ev, format_ip, k_pct
+from app.data.cache import cached
 from app.db import query_df
 
 LMU_TEAM_ID = 78  # GAMES.HomeTeamForeignID/AwayTeamForeignID for LMU.
@@ -82,6 +83,7 @@ def _add_batters_faced(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@cached
 def _sibling_pitcher_ids(pitcher_id) -> list[int]:
     """All LMU GAMES.PitcherId values sharing this id's Pitcher name."""
     name = query_df(
@@ -108,6 +110,7 @@ def game_pitches(game_id, pitcher_id) -> pd.DataFrame:
     return _add_batters_faced(df)
 
 
+@cached
 def game_pitches_for(game_id, pitcher_id) -> pd.DataFrame:
     """A pitcher's pitches in a game, unioning split Trackman ids (dashboard/report use)."""
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
@@ -120,6 +123,7 @@ def game_pitches_for(game_id, pitcher_id) -> pd.DataFrame:
     return _add_batters_faced(df)
 
 
+@cached
 def range_pitches_for(pitcher_id, start, end) -> pd.DataFrame:
     """All of a pitcher's pitches across in-range games (sibling-id union).
 
@@ -230,6 +234,7 @@ def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
     return df
 
 
+@cached
 def recent_outings(pitcher_id, game_id, n: int = 5) -> pd.DataFrame:
     """This outing + prior ones, newest first, up to n rows.
 
@@ -251,6 +256,7 @@ def recent_outings(pitcher_id, game_id, n: int = 5) -> pd.DataFrame:
     return df[cols].head(n).reset_index(drop=True)
 
 
+@cached
 def velo_trend(pitcher_id) -> pd.DataFrame:
     """Chronological avg/max velo per appearance, with velo_change vs the
     pitcher's previous appearance IN THE SAME SEASON (matches the oracle's
@@ -385,6 +391,7 @@ def pitcher_profile(pitcher_id) -> dict:
             "photo": media.get("photo_url", "")}
 
 
+@cached
 def games_for_pitcher(pitcher_id, start=None, end=None) -> pd.DataFrame:
     """A pitcher's outings, newest first. GameLabel = 'YYYY-MM-DD vs/@ OPP'.
     Optional start/end (inclusive) bound game_date. Sibling-id union, matching

@@ -10,6 +10,7 @@ from app.db import query_df
 from app.data.hitting import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers (moved from hitting_wh in Phase 3)
 from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
 from app.data.roster_media import player_media
+from app.data.cache import cached
 
 LMU_BATTER_TEAM = "LOY_LIO"
 LMU_TEAM_ID = 78
@@ -34,6 +35,7 @@ _PITCH_COLS = (
     "Pitcher, GameID, Angle"
 )
 
+@cached
 def _sibling_ids(batter_id):
     name = query_df(
         "SELECT Batter FROM GAMES WHERE BatterId = :b AND BatterTeam = :t LIMIT 1",
@@ -46,6 +48,7 @@ def _sibling_ids(batter_id):
         {"n": str(name.iloc[0]["Batter"]), "t": LMU_BATTER_TEAM})
     return [int(x) for x in ids["BatterId"]] or [int(batter_id)]
 
+@cached
 def game_pitches(game_id, batter_id):
     ph, idp = _in_clause(_sibling_ids(batter_id))
     df = query_df(
@@ -53,6 +56,7 @@ def game_pitches(game_id, batter_id):
         f"ORDER BY PitchNo", {"g": int(game_id), **idp})
     return _finish(df)
 
+@cached
 def season_pitches(batter_id):
     """Season pitches, windowed to the trailing ~12 months (see
     _RECENT_WINDOW_CLAUSE) rather than a batter's full GAMES history."""
@@ -64,6 +68,7 @@ def season_pitches(batter_id):
         f"ORDER BY GameID, PitchNo", idp)
     return _finish(df)
 
+@cached
 def range_pitches(batter_id, start, end):
     ph, idp = _in_clause(_sibling_ids(batter_id))
     idp["start"] = str(start); idp["end"] = str(end)
@@ -73,6 +78,7 @@ def range_pitches(batter_id, start, end):
     return _finish(df)
 
 
+@cached
 def games_for_batter(batter_id, start=None, end=None):
     """A batter's games, newest first.
 
@@ -248,6 +254,7 @@ def lmu_hitters() -> pd.DataFrame:
     return df
 
 
+@cached
 def bip_points(batter_id, game_id) -> pd.DataFrame:
     """Balls-in-play landing (x,y) + launch-radial (rx,ry) for a batter and
     game(s). `game_id` is an int or a list. Empty full-column frame when none.
@@ -294,6 +301,7 @@ def bip_points(batter_id, game_id) -> pd.DataFrame:
     return df[_BIP_COLS]
 
 
+@cached
 def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     """The batter's most recent `n` plate appearances (across all games),
     returned through _finish so the shared hitting transforms apply.

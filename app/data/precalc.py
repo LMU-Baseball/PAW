@@ -26,6 +26,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.db import query_df, get_engine
 from app.ingest.common import chunked_insert
+from app.data import cache
 
 HITTING_SEASON_TABLE = "precalc_hitting_player_season"
 PITCHING_SEASON_TABLE = "precalc_pitching_player_season"
@@ -81,6 +82,7 @@ def _replace_rows(engine, table: str, rows: list[dict]) -> int:
         conn.execute(text(f"DELETE FROM {table}"))
     if rows:
         chunked_insert(engine, table, rows)
+    cache.clear_all()  # readers re-query fresh CAPS after a rebuild
     return len(rows)
 
 
@@ -89,6 +91,7 @@ def _build_rows(engine, ids, compute) -> list[dict]:
     connection mid-run over a long rebuild (~minutes); on OperationalError,
     dispose the stale pool and retry that id on a fresh connection (up to 3x) so
     a transient drop doesn't abort the whole rebuild / the daily cron."""
+    cache.clear_all()  # compute from fresh CAPS, never a stale in-process cache
     built = _now()
     rows = []
     for i in ids:
