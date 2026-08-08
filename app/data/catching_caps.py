@@ -113,6 +113,7 @@ def game_context(game_id) -> dict:
 # pitching slice's First/Last reorder) catcher_name here reads GAMES.Catcher
 # as-is, with no reformatting.
 
+@cached
 def lmu_catchers() -> pd.DataFrame:
     """One row per LMU catcher (name deduped; canonical id = most-tracked id
     within the window), scoped to the same ~12-month recent-data window

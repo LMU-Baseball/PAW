@@ -313,6 +313,7 @@ _RECENT_WINDOW_CLAUSE = """Date >= (
              )"""
 
 
+@cached
 def lmu_pitchers() -> pd.DataFrame:
     """One row per LMU pitcher (name deduped; canonical id = most-tracked id
     within the window), scoped to a ~12-month recent-data window.

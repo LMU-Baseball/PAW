@@ -15,6 +15,7 @@ import re
 import pandas as pd
 
 from app.db import query_df
+from app.data.cache import cached
 
 ANGLES: list[tuple[str, str]] = [
     ("HomeBehind", "Behind"), ("HomeRight", "Home R"),
@@ -71,6 +72,7 @@ def _sibling_ids(*, batter_id, pitcher_id, catcher_id):
     return col, [int(x) for x in sib]
 
 
+@cached
 def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=None) -> set[int]:
     """Of the given game_ids, the subset that have at least one video clip for the
     subject (Item 3: used to tag the game dropdown). Empty input -> empty set."""

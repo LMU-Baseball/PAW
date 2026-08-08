@@ -191,6 +191,7 @@ def sidebar_stats(batter_id):
     return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 
+@cached
 def player_profile(batter_id):
     blank = {"name": "", "bats": "", "class_year": "", "position": "",
              "photo": "", "jersey": ""}
@@ -207,6 +208,7 @@ def player_profile(batter_id):
             "photo": media["photo_url"], "jersey": media["jersey"]}
 
 
+@cached
 def lmu_hitters() -> pd.DataFrame:
     """One row per LMU hitter (name deduped; canonical id = most-tracked id),
     scoped to a ~12-month recent-data window.
