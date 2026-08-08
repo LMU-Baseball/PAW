@@ -1,5 +1,11 @@
 """Development entry point:  python run.py  (or: flask --app run run)."""
-from app import create_app
+import os
+
+# Warm the dashboard caches at startup so even the first open is fast (see
+# app/warmup.py). Set before create_app so the app wires the warm thread.
+os.environ.setdefault("PAW_WARM_CACHE", "1")
+
+from app import create_app  # noqa: E402
 
 app = create_app()
 

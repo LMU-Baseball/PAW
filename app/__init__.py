@@ -48,6 +48,13 @@ def create_app(config_object=Config) -> Flask:
     from app.data import cache, precalc
     cache.configure(version_reader=precalc.read_data_version)
 
+    # Warm the per-open serve_layout caches in the background so even the first
+    # dashboard open is fast. Guarded by PAW_WARM_CACHE (run.py sets it) so
+    # tests/CLI never spawn the thread or hit the DB at import.
+    if os.getenv("PAW_WARM_CACHE"):
+        from app.warmup import start_warm_thread
+        start_warm_thread()
+
     with server.app_context():
         db.create_all()
 
