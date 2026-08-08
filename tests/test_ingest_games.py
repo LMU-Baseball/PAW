@@ -110,3 +110,82 @@ def test_parse_game_csv_returns_a_copy_not_a_view():
     out = parse_game_csv(df, source_file="game_sample.csv")
     out["PitchNo"] = 999999
     assert (df["PitchNo"] != 999999).any()
+
+
+# --- Pipeline (goal 3): LMU-aware + upload-folder-pruned selection -----------
+
+def test_dir_within_window_year_month_day():
+    import datetime as dt
+    from app.ingest import games
+    cut = dt.date(2026, 9, 10)
+    assert games._dir_within_window("/v3/2026", cut) is True         # year open
+    assert games._dir_within_window("/v3/2026/09", cut) is True      # month open
+    assert games._dir_within_window("/v3/2026/09/15", cut) is True   # after cutoff
+    assert games._dir_within_window("/v3/2026/09/05", cut) is False  # before cutoff
+    assert games._dir_within_window("/v3/2025", cut) is False        # old year
+    assert games._dir_within_window("/v3/2026/09/15/CSV", cut) is True  # non-date leaf
+
+
+def test_is_lmu_game_by_foreign_id_or_team_code():
+    from app.ingest import games
+    assert games.is_lmu_game(pd.DataFrame({"HomeTeamForeignID": [78], "AwayTeamForeignID": [12]}))
+    assert games.is_lmu_game(pd.DataFrame({"AwayTeamForeignID": [78]}))
+    assert games.is_lmu_game(pd.DataFrame({"PitcherTeam": ["LOY_LIO"], "BatterTeam": ["X"]}))
+    assert not games.is_lmu_game(pd.DataFrame({"HomeTeamForeignID": [12], "AwayTeamForeignID": [34]}))
+    assert not games.is_lmu_game(pd.DataFrame({"PitcherTeam": ["SAN_TOR"]}))
+
+
+class _Entry:
+    def __init__(self, name, is_dir):
+        import stat as _s
+        self.filename = name
+        self.st_mode = _s.S_IFDIR if is_dir else _s.S_IFREG
+
+
+class _FakeSFTP:
+    def __init__(self, tree):
+        self.tree = tree
+
+    def listdir_attr(self, path):
+        return [_Entry(n, d) for (n, d) in self.tree.get(path, [])]
+
+
+_TREE = {
+    "/v3": [("2026", True)],
+    "/v3/2026": [("09", True)],
+    "/v3/2026/09": [("15", True), ("05", True)],
+    "/v3/2026/09/15": [("CSV", True)],
+    "/v3/2026/09/15/CSV": [("20260914-LMU-1.csv", False),
+                           ("20260914-Other-1.csv", False)],
+    # in-window LMU + non-LMU games
+    "/v3/2026/09/05": [("CSV", True)],   # out-of-window: must be pruned (not walked)
+    "/v3/2026/09/05/CSV": [("20260904-LMU-2.csv", False)],
+}
+
+
+def _fake_read(sftp, path):
+    if "Other" in path:
+        return pd.DataFrame({"PitchUID": ["o1"], "Date": ["2026-09-14"],
+                             "HomeTeamForeignID": [12], "AwayTeamForeignID": [34]})
+    n = path.rsplit("/", 1)[-1]  # distinct UIDs per file so no cross-file dedup
+    return pd.DataFrame({"PitchUID": [f"{n}-a", f"{n}-b"], "Date": ["2026-09-14", "2026-09-14"],
+                         "HomeTeamForeignID": [78, 78], "AwayTeamForeignID": [12, 12]})
+
+
+def test_load_games_window_prune_and_lmu_filter(monkeypatch):
+    import datetime as dt
+    from app.ingest import games
+    monkeypatch.setattr(games, "_today", lambda: dt.date(2026, 9, 16))
+    monkeypatch.setattr(games, "existing_keys", lambda *a, **k: set())
+    monkeypatch.setattr(games, "_read_csv_from_sftp", _fake_read)
+    sftp = _FakeSFTP(_TREE)
+
+    # since_days=3 (cutoff 2026-09-13): only /v3/2026/09/15 in window; 09/05 pruned.
+    r = games.load_games(engine=None, sftp=sftp, dry_run=True, since_days=3, lmu_only=True)
+    assert r.files == 2                 # both files under 09/15/CSV; 09/05 pruned
+    assert r.inserted == 2             # the LMU game's 2 rows
+    assert r.skipped_non_lmu == 1      # the Other (non-LMU) game
+
+    # since_days=None: full walk reaches the pruned 09/05 folder too.
+    r_all = games.load_games(engine=None, sftp=sftp, dry_run=True, since_days=None, lmu_only=True)
+    assert r_all.files == 3

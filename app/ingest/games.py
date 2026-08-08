@@ -19,6 +19,8 @@ called via ``common.``) so tests can monkeypatch them.
 """
 from __future__ import annotations
 
+import calendar
+import datetime as dt
 import posixpath
 import re
 import stat
@@ -30,6 +32,62 @@ from app.ingest.common import LoadResult, chunked_insert, existing_keys
 # Game CSV basenames look like "20260416-CypressCollege-1.csv": 8 digits
 # (the game date) then a dash.
 _GAME_FILENAME_RE = re.compile(r"^\d{8}-.*\.csv$")
+
+LMU_FOREIGN_ID = 78          # HomeTeamForeignID/AwayTeamForeignID for LMU
+LMU_TEAM_CODE = "LOY_LIO"    # PitcherTeam/BatterTeam Trackman code for LMU
+
+
+def _today() -> dt.date:
+    """Seam so tests can pin 'today' for the upload-folder window."""
+    return dt.date.today()
+
+
+def _dir_within_window(dirpath: str, cutoff: dt.date) -> bool:
+    """True if an upload-date directory under /v3 could contain files uploaded
+    on/after `cutoff`. Parses the leading numeric path components as
+    year[/month[/day]] and compares the LATEST date that prefix can represent
+    (year -> Dec 31, year/month -> month end, full -> that day) against cutoff.
+
+    Non-date directories (the `/v3` root, the `CSV` leaf, any non-numeric
+    token) are always allowed, so pruning never blocks the walk from reaching
+    files -- it only skips whole out-of-window date folders. Malformed dates
+    also return True (descend rather than wrongly prune)."""
+    nums: list[int] = []
+    for p in [x for x in dirpath.strip("/").split("/") if x]:
+        if p.isdigit():
+            nums.append(int(p))
+        elif nums:
+            break  # stop at the first non-numeric AFTER the date parts (e.g. CSV)
+        # leading non-numeric tokens (e.g. "v3") are skipped
+    if not nums:
+        return True
+    try:
+        year = nums[0]
+        if len(nums) == 1:
+            latest = dt.date(year, 12, 31)
+        elif len(nums) == 2:
+            latest = dt.date(year, nums[1], calendar.monthrange(year, nums[1])[1])
+        else:
+            latest = dt.date(year, nums[1], nums[2])
+    except (ValueError, IndexError):
+        return True
+    return latest >= cutoff
+
+
+def is_lmu_game(df: pd.DataFrame) -> bool:
+    """True if LMU played in this game CSV: LMU's foreign id (78) appears as the
+    home/away team, or the LMU team code appears as a pitcher/batter team."""
+    if df is None or df.empty:
+        return False
+    for col in ("HomeTeamForeignID", "AwayTeamForeignID"):
+        if col in df.columns:
+            if (pd.to_numeric(df[col], errors="coerce") == LMU_FOREIGN_ID).any():
+                return True
+    for col in ("PitcherTeam", "BatterTeam"):
+        if col in df.columns:
+            if (df[col].astype(str) == LMU_TEAM_CODE).any():
+                return True
+    return False
 
 # Maps each of the 167 raw Trackman game-CSV column names to its GAMES DB
 # column name. Identity for every column except the one known difference.
@@ -296,7 +354,7 @@ def dedup_key(row: dict) -> str:
     return f"{game_uid}|{row.get('PitchNo')}"
 
 
-def iter_game_files(sftp, root: str = "/v3") -> list[str]:
+def iter_game_files(sftp, root: str = "/v3", since_days: int | None = None) -> list[str]:
     """Recursively walk `root` on `sftp`, returning full paths of files whose
     basename matches a game-export CSV name (8 digits, a dash, then anything,
     e.g. ``20260416-CypressCollege-1.csv``) AND whose immediate parent
@@ -305,9 +363,16 @@ def iter_game_files(sftp, root: str = "/v3") -> list[str]:
     directories at the ``DD`` level may hold other export formats with
     similarly-named files, which must be excluded).
 
+    When ``since_days`` is set (the daily-cron case), directory descent is
+    pruned to upload-date folders within the last ``since_days`` days -- since
+    ``/v3/YYYY/MM/DD`` is the UPLOAD date, recent uploads live in recent
+    folders, so this turns the ~50k-file full-tree walk into a few days'
+    without missing new games. ``since_days=None`` keeps the full walk.
+
     Sorted for deterministic ordering (helps `date_min`/`date_max` reasoning
     and makes tests reproducible).
     """
+    cutoff = (_today() - dt.timedelta(days=since_days)) if since_days is not None else None
     found: list[str] = []
     stack = [root]
     while stack:
@@ -315,7 +380,8 @@ def iter_game_files(sftp, root: str = "/v3") -> list[str]:
         for entry in sftp.listdir_attr(current):
             path = posixpath.join(current, entry.filename)
             if stat.S_ISDIR(entry.st_mode):
-                stack.append(path)
+                if cutoff is None or _dir_within_window(path, cutoff):
+                    stack.append(path)
             elif (
                 _GAME_FILENAME_RE.match(entry.filename)
                 and posixpath.basename(current) == "CSV"
@@ -334,16 +400,23 @@ def _read_csv_from_sftp(sftp, path: str) -> pd.DataFrame:
         return pd.read_csv(f)
 
 
-def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None) -> LoadResult:
+def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
+               since_days: int | None = None, lmu_only: bool = True) -> LoadResult:
     """Walk the Trackman `/v3` tree for game-export CSV files, parse each with
     `parse_game_csv`, dedup rows against GAMES.PitchUID (both already-loaded
     rows and within-run duplicates), and insert the new rows via
     `chunked_insert` (skipped entirely when `dry_run`).
 
+    `since_days` prunes the walk to recent upload-date folders (the daily-cron
+    case; see `iter_game_files`). `lmu_only` (default) skips any game CSV in
+    which LMU did not play (`is_lmu_game`), keeping GAMES LMU-only and avoiding
+    ingesting the multi-team `/v3` swamp; such files are counted in
+    `skipped_non_lmu`.
+
     Insert-only: never DELETEs or DROPs existing rows. `date_min`/`date_max`
     are computed from the `Date` column of the rows selected for insert.
     """
-    files = iter_game_files(sftp)
+    files = iter_game_files(sftp, since_days=since_days)
     if limit is not None:
         files = files[:limit]
 
@@ -351,10 +424,14 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None) 
     seen: set[str] = set()
     rows_to_insert: list[dict] = []
     skipped = 0
+    skipped_non_lmu = 0
 
     for path in files:
         raw_df = _read_csv_from_sftp(sftp, path)
         parsed = parse_game_csv(raw_df, source_file=path)
+        if lmu_only and not is_lmu_game(parsed):
+            skipped_non_lmu += 1
+            continue
         for row in parsed.to_dict(orient="records"):
             key = dedup_key(row)
             if key in already_loaded or key in seen:
@@ -378,4 +455,5 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None) 
         date_min=date_min,
         date_max=date_max,
         dry_run=dry_run,
+        skipped_non_lmu=skipped_non_lmu,
     )

@@ -25,6 +25,7 @@ class LoadResult:
     date_min: str | None
     date_max: str | None
     dry_run: bool
+    skipped_non_lmu: int = 0  # games skipped by the LMU-only filter (pipeline)
 
 
 def safe_numeric(x) -> float | None:
