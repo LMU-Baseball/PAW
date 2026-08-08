@@ -122,3 +122,26 @@ def test_range_summary_falls_back_to_compute_when_missing(monkeypatch):
     monkeypatch.setattr(precalc, "read_pitching_season", lambda p: None)
     out = pitching_caps.range_summary(RAW_PID)
     assert set(out) == {"appearances", "ip", "k_pct", "bb_pct", "barrel_pct"}
+
+
+def test_pitchers_for_game_columns_lmu_and_ordering():
+    """Correctness guard for the perf rewrite (correlated ORDER BY subquery ->
+    GROUP BY): same columns, pitch-order = ascending first-pitch, alpha-order =
+    name-sorted, and both sorts return the same pitcher set."""
+    g = pitching_caps.recent_games(5)
+    gid = int(g.iloc[0]["game_id"])
+    df = pitching_caps.pitchers_for_game(gid, sort="pitch")
+    assert list(df.columns) == ["game_id", "player_id", "display_name"]
+    assert not df.empty
+    # pitch order = ascending MIN(PitchNo) per pitcher (computed independently)
+    mins = {}
+    for pid in df["player_id"]:
+        m = query_df("SELECT MIN(PitchNo) AS mn FROM GAMES WHERE GameID = :g AND PitcherId = :p",
+                     {"g": str(gid), "p": int(pid)})
+        mins[int(pid)] = int(m.iloc[0]["mn"])
+    order = [mins[int(p)] for p in df["player_id"]]
+    assert order == sorted(order)
+    # alpha = same set of pitchers, name-sorted
+    da = pitching_caps.pitchers_for_game(gid, sort="alpha")
+    assert set(da["player_id"]) == set(df["player_id"])
+    assert list(da["display_name"]) == sorted(da["display_name"])
