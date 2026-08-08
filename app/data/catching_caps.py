@@ -218,17 +218,15 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
 
 # ============================ SEASON TILES ===================================
 
-def framing_season_tiles(catcher_id) -> dict:
-    """Season sidebar tiles: games, pitches, net strikes, steal% -- SQL
-    aggregate over GAMES (sibling-id union), mirroring catching's warehouse
-    version exactly (same keys/format/InZone box). No game_id-driven date
-    bound, so guarded by `_NUMERIC_GAME_ID_CLAUSE` (see games_for_catcher)
-    to keep pre-CAPS-migration composite-GameID rows out of "whole career"
-    totals -- verified live to reproduce the oracle's totals exactly for the
-    fixture catcher.
-    """
+def _compute_season_rollup(catcher_id) -> dict:
+    """Phase 4 catching season rollup: the framing sidebar tiles (games,
+    pitches, net strikes, steal%) as an SQL aggregate over GAMES (sibling-id
+    union, numeric-GameID-guarded), plus catcher_id/name. Mirrors catching's
+    warehouse version exactly (same keys/format/InZone box). This is the rebuild
+    source AND the compute fallback for framing_season_tiles."""
     from app.data.catching import _pct
-    ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
+    cid = int(catcher_id)
+    ph, idp = _in_clause(_sibling_catcher_ids(cid))
     df = query_df(
         f"""
         SELECT COUNT(DISTINCT GameID) AS games,
@@ -246,16 +244,26 @@ def framing_season_tiles(catcher_id) -> dict:
         """,
         idp,
     )
-    if df.empty:
-        return {"games": "—", "pitches": "—", "net_strikes": "—", "steal_pct": "—"}
-    r = df.iloc[0]
-    stolen = int(r["stolen"] or 0)
-    lost = int(r["lost"] or 0)
-    valid_loc = int(r["valid_loc"] or 0)
-    steal = _pct(lost, valid_loc)
-    return {
-        "games": str(int(r["games"] or 0)),
-        "pitches": str(int(r["pitches"] or 0)),
-        "net_strikes": str(stolen - lost),
-        "steal_pct": "—" if steal is None else f"{steal}%",
-    }
+    tiles = {"games": "—", "pitches": "—", "net_strikes": "—", "steal_pct": "—"}
+    if not df.empty:
+        r = df.iloc[0]
+        stolen = int(r["stolen"] or 0)
+        lost = int(r["lost"] or 0)
+        valid_loc = int(r["valid_loc"] or 0)
+        steal = _pct(lost, valid_loc)
+        tiles = {
+            "games": str(int(r["games"] or 0)),
+            "pitches": str(int(r["pitches"] or 0)),
+            "net_strikes": str(stolen - lost),
+            "steal_pct": "—" if steal is None else f"{steal}%",
+        }
+    return {"catcher_id": cid, "catcher_name": catcher_name(cid), **tiles}
+
+
+def framing_season_tiles(catcher_id) -> dict:
+    """Season sidebar tiles, read from the 1-row precalc catching rollup with a
+    compute fallback (Phase 4). Return shape unchanged."""
+    from app.data import precalc  # lazy: precalc imports catching_caps for rebuild
+    row = precalc.read_catching_season(int(catcher_id))
+    r = row if row is not None else _compute_season_rollup(catcher_id)
+    return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}

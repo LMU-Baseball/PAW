@@ -96,3 +96,20 @@ def test_lmu_catchers_all_have_numeric_game_id_rows():
         {"t": catching_caps.LMU_PITCHER_TEAM},
     )["CatcherId"].astype(int))
     assert ids <= current_ids
+
+
+def test_framing_season_tiles_uses_precalc_when_present(monkeypatch):
+    from app.data import precalc
+    sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
+                "games": "12", "pitches": "800", "net_strikes": "15",
+                "steal_pct": "4.2%"}
+    monkeypatch.setattr(precalc, "read_catching_season", lambda c: sentinel)
+    assert catching_caps.framing_season_tiles(RAW_CID) == {
+        "games": "12", "pitches": "800", "net_strikes": "15", "steal_pct": "4.2%"}
+
+
+def test_framing_season_tiles_falls_back_to_compute_when_missing(monkeypatch):
+    from app.data import precalc
+    monkeypatch.setattr(precalc, "read_catching_season", lambda c: None)
+    out = catching_caps.framing_season_tiles(RAW_CID)
+    assert set(out) == {"games", "pitches", "net_strikes", "steal_pct"}

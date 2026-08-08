@@ -510,22 +510,8 @@ def season_summary(pitcher_id) -> dict:
             "k": _s(r["k"]), "bb": _s(r["bb"])}
 
 
-def range_summary(pitcher_id, start=None, end=None) -> dict:
-    """Date-range-scoped sidebar tiles: Appearances / IP / K% / Walk% / Barrel%.
-
-    Loads the date-bounded pitch df (whole-career, numeric-GameID-only, when
-    start/end are missing) and computes via the transforms shared with
-    pitching.py (imported unchanged)."""
-    pid = int(pitcher_id)
-    if start and end:
-        df = range_pitches_for(pid, start, end)
-    else:
-        ph, idp = _in_clause(_sibling_pitcher_ids(pid))
-        df = query_df(
-            f"SELECT {_PITCH_SELECT} FROM GAMES "
-            f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}",
-            idp,
-        )
+def _summary_tiles(df) -> dict:
+    """The 5 sidebar tiles from a pitch df (shared by range_summary + rollup)."""
     if df is None or df.empty:
         return {"appearances": "—", "ip": "—", "k_pct": "—",
                 "bb_pct": "—", "barrel_pct": "—"}
@@ -536,3 +522,51 @@ def range_summary(pitcher_id, start=None, end=None) -> dict:
         "bb_pct": f"{bb_pct(df)[0]:.1f}%",
         "barrel_pct": f"{barrel_pct_ev(df)[0]:.1f}%",
     }
+
+
+def _numeric_career_df(pitcher_id):
+    """Whole-career, numeric-GameID-only pitch df for a pitcher (sibling union)."""
+    ph, idp = _in_clause(_sibling_pitcher_ids(int(pitcher_id)))
+    return query_df(
+        f"SELECT {_PITCH_SELECT} FROM GAMES "
+        f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}", idp)
+
+
+def _compute_season_rollup(pitcher_id) -> dict:
+    """Phase 4 pitching season rollup: the whole-numeric-career sidebar tiles
+    plus the numeric date span, computed from raw CAPS. This is exactly what
+    range_summary returns for a range that covers the pitcher's whole span (the
+    default 'season' sidebar view); precalc.rebuild_pitching stores it and
+    range_summary reads it back (this function is the compute fallback)."""
+    pid = int(pitcher_id)
+    df = _numeric_career_df(pid)
+    ph, idp = _in_clause(_sibling_pitcher_ids(pid))
+    span = query_df(
+        f"SELECT MIN(Date) AS mn, MAX(Date) AS mx FROM GAMES "
+        f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}", idp)
+    mn = None if span.empty or pd.isna(span.iloc[0]["mn"]) else str(span.iloc[0]["mn"])
+    mx = None if span.empty or pd.isna(span.iloc[0]["mx"]) else str(span.iloc[0]["mx"])
+    return {"pitcher_id": pid, "pitcher_name": pitcher_name(pid),
+            "min_date": mn, "max_date": mx, **_summary_tiles(df)}
+
+
+def range_summary(pitcher_id, start=None, end=None) -> dict:
+    """Date-range-scoped sidebar tiles: Appearances / IP / K% / Walk% / Barrel%.
+
+    Phase 4: when the request covers the pitcher's whole numeric span (the
+    default 'season' view passes start<=min & end>=max) or omits dates entirely,
+    read the 1-row precalc rollup instead of loading the full season; a genuine
+    sub-range still computes on the fly. Compute fallback when no rollup row."""
+    from app.data import precalc  # lazy: precalc imports pitching_caps for rebuild
+    pid = int(pitcher_id)
+    row = precalc.read_pitching_season(pid)
+
+    def _tiles_from(r):
+        return {k: r[k] for k in ("appearances", "ip", "k_pct", "bb_pct", "barrel_pct")}
+
+    if not (start and end):
+        return _tiles_from(row) if row else _tiles_from(_compute_season_rollup(pid))
+    if row and row.get("min_date") and str(start) <= row["min_date"] and str(end) >= row["max_date"]:
+        return _tiles_from(row)  # range covers the whole numeric span -> rollup
+    df = range_pitches_for(pid, start, end)  # genuine sub-range: compute
+    return _summary_tiles(df)

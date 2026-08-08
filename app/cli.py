@@ -30,11 +30,17 @@ def register_cli(server):
         click.echo(f"Created {role} {email} (id={user.id}).")
 
     @server.cli.command("rebuild-precalc")
-    @click.option("--module", default="hitting", type=click.Choice(["hitting"]),
-                  help="Which precalc family to rebuild (only hitting so far).")
+    @click.option("--module", default="all",
+                  type=click.Choice(["all", "hitting", "pitching", "catching"]),
+                  help="Which precalc rollup(s) to rebuild from CAPS.")
     def rebuild_precalc(module):
         """Rebuild the precalc rollup tables from CAPS."""
         from app.data import precalc
         from app.db import get_engine
-        n = precalc.rebuild_hitting(get_engine())
-        click.echo(f"rebuilt {module}: {n} rows")
+        engine = get_engine()
+        fns = {"hitting": precalc.rebuild_hitting,
+               "pitching": precalc.rebuild_pitching,
+               "catching": precalc.rebuild_catching}
+        targets = list(fns) if module == "all" else [module]
+        for m in targets:
+            click.echo(f"rebuilt {m}: {fns[m](engine)} rows")

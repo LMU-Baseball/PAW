@@ -101,3 +101,24 @@ def test_lmu_pitchers_all_have_numeric_game_id_rows():
 def test_report_data_version_present():
     assert hasattr(pitching_caps, "report_data_version")
     assert pitching_caps.report_data_version(RAW_PID) != "none"
+
+
+def test_range_summary_uses_precalc_when_range_covers_span(monkeypatch):
+    """A range covering the pitcher's whole numeric span (the default season
+    view) reads the 1-row rollup instead of loading the season."""
+    from app.data import precalc
+    sentinel = {"min_date": "2025-11-01", "max_date": "2026-05-16",
+                "appearances": "7", "ip": "12.1", "k_pct": "30.0%",
+                "bb_pct": "6.0%", "barrel_pct": "5.0%"}
+    monkeypatch.setattr(precalc, "read_pitching_season", lambda p: sentinel)
+    out = pitching_caps.range_summary(RAW_PID, "2025-11-01", "2026-05-16")
+    assert out == {"appearances": "7", "ip": "12.1", "k_pct": "30.0%",
+                   "bb_pct": "6.0%", "barrel_pct": "5.0%"}
+
+
+def test_range_summary_falls_back_to_compute_when_missing(monkeypatch):
+    """No rollup row -> compute on the fly (correct, just slower)."""
+    from app.data import precalc
+    monkeypatch.setattr(precalc, "read_pitching_season", lambda p: None)
+    out = pitching_caps.range_summary(RAW_PID)
+    assert set(out) == {"appearances", "ip", "k_pct", "bb_pct", "barrel_pct"}
