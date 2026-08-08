@@ -22,6 +22,7 @@ def open_sftp(cfg: dict):
     transport = paramiko.Transport(sock)
     try:
         transport.connect(username=cfg["user"], password=cfg["password"])
+        transport.set_keepalive(30)  # keep long /v3 walks alive (idle drops otherwise)
         sftp = paramiko.SFTPClient.from_transport(transport)
         try:
             yield sftp
