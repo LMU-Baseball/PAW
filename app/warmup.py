@@ -37,6 +37,8 @@ def warm_caches() -> None:
         _safe(lambda: H.player_profile(bid))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, batter_id=bid))
+            gid = int(g.iloc[0]["game_id"])  # default (most-recent) game
+            _safe(lambda: H.game_pitches(gid, bid))  # default tab's game-data
 
     pitchers = _safe(P.lmu_pitchers)
     if pitchers is not None and not pitchers.empty:
@@ -45,6 +47,8 @@ def warm_caches() -> None:
         _safe(lambda: P.pitcher_profile(pid))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, pitcher_id=pid))
+            gid = int(g.iloc[0]["game_id"])
+            _safe(lambda: P.game_pitches_for(gid, pid))
 
     catchers = _safe(C.lmu_catchers)
     if catchers is not None and not catchers.empty:
@@ -53,6 +57,8 @@ def warm_caches() -> None:
         _safe(lambda: C.catcher_profile(cid))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
+            gid = int(g.iloc[0]["game_id"])
+            _safe(lambda: C.game_pitches_for(gid, cid))
 
 
 def start_warm_thread() -> threading.Thread:

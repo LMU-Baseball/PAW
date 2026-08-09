@@ -375,6 +375,7 @@ def pitcher_tm_id_for(pitcher_id):
     return int(pitcher_id)
 
 
+@cached
 def pitcher_profile(pitcher_id) -> dict:
     """Name + throws (from GAMES) + jersey/photo (roster_media, by raw id
     directly -- no pitcher_tm_id_for mapping needed, unlike the oracle)."""

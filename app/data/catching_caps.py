@@ -172,6 +172,7 @@ def catcher_tm_id_for(catcher_id):
     return int(catcher_id)
 
 
+@cached
 def catcher_profile(catcher_id) -> dict:
     """Name + position 'C' + jersey/photo (roster_media, by raw id directly --
     no catcher_tm_id_for mapping needed, unlike the oracle)."""
