@@ -267,12 +267,60 @@ def test_build_bullpen_dash_mounts(server):
 
 
 def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
-    """The Task 4 first-paint pitcher options must be scoped to the season-default
-    range (start_d, end_d), not every pitcher who's ever thrown a bullpen."""
-    import inspect
+    """The Task 4 first-paint pitcher dropdown options must be scoped to the
+    season-default range, not every pitcher who's ever thrown a bullpen."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.dashboards.bullpen import layout, selectors
+    with server.app_context():
+        coach = User(email="bpfp@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/bullpen/"):
+            login_user(coach)
+            out = layout.serve_layout()
+    store = out.children[0]
+    assert store.id == "bp-selection"
+    start_d, end_d = store.data["start"], store.data["end"]
+    pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
+    assert pitcher_dd.id == "bp-pitcher-dd"
+    rendered_values = {o["value"] for o in pitcher_dd.options}
+    expected = {o["value"] for o in selectors.pitcher_options(
+        is_coach=True, own_trackman_id=None, start=start_d, end=end_d)}
+    assert rendered_values == expected
+    # sanity: prove this is actually scoped, not coincidentally equal to the
+    # unscoped list (otherwise this test wouldn't distinguish the two).
+    unscoped = {o["value"] for o in selectors.pitcher_options(is_coach=True, own_trackman_id=None)}
+    assert expected <= unscoped
+
+
+def test_layout_initial_paint_player_role_empty_options_value_consistent(server):
+    """Task 4 fix round 1: when a player-role user's own bullpen falls outside
+    the season-default range, first-paint options is [] -- the dropdown value
+    must not be bound to their own id (which isn't among the options); it must
+    be the fallback used by _on_daterange_pitchers (first option's value, or
+    None), matching the runtime callback's own behavior exactly."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
     from app.dashboards.bullpen import layout
-    src = inspect.getsource(layout.serve_layout)
-    assert "start=start_d, end=end_d" in src
+    with server.app_context():
+        player = User(email="bpplayer@lmu.edu", name="Player", role="player",
+                      trackman_id=-999)  # id with no bullpen data at all
+        player.set_password("x")
+        db.session.add(player)
+        db.session.commit()
+        with server.test_request_context("/dash/bullpen/"):
+            login_user(player)
+            out = layout.serve_layout()
+    store = out.children[0]
+    pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
+    assert pitcher_dd.id == "bp-pitcher-dd"
+    assert pitcher_dd.options == []
+    assert pitcher_dd.value is None
+    assert store.data["pitcher_id"] is None
 
 
 def test_bullpen_layout_uses_preset_dropdown(server):

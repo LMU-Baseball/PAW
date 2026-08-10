@@ -74,10 +74,15 @@ def serve_layout() -> html.Div:
     # thrown a bullpen.
     pitchers = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
                                          start=start_d, end=end_d)
+    # Fallback mirrors _on_daterange_pitchers exactly (callbacks.py): if the
+    # unscoped default isn't in the range-scoped options, fall back to the
+    # first available option's value (or None) -- NOT resolve_pitcher(), which
+    # would force a player-role user back to their own id even when it's not
+    # among `pitchers` (own bullpen outside the season-default range), binding
+    # a stale value to empty options until the date range is touched.
     pitcher_values = {p["value"] for p in pitchers}
     if default_pitcher not in pitcher_values:
-        default_pitcher = selectors.resolve_pitcher(
-            pitchers[0]["value"] if pitchers else None, is_coach=is_coach, own_trackman_id=own)
+        default_pitcher = pitchers[0]["value"] if pitchers else None
     sess = B.session_options(default_pitcher, start_d, end_d) if default_pitcher is not None else None
     session_opts = selectors.session_dropdown_options(sess)
     default_session = session_opts[0]["value"] if session_opts else None
