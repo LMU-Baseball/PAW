@@ -2,7 +2,7 @@
 
 Ports loaders/transforms from BRADhaskell/lmu-baseball-practice-analytics
 `dashboard/app.py` onto PAW's shared analytics MySQL (MYSQL_* → same RDS that
-holds the Trackman warehouse). Tables: practice_plays, practice_sessions,
+holds the Trackman warehouse). Tables: PRACTICE_PLAYS, PRACTICE_SESSIONS,
 player_stats_summary.
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ def current_season_start() -> str:
 def date_bounds() -> tuple:
     df = query_df(
         "SELECT MIN(session_date) AS min_d, MAX(session_date) AS max_d "
-        "FROM practice_sessions WHERE session_date IS NOT NULL"
+        "FROM PRACTICE_SESSIONS WHERE session_date IS NOT NULL"
     )
     if df.empty:
         return date(2023, 1, 1), date.today()
@@ -81,7 +81,7 @@ def all_player_names(exclude_test: bool = True) -> list[str]:
     for the dropdown, so the dashboard needn't load every player's pitch rows."""
     where = ("WHERE user_name IS NOT NULL AND TRIM(user_name) <> ''"
              + _test_clause("user_name", exclude_test))
-    df = query_df(f"SELECT DISTINCT user_name AS name FROM practice_sessions "
+    df = query_df(f"SELECT DISTINCT user_name AS name FROM PRACTICE_SESSIONS "
                   f"{where} ORDER BY user_name")
     return [] if df.empty else [str(n) for n in df["name"].dropna()]
 
@@ -89,7 +89,7 @@ def all_player_names(exclude_test: bool = True) -> list[str]:
 def latest_session_date(exclude_test: bool = True):
     """Most recent session date (the default date the dashboard opens on)."""
     where = "WHERE session_date IS NOT NULL" + _test_clause("user_name", exclude_test)
-    df = query_df(f"SELECT MAX(session_date) AS d FROM practice_sessions {where}")
+    df = query_df(f"SELECT MAX(session_date) AS d FROM PRACTICE_SESSIONS {where}")
     return None if df.empty or pd.isna(df.iloc[0]["d"]) else df.iloc[0]["d"]
 
 
@@ -100,7 +100,7 @@ def players_on_date(d, exclude_test: bool = True) -> list[str]:
         return []
     where = ("WHERE session_date = :d AND user_name IS NOT NULL AND TRIM(user_name) <> ''"
              + _test_clause("user_name", exclude_test))
-    df = query_df(f"SELECT DISTINCT user_name AS name FROM practice_sessions "
+    df = query_df(f"SELECT DISTINCT user_name AS name FROM PRACTICE_SESSIONS "
                   f"{where} ORDER BY user_name", {"d": str(d)})
     return [] if df.empty else [str(n) for n in df["name"].dropna()]
 
@@ -145,7 +145,7 @@ def load_sessions(exclude_test: bool = True, player=None,
                total_plays, at_bats, hit_count, batting_avg,
                hard_hit_count, ground_ball_pct, fly_ball_pct, line_drive_pct,
                session_type, session_tag
-          FROM practice_sessions
+          FROM PRACTICE_SESSIONS
           {where}
          ORDER BY session_date DESC
     """, params)
@@ -166,7 +166,7 @@ def load_plays(exclude_test: bool = True, player=None,
                DATE(play_timestamp) AS play_date,
                exit_velocity, distance_feet, horizontal_angle,
                hit_type, launch_angle, session_id, result
-          FROM practice_plays
+          FROM PRACTICE_PLAYS
           {where}
          ORDER BY play_timestamp
     """, params)
@@ -201,8 +201,8 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
                    pp.play_timestamp, pp.session_id,
                    DATE(pp.play_timestamp) AS play_date,
                    ps.session_type, ps.session_tag
-              FROM practice_plays pp
-              LEFT JOIN practice_sessions ps ON pp.session_id = ps.session_id
+              FROM PRACTICE_PLAYS pp
+              LEFT JOIN PRACTICE_SESSIONS ps ON pp.session_id = ps.session_id
               {where}
              ORDER BY pp.play_timestamp
         """, params)

@@ -1,7 +1,7 @@
 """Tests for app.ingest.hittrax's TRANSFORM step: transform_sessions /
 transform_plays. PURE only -- no network, no DB. Builds an in-memory
 raw-table-shaped DataFrame (`source_file`, `payload`=json per CSV row) from
-the two fixture CSVs, exactly as the real `raw_practice_csv` table would
+the two fixture CSVs, exactly as the real `RAW_PRACTICE_CSV` table would
 hold them, and feeds that straight into the pure transforms.
 
 One additional test (`test_transform_uses_delete_not_truncate_for_rebuild`)
@@ -30,7 +30,7 @@ PLAYS_FIXTURE = Path(__file__).parent / "fixtures" / "ingest" / "hittrax_plays_s
 
 
 def _raw_df(fixture: Path, *, source_file: str) -> pd.DataFrame:
-    """Build a raw_practice_csv-shaped DataFrame (source_file, payload) from
+    """Build a RAW_PRACTICE_CSV-shaped DataFrame (source_file, payload) from
     a fixture CSV, one row per CSV row -- mirrors how `csv_to_raw_rows`
     stores each row as a JSON payload string.
     """
@@ -167,7 +167,7 @@ def test_transform_sessions_empty_raw_df_returns_empty_frame():
 
 
 def test_transform_sessions_drops_row_with_blank_ts():
-    # practice_sessions.session_date is NOT NULL; a blank TS can't produce
+    # PRACTICE_SESSIONS.session_date is NOT NULL; a blank TS can't produce
     # a session_date, so the row must be excluded rather than passed
     # through with a null session_date that would fail the DB constraint.
     payload = {"Id": 1, "TS": "", "UsId": 5, "AEV": 30.0}
@@ -338,9 +338,9 @@ def test_transform_plays_empty_raw_df_returns_empty_frame():
 # ---------------------------------------------------------------------------
 # transform(): DB-write path, exercised against a FAKE engine/connection
 # (no real DB) -- only to prove the destructive statements are DELETE, not
-# TRUNCATE. `raw_practice_csv` is faked as empty (via the fake connection's
+# TRUNCATE. `RAW_PRACTICE_CSV` is faked as empty (via the fake connection's
 # `.execute(...).mappings().all()` returning `[]`), and `pd.read_sql` (used
-# to re-fetch practice_sessions' auto-generated session_ids) is monkeypatched
+# to re-fetch PRACTICE_SESSIONS' auto-generated session_ids) is monkeypatched
 # to a canned empty frame, so nothing here depends on real SQLAlchemy/pandas
 # DB-execution semantics.
 # ---------------------------------------------------------------------------
@@ -418,7 +418,7 @@ class _FakeEngine:
 def test_transform_uses_delete_not_truncate_for_rebuild(monkeypatch):
     import app.ingest.hittrax as hittrax_module
 
-    # transform() re-queries practice_sessions (via pd.read_sql) after
+    # transform() re-queries PRACTICE_SESSIONS (via pd.read_sql) after
     # inserting sessions, to get real auto-increment session_ids for the
     # play merge -- faked here as an empty frame with the right columns.
     monkeypatch.setattr(

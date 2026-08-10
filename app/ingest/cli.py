@@ -126,7 +126,7 @@ def backfill_zone_command(dry_run: bool):
 )
 @click.option("--limit", type=int, default=None, help="Limit the number of HitTrax CSV files processed.")
 def hittrax_raw_command(dry_run: bool, limit: int | None):
-    """Load raw HitTrax exports (Plays/Session CSVs) into `raw_practice_csv` from the FTPS root."""
+    """Load raw HitTrax exports (Plays/Session CSVs) into `RAW_PRACTICE_CSV` from the FTPS root."""
     engine = get_engine()
     ingested_at = datetime.now(timezone.utc)
     with open_ftps(hittrax_cfg()) as ftps:
@@ -143,7 +143,7 @@ def hittrax_raw_command(dry_run: bool, limit: int | None):
     help="Preview only, write nothing (default). Use --no-dry-run to actually rebuild.",
 )
 def hittrax_transform_command(dry_run: bool):
-    """Rebuild practice_sessions/practice_plays/player_stats_summary from raw_practice_csv."""
+    """Rebuild PRACTICE_SESSIONS/PRACTICE_PLAYS/player_stats_summary from RAW_PRACTICE_CSV."""
     engine = get_engine()
     result = transform(engine, dry_run=dry_run)
     click.echo(

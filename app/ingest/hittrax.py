@@ -1,13 +1,13 @@
-"""HitTrax raw ELT: FTPS -> `raw_practice_csv` staging table, PLUS the
+"""HitTrax raw ELT: FTPS -> `RAW_PRACTICE_CSV` staging table, PLUS the
 transform step from that raw layer into the clean analytics tables
-(`practice_sessions` / `practice_plays` / `player_stats_summary`).
+(`PRACTICE_SESSIONS` / `PRACTICE_PLAYS` / `player_stats_summary`).
 
 Reproduces the "Extract & Load Phase" of the original pipeline (see
 ``docs/reference/hittrax-practice-analytics/pipeline-architecture.md`` §1):
 list the HitTrax FTPS root, read each CSV (``PlaysExport_*``/
 ``SessionExport_*``), convert every row to a JSON payload, compute a
 SHA-256 ``row_hash`` for dedup, and ``INSERT IGNORE`` into
-``raw_practice_csv`` keyed on that hash (UNIQUE column) -- idempotent by
+``RAW_PRACTICE_CSV`` keyed on that hash (UNIQUE column) -- idempotent by
 construction, so re-running never creates duplicate rows.
 
 Pure helpers (``row_hash``/``csv_to_raw_rows``) take no network/DB
@@ -81,7 +81,7 @@ def _clean_record(record: dict) -> dict:
 
 
 def csv_to_raw_rows(df: pd.DataFrame, *, source_file: str) -> list[dict]:
-    """Convert every row of `df` into a `raw_practice_csv` insert-ready dict:
+    """Convert every row of `df` into a `RAW_PRACTICE_CSV` insert-ready dict:
     ``{"source_file", "row_hash", "payload"}`` where ``payload`` is the row's
     JSON string (the hash is computed from the same cleaned row dict as the
     stored payload -- see `_clean_record` -- so key order never affects the
@@ -133,7 +133,7 @@ def extract_load_raw(
     limit: int | None = None,
 ) -> LoadResult:
     """List the HitTrax FTPS root, read each CSV, and `INSERT IGNORE` every
-    row (as JSON) into `raw_practice_csv`.
+    row (as JSON) into `RAW_PRACTICE_CSV`.
 
     Skips files smaller than 10 bytes (offseason/empty exports). `limit`
     caps the number of files processed, not rows. `ingested_at` is a
@@ -167,7 +167,7 @@ def extract_load_raw(
 
     if not dry_run and rows_to_insert:
         sql = text(
-            "INSERT IGNORE INTO raw_practice_csv "
+            "INSERT IGNORE INTO RAW_PRACTICE_CSV "
             "(source_file, ingested_at_utc, row_hash, payload) "
             "VALUES (:source_file, :ingested_at, :row_hash, CAST(:payload AS JSON))"
         )
@@ -188,7 +188,7 @@ def extract_load_raw(
 
 
 # ===========================================================================
-# TRANSFORM: raw_practice_csv -> practice_sessions / practice_plays /
+# TRANSFORM: RAW_PRACTICE_CSV -> PRACTICE_SESSIONS / PRACTICE_PLAYS /
 # player_stats_summary
 #
 # Column-by-column mapping source of truth:
@@ -275,7 +275,7 @@ def _split_name(name: str | None) -> tuple[str | None, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# practice_sessions
+# PRACTICE_SESSIONS
 # ---------------------------------------------------------------------------
 
 # Every entry here has an explicit HitTrax source-code comment in
@@ -357,7 +357,7 @@ _SESSION_EXTRA_COLS = [
 
 def transform_sessions(raw_df: pd.DataFrame) -> pd.DataFrame:
     """SessionExport raw rows (``{source_file, payload}``, payload = one
-    HitTrax SessionExport row as a JSON string) -> `practice_sessions`
+    HitTrax SessionExport row as a JSON string) -> `PRACTICE_SESSIONS`
     columns.
 
     Every column in `SESSION_FIELD_MAP` follows its `transformed_schema.sql`
@@ -380,17 +380,17 @@ def transform_sessions(raw_df: pd.DataFrame) -> pd.DataFrame:
       corresponding SessionExport field at all and are left NULL.
     - ``total_plays`` is left NULL here (schema DEFAULT 0) -- `transform()`
       fills it in after plays are linked to sessions via an UPDATE
-      (COUNT(*) of linked `practice_plays` rows per session_id).
+      (COUNT(*) of linked `PRACTICE_PLAYS` rows per session_id).
 
     Never touches a DB; missing/blank source cells become `None` (never 0),
     per Task 1's `safe_numeric`/`mps_to_mph`/`meters_to_feet`.
 
-    `practice_sessions.session_date` is `NOT NULL` in the schema, but `TS`
+    `PRACTICE_SESSIONS.session_date` is `NOT NULL` in the schema, but `TS`
     is occasionally blank/unparseable in real exports (`pd.to_datetime` with
     `errors="coerce"` yields `NaT` -> `None` for those). Rows whose derived
     `session_date` is null are dropped here (before the caller ever builds
     an insert dict) rather than left to fail the DB constraint -- they also
-    can't be keyed or joined against `practice_plays` without a date.
+    can't be keyed or joined against `PRACTICE_PLAYS` without a date.
     """
     data = _payload_frame(raw_df)
     if data.empty:
@@ -426,7 +426,7 @@ def transform_sessions(raw_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# practice_plays
+# PRACTICE_PLAYS
 # ---------------------------------------------------------------------------
 
 # {clean_column: (PlaysExport_column, converter_key)} -- every entry has an
@@ -471,7 +471,7 @@ _PLAYS_EXTRA_COLS = [
 
 
 def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd.DataFrame:
-    """PlaysExport raw rows -> `practice_plays` columns, with `session_id`
+    """PlaysExport raw rows -> `PRACTICE_PLAYS` columns, with `session_id`
     attached via a left merge on `(session_date, player_id)`.
 
     Every column in `PLAYS_FIELD_MAP` follows its `transformed_schema.sql`
@@ -481,7 +481,7 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
 
     - ``player_id`` <- `UsId`, ``player_uuid`` <- `UsUuid` -- same "Us"
       (User/batter) field family as SessionExport's `UsId`/`UserUuid`, so
-      this is the consistent join key against `practice_sessions.player_id`.
+      this is the consistent join key against `PRACTICE_SESSIONS.player_id`.
     - ``user_id`` <- `OId`, ``user_uuid`` <- `OUId` -- PlaysExport's other
       id pair ("Owner"?), kept distinct from player_id/player_uuid per the
       schema's separate `user_id`/`user_uuid` columns. In every sample row
@@ -490,13 +490,13 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
       not coerced to NULL, since the schema gives no override rule for them.
     - ``player_name``/``first_name``/``last_name`` have no PlaysExport field
       at all (only ids/uuids) and are left NULL; `player_stats_summary`
-      later fills in name info from `practice_sessions`.
+      later fills in name info from `PRACTICE_SESSIONS`.
     - ``play_timestamp`` <- `TS` (parsed datetime); the play's `session_date`
-      (for the merge key only, not a `practice_plays` column) is `TS`'s date
+      (for the merge key only, not a `PRACTICE_PLAYS` column) is `TS`'s date
       part, per pipeline-architecture.md's "Session-to-Play Mapping Logic".
 
     `sessions_with_ids` must have `session_id`/`session_date`/`player_id`
-    columns (as returned by re-querying `practice_sessions` after it's
+    columns (as returned by re-querying `PRACTICE_SESSIONS` after it's
     loaded); it is deduped to one row per `(session_date, player_id)`
     (`keep='first'`) before the merge, matching the reference's dedup step,
     so a play never fans out into duplicate rows when multiple sessions
@@ -527,7 +527,7 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
     else:
         out["ingested_at"] = None
 
-    # merge key only -- not a practice_plays column, dropped after the merge
+    # merge key only -- not a PRACTICE_PLAYS column, dropped after the merge
     out["session_date"] = ts.dt.date
 
     sessions = (
@@ -547,10 +547,10 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
 # INSERT ... SELECT ... ON DUPLICATE KEY UPDATE per pipeline-architecture.md
 # §2.3, extended to cover the full player_stats_summary schema (the
 # reference's code sample is illustrative/truncated with "..."). Traditional
-# batting totals (AB/hits/BA/SLG) come from practice_sessions (career
+# batting totals (AB/hits/BA/SLG) come from PRACTICE_SESSIONS (career
 # per-session aggregates, per the schema's "career totals from sessions"
 # comments); exit-velocity/distance/hit-type/swing-rate stats come from
-# practice_plays. `NULLIF(..., 0)` denominators keep missing data as NULL
+# PRACTICE_PLAYS. `NULLIF(..., 0)` denominators keep missing data as NULL
 # rather than skewing rates to 0, per the "NULL Handling" data-quality rule.
 _PLAYER_STATS_SQL = """
 INSERT INTO player_stats_summary
@@ -596,9 +596,9 @@ SELECT
     COALESCE(pp.total_swings, 0) AS total_swings,
     pp.swing_rate
 FROM (
-    SELECT player_id FROM practice_sessions WHERE player_id IS NOT NULL
+    SELECT player_id FROM PRACTICE_SESSIONS WHERE player_id IS NOT NULL
     UNION
-    SELECT player_id FROM practice_plays WHERE player_id IS NOT NULL
+    SELECT player_id FROM PRACTICE_PLAYS WHERE player_id IS NOT NULL
 ) ap
 LEFT JOIN (
     SELECT
@@ -616,7 +616,7 @@ LEFT JOIN (
         SUM(home_runs) AS total_home_runs,
         SUM(COALESCE(singles, 0) + COALESCE(doubles, 0) + COALESCE(triples, 0) + COALESCE(home_runs, 0)) AS total_hits,
         SUM(hard_hit_count) AS hard_hit_count
-    FROM practice_sessions
+    FROM PRACTICE_SESSIONS
     WHERE player_id IS NOT NULL
     GROUP BY player_id
 ) ps ON ps.player_id = ap.player_id
@@ -637,7 +637,7 @@ LEFT JOIN (
         SUM(CASE WHEN result IN (-5, -3, -8, -1, 0, 1, 2, 3, 4) THEN 1 ELSE 0 END) AS total_swings,
         SUM(CASE WHEN result IN (-5, -3, -8, -1, 0, 1, 2, 3, 4) THEN 1 ELSE 0 END) * 100.0
             / NULLIF(COUNT(*), 0) AS swing_rate
-    FROM practice_plays
+    FROM PRACTICE_PLAYS
     WHERE player_id IS NOT NULL
     GROUP BY player_id
 ) pp ON pp.player_id = ap.player_id
@@ -672,13 +672,13 @@ ON DUPLICATE KEY UPDATE
 
 
 def _load_raw(engine, prefix: str) -> pd.DataFrame:
-    """SELECT `source_file, ingested_at_utc, payload` from `raw_practice_csv`
+    """SELECT `source_file, ingested_at_utc, payload` from `RAW_PRACTICE_CSV`
     for every row whose `source_file` starts with `prefix` (e.g.
     'SessionExport' / 'PlaysExport'). DB-only (never called by the pure
     transforms/tests).
     """
     sql = text(
-        "SELECT source_file, ingested_at_utc, payload FROM raw_practice_csv "
+        "SELECT source_file, ingested_at_utc, payload FROM RAW_PRACTICE_CSV "
         "WHERE source_file LIKE :pattern"
     )
     with engine.connect() as conn:
@@ -712,14 +712,14 @@ def _insert_rows(conn, table: str, rows: list[dict], chunksize: int = 500) -> No
 
 
 def transform(engine, *, dry_run: bool = True) -> dict:
-    """Rebuild `practice_sessions`, `practice_plays`, and
-    `player_stats_summary` from `raw_practice_csv`.
+    """Rebuild `PRACTICE_SESSIONS`, `PRACTICE_PLAYS`, and
+    `player_stats_summary` from `RAW_PRACTICE_CSV`.
 
     Reads every SessionExport/PlaysExport row currently in
-    `raw_practice_csv`, builds the three clean tables with
+    `RAW_PRACTICE_CSV`, builds the three clean tables with
     `transform_sessions`/`transform_plays`, and -- inside ONE transaction --
     `SET FOREIGN_KEY_CHECKS=0`, DELETEs all rows from the three tables, loads
-    sessions, re-queries `practice_sessions` for its auto-generated
+    sessions, re-queries `PRACTICE_SESSIONS` for its auto-generated
     `session_id`s, loads plays (with `session_id` attached via the merge),
     fills in each session's `total_plays` from its linked plays, aggregates
     `player_stats_summary` via `_PLAYER_STATS_SQL`, then re-enables FK
@@ -769,7 +769,7 @@ def transform(engine, *, dry_run: bool = True) -> dict:
             "players": len(player_ids),
         }
 
-    # De-dupe against practice_sessions' UNIQUE (session_date, player_id,
+    # De-dupe against PRACTICE_SESSIONS' UNIQUE (session_date, player_id,
     # hittrax_session_id) key -- raw exports are cumulative, so the same
     # session can legitimately appear in more than one SessionExport file.
     sessions_df = sessions_df.drop_duplicates(
@@ -790,26 +790,26 @@ def transform(engine, *, dry_run: bool = True) -> dict:
             # DELETE is transactional DML in InnoDB, so the whole rebuild is
             # genuinely atomic. Child-first order kept for clarity even though
             # FK checks are off (order doesn't matter functionally here).
-            conn.execute(text("DELETE FROM practice_plays"))
+            conn.execute(text("DELETE FROM PRACTICE_PLAYS"))
             conn.execute(text("DELETE FROM player_stats_summary"))
-            conn.execute(text("DELETE FROM practice_sessions"))
+            conn.execute(text("DELETE FROM PRACTICE_SESSIONS"))
 
             session_rows = _rows(sessions_df)
-            _insert_rows(conn, "practice_sessions", session_rows)
+            _insert_rows(conn, "PRACTICE_SESSIONS", session_rows)
 
             sessions_with_ids = pd.read_sql(
-                text("SELECT session_id, session_date, player_id FROM practice_sessions"), conn
+                text("SELECT session_id, session_date, player_id FROM PRACTICE_SESSIONS"), conn
             )
             plays_df = transform_plays(raw_plays, sessions_with_ids)
             play_rows = _rows(plays_df)
-            _insert_rows(conn, "practice_plays", play_rows)
+            _insert_rows(conn, "PRACTICE_PLAYS", play_rows)
 
             # total_plays has no direct HitTrax source column -- computed here
             # from the just-linked plays.
             conn.execute(text(
-                "UPDATE practice_sessions ps "
+                "UPDATE PRACTICE_SESSIONS ps "
                 "LEFT JOIN ("
-                "  SELECT session_id, COUNT(*) AS n FROM practice_plays "
+                "  SELECT session_id, COUNT(*) AS n FROM PRACTICE_PLAYS "
                 "  WHERE session_id IS NOT NULL GROUP BY session_id"
                 ") c ON c.session_id = ps.session_id "
                 "SET ps.total_plays = COALESCE(c.n, 0)"
