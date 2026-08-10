@@ -490,8 +490,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda c: {"name": "Doe, John", "class_year": "",
                                    "position": "", "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.catching_caps.framing_season_tiles",
-                        lambda c, season=None: {"games": 0, "pitches": 0,
-                                                "net_strikes": 0, "steal_pct": "—"})
+                        lambda c, *a, **k: {"games": 0, "pitches": 0,
+                                            "net_strikes": 0, "steal_pct": "—"})
     with server.app_context():
         coach = User(email="cat-season@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -518,3 +518,20 @@ def test_catching_preset_callback_writes_range(server):
     callbacks.register_callbacks(app)
     assert any("cat-daterange" in str(k) for k in app.callback_map)
     assert any("cat-date-preset" in str(v) for v in app.callback_map.values())
+
+
+def test_catching_sidebar_callback_lists_daterange_inputs(server):
+    """The sidebar callback must rescope on the date range, not just catcher/
+    season -- mirrors the hitting/pitching sidebars (hit-daterange/
+    pit-daterange). Otherwise the sidebar tiles never update when the coach
+    narrows the calendar/preset."""
+    from dash import Dash
+    from app.dashboards.catching import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/cattest3/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    key = next(k for k in app.callback_map if "sidebar.children" in k)
+    inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
+    assert "cat-daterange.start_date" in inputs
+    assert "cat-daterange.end_date" in inputs

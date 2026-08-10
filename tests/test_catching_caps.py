@@ -142,3 +142,54 @@ def test_framing_season_tiles_falls_back_to_compute_when_missing(monkeypatch):
     monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: None)
     out = catching_caps.framing_season_tiles(RAW_CID)
     assert set(out) == {"games", "pitches", "net_strikes", "steal_pct"}
+
+
+def test_compute_season_rollup_uses_rollup_over():
+    """_compute_season_rollup is now a thin wrapper over _rollup_over with the
+    season's bounds -- pin down the delegation so the two paths can't drift."""
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    direct = catching_caps._rollup_over(RAW_CID, s, e)
+    via_season = catching_caps._compute_season_rollup(RAW_CID, season)
+    assert via_season == {**direct, "season_label": season}
+
+
+def test_framing_tiles_range_equals_season_matches():
+    """The default 'This Season' view (date range == season bounds) must be
+    byte-identical to the season-scoped tiles -- the fast precalc path must
+    not regress when the range Inputs are wired in."""
+    from app.data import seasons
+    cid = int(catching_caps.lmu_catchers().iloc[0]["CatcherId"])
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    assert catching_caps.framing_season_tiles(cid, season, str(s), str(e)) \
+        == catching_caps.framing_season_tiles(cid, season)
+
+
+def test_framing_tiles_subrange_is_scoped():
+    """A genuine sub-range (narrower than the season) computes on the fly and
+    still returns the same 4-key contract without error."""
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    narrow = catching_caps.framing_season_tiles(RAW_CID, season, start=str(s), end=str(s))
+    assert set(narrow) == {"games", "pitches", "net_strikes", "steal_pct"}
+
+
+def test_framing_tiles_subrange_matches_rollup_over():
+    """The range path's numbers agree exactly with _rollup_over over the same
+    window -- single source of truth for the framing-tile math."""
+    g = catching_caps.games_for_catcher(RAW_CID)
+    # A few legacy composite-GameID rows carry a blank Date (see games_for_catcher's
+    # docstring); drop them so min/max reflect real game dates, not "".
+    g = g[g["game_date"].astype(str) != ""]
+    start, end = str(g["game_date"].min()), str(g["game_date"].max())
+    from app.data import seasons
+    season = seasons.current_season()
+    s_b, e_b = seasons.season_bounds(season)
+    if (start, end) == (s_b, e_b):
+        pytest.skip("fixture's full game span equals the season bounds; not a sub-range")
+    out = catching_caps.framing_season_tiles(RAW_CID, season, start=start, end=end)
+    r = catching_caps._rollup_over(RAW_CID, start, end)
+    assert out == {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}

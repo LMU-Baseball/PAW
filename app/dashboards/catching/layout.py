@@ -21,11 +21,11 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
-def sidebar(catcher_id, season=None) -> html.Div:
+def sidebar(catcher_id, season=None, start=None, end=None) -> html.Div:
     if catcher_id is None:
         return html.Div("Select a catcher.", style={"padding": "12px"})
     prof = catching_caps.catcher_profile(int(catcher_id))
-    summ = catching_caps.framing_season_tiles(int(catcher_id), season)
+    summ = catching_caps.framing_season_tiles(int(catcher_id), season, start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"]) if x])
@@ -41,7 +41,7 @@ def sidebar(catcher_id, season=None) -> html.Div:
                   _tile("STEAL%", summ["steal_pct"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Season framing tiles (provisional stolen/lost model).",
+        html.Div("Stats reflect the selected date range.",
                  style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
@@ -137,7 +137,7 @@ def serve_layout() -> html.Div:
         header(back_href="/catching", back_label="← Catching"),
         html.Div([
             html.Div([
-                html.Div(id="sidebar", children=sidebar(default_catcher, season)),
+                html.Div(id="sidebar", children=sidebar(default_catcher, season, start_d, end_d)),
                 notes_ui.note_card("catching"),
             ], style={"width": "260px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,

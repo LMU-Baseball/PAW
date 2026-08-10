@@ -91,17 +91,20 @@ def register_callbacks(dash_app) -> None:
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games); game_id is an opaque string
         return opts, value
 
-    # Catcher/season -> sidebar (season framing tiles depend only on catcher + season).
+    # Catcher/season/date-range -> sidebar (tiles rescope to the selected range;
+    # when the range equals the season's bounds, framing_season_tiles reads the
+    # fast precalc rollup, so the default "This Season" view is unchanged).
     @dash_app.callback(
         Output("sidebar", "children"),
         Input("catcher-dd", "value"), Input("cat-season", "value"),
+        Input("cat-daterange", "start_date"), Input("cat-daterange", "end_date"),
         prevent_initial_call=True,
     )
-    def _on_sidebar(catcher_id, season):
+    def _on_sidebar(catcher_id, season, start, end):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
-        return layout.sidebar(cid, season)
+        return layout.sidebar(cid, season, start, end)
 
     # Selection -> selection store + scoreboard (fresh season/dates as Inputs).
     @dash_app.callback(

@@ -221,25 +221,17 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
 
 # ============================ SEASON TILES ===================================
 
-def _compute_season_rollup(catcher_id, season=None) -> dict:
-    """Catching season rollup: the framing sidebar tiles (games, pitches, net
-    strikes, steal%) as an SQL aggregate over GAMES (sibling-id union), plus
-    catcher_id/name. Mirrors catching's warehouse version exactly (same
-    keys/format/InZone box). This is the rebuild source AND the compute fallback
-    for framing_season_tiles.
-
-    Scoped to the academic-year `season` (default current_season()) via
-    Date-bounds -- which for the current season equals the old numeric-GameID
-    guard (that season is the numeric-backfilled one) but also lets a PAST
-    season's composite-GameID rows aggregate when the Season dropdown selects
-    it."""
+def _rollup_over(catcher_id, start, end) -> dict:
+    """The catching framing rollup (games, pitches, net strikes, steal%) for one
+    catcher over an arbitrary [start, end] date window, as a single SQL
+    aggregate over GAMES (sibling-id union). Single source of truth for the
+    framing-tile math: `_compute_season_rollup` calls this with a season's
+    bounds; `framing_season_tiles`'s range path calls it with the caller's
+    date-range bounds directly -- same function, different window."""
     from app.data.catching import _pct
-    from app.data import seasons
-    season = season or seasons.current_season()
-    s, e = seasons.season_bounds(season)
     cid = int(catcher_id)
     ph, idp = _in_clause(_sibling_catcher_ids(cid))
-    idp["s"] = s; idp["e"] = e
+    idp["s"] = start; idp["e"] = end
     df = query_df(
         f"""
         SELECT COUNT(DISTINCT GameID) AS games,
@@ -270,18 +262,44 @@ def _compute_season_rollup(catcher_id, season=None) -> dict:
             "net_strikes": str(stolen - lost),
             "steal_pct": "—" if steal is None else f"{steal}%",
         }
-    return {"catcher_id": cid, "catcher_name": catcher_name(cid),
-            "season_label": season, **tiles}
+    return {"catcher_id": cid, "catcher_name": catcher_name(cid), **tiles}
 
 
-def framing_season_tiles(catcher_id, season=None) -> dict:
-    """Season sidebar tiles, read from the 1-row precalc catching rollup with a
-    compute fallback. Return shape unchanged. `season` (default current_season())
-    rescopes to that academic year. The precalc table holds one row per
-    (catcher, season), so ANY season is a ~0.2s single-row read; the compute
-    fallback covers a pre-rebuild / unbuilt (catcher, season)."""
+def _compute_season_rollup(catcher_id, season=None) -> dict:
+    """Catching season rollup: the framing sidebar tiles (games, pitches, net
+    strikes, steal%) plus catcher_id/name. Thin wrapper over `_rollup_over`
+    with the season's date bounds -- the single source of truth for the tile
+    math lives there now. This is the rebuild source AND the compute fallback
+    for framing_season_tiles.
+
+    Scoped to the academic-year `season` (default current_season()) via
+    Date-bounds -- which for the current season equals the old numeric-GameID
+    guard (that season is the numeric-backfilled one) but also lets a PAST
+    season's composite-GameID rows aggregate when the Season dropdown selects
+    it."""
+    from app.data import seasons
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    return {**_rollup_over(catcher_id, s, e), "season_label": season}
+
+
+def framing_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
+    """Season sidebar tiles, scoped to a date range.
+
+    When `start`/`end` are omitted, or given but equal to `season`'s bounds
+    (the default "This Season" view), read the 1-row precalc catching rollup
+    with a compute fallback -- this fast path is unchanged (the precalc table
+    holds one row per (catcher, season), so ANY season is a ~0.2s single-row
+    read). A genuine sub-range (the coach narrowed the calendar/preset)
+    computes on the fly via `_rollup_over` so the sidebar tiles track the
+    selected date range. Return shape unchanged."""
     from app.data import seasons, precalc  # lazy: precalc imports catching_caps
     season = season or seasons.current_season()
+    if start and end:
+        s_b, e_b = seasons.season_bounds(season)
+        if str(start) != s_b or str(end) != e_b:
+            r = _rollup_over(catcher_id, start, end)
+            return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
     row = precalc.read_catching_season(int(catcher_id), season)
     r = row if row is not None else _compute_season_rollup(catcher_id, season)
     return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
