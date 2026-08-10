@@ -22,26 +22,6 @@ def _read_json(data_json):
     return pd.read_json(io.StringIO(data_json), orient="split")
 
 
-def _load_all(exclude_test: bool):
-    try:
-        pitch = P.load_pitch_coords(exclude_test=exclude_test)
-    except Exception:
-        pitch = pd.DataFrame()
-    try:
-        plays = P.load_plays(exclude_test=exclude_test)
-    except Exception:
-        plays = pd.DataFrame()
-    try:
-        sessions = P.load_sessions(exclude_test=exclude_test)
-    except Exception:
-        sessions = pd.DataFrame()
-    try:
-        stats = P.load_player_stats(exclude_test=exclude_test)
-    except Exception:
-        stats = pd.DataFrame()
-    return pitch, plays, sessions, stats
-
-
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
@@ -71,16 +51,12 @@ def register_callbacks(dash_app) -> None:
     def _on_filters(player, ds, de):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own_name = getattr(current_user, "name", None)
-        exclude_test = True
-        pitch, _, _, _ = _load_all(exclude_test)
+        names = P.all_player_names()  # light query; no all-players pitch load
+        popts = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
         start = date.fromisoformat(ds[:10]) if ds else None
         end = date.fromisoformat(de[:10]) if de else None
-        windowed = P.apply_filters(pitch, player=None, start=start, end=end, session=None)
-        base = windowed if not windowed.empty else pitch
-        popts = selectors.player_options(base, is_coach=is_coach, own_name=own_name)
-        player = selectors.resolve_player(player, is_coach=is_coach, own_name=own_name)
-        if player not in {o["value"] for o in popts} and popts:
-            player = popts[0]["value"]
+        player = selectors.resolve_player(player, is_coach=is_coach,
+                                          own_name=own_name, available=names)
         return (
             {"player": player,
              "session": "All session types", "exclude_test": True,
@@ -96,15 +72,17 @@ def register_callbacks(dash_app) -> None:
     def _load_pitch(filt):
         filt = filt or {}
         exclude_test = bool(filt.get("exclude_test", True))
-        pitch, _, _, _ = _load_all(exclude_test)
+        player = filt.get("player")
         start = date.fromisoformat(filt["start"]) if filt.get("start") else None
         end = date.fromisoformat(filt["end"]) if filt.get("end") else None
-        filtered = P.apply_filters(
-            pitch,
-            player=filt.get("player"),
-            start=start, end=end,
-            session=filt.get("session"),
-        )
+        if not player:
+            return None
+        # Scoped load: only this player's rows for the window (not every player).
+        pitch = P.load_pitch_coords(exclude_test=exclude_test, player=player,
+                                    start=start, end=end)
+        # apply_filters still applies the session filter (player/date already scoped).
+        filtered = P.apply_filters(pitch, player=player, start=start, end=end,
+                                   session=filt.get("session"))
         return None if filtered.empty else filtered.to_json(orient="split")
 
     @dash_app.callback(
@@ -116,7 +94,7 @@ def register_callbacks(dash_app) -> None:
     def _render(tab, pitch_json, filt):
         filt = filt or {}
         exclude_test = bool(filt.get("exclude_test", True))
-        player = filt.get("player") or "All Players"
+        player = filt.get("player")
         pitch = _read_json(pitch_json)
         start = date.fromisoformat(filt["start"]) if filt.get("start") else None
         end = date.fromisoformat(filt["end"]) if filt.get("end") else None
@@ -126,29 +104,15 @@ def register_callbacks(dash_app) -> None:
         if tab == "swing":
             return swing_frequency.render(pitch)
         if tab == "batted":
-            _, plays, _, _ = _load_all(exclude_test)
-            if not plays.empty and start and end and "play_date" in plays.columns:
-                plays = plays[pd.to_datetime(plays["play_date"]).between(
-                    pd.Timestamp(start), pd.Timestamp(end))]
-            if player != "All Players" and not plays.empty:
-                plays = plays[plays["player_name"] == player]
+            # Scoped: only this player's plays for the window.
+            plays = P.load_plays(exclude_test=exclude_test, player=player,
+                                 start=start, end=end)
             return batted_ball.render(plays)
 
-        _, plays, sessions, stats = _load_all(exclude_test)
-        # Date / player filter on plays & sessions
-        if not plays.empty and start and end and "play_date" in plays.columns:
-            plays = plays[pd.to_datetime(plays["play_date"]).between(
-                pd.Timestamp(start), pd.Timestamp(end))]
-        if not sessions.empty and start and end:
-            sessions = sessions[pd.to_datetime(sessions["session_date"]).between(
-                pd.Timestamp(start), pd.Timestamp(end))]
-        if player != "All Players":
-            if not plays.empty:
-                plays = plays[plays["player_name"] == player]
-            if not sessions.empty:
-                sessions = sessions[sessions["player_name"] == player]
-
         if tab == "sessions":
+            sessions = P.load_sessions(exclude_test=exclude_test, player=player,
+                                       start=start, end=end)
+            stats = P.load_player_stats(exclude_test=exclude_test)  # small summary table
             return session_tables.render(stats, sessions, player=player)
         return html.Div()
 
@@ -282,15 +246,11 @@ def register_callbacks(dash_app) -> None:
     def _bb_body(active, filt):
         from app.dashboards.hitting_practice.tabs import batted_ball
         filt = filt or {}
-        _, plays, _, _ = _load_all(bool(filt.get("exclude_test", True)))
+        player = filt.get("player")
         start = date.fromisoformat(filt["start"]) if filt.get("start") else None
         end = date.fromisoformat(filt["end"]) if filt.get("end") else None
-        player = filt.get("player") or "All Players"
-        if not plays.empty and start and end and "play_date" in plays.columns:
-            plays = plays[pd.to_datetime(plays["play_date"]).between(
-                pd.Timestamp(start), pd.Timestamp(end))]
-        if player != "All Players" and not plays.empty:
-            plays = plays[plays["player_name"] == player]
+        plays = P.load_plays(exclude_test=bool(filt.get("exclude_test", True)),
+                             player=player, start=start, end=end)
         if plays.empty:
             return html.Div("No batted-ball data for these filters.",
                             style={"color": "#555", "padding": "12px"})
@@ -303,11 +263,12 @@ def register_callbacks(dash_app) -> None:
     def _sidebar(filt):
         filt = filt or {}
         exclude_test = bool(filt.get("exclude_test", True))
-        pitch, _, _, _ = _load_all(exclude_test)
-        from datetime import date
         start = date.fromisoformat(filt["start"]) if filt.get("start") else None
         end = date.fromisoformat(filt["end"]) if filt.get("end") else None
-        player = filt.get("player") or "All Players"
+        player = filt.get("player")
+        pitch = (P.load_pitch_coords(exclude_test=exclude_test, player=player,
+                                     start=start, end=end)
+                 if player else pd.DataFrame())
         d = P.apply_filters(pitch, player=player, start=start, end=end,
                             session=filt.get("session"))
         return layout.sidebar(d, player)

@@ -84,12 +84,32 @@ def test_session_tables_render():
     assert session_tables.render(stats, sessions, player="All Players") is not None
 
 
-def test_player_options_coach():
+def test_player_options_coach_no_all_players():
     from app.dashboards.hitting_practice import selectors
-    pitch = pd.DataFrame({"player_name": ["Alpha", "Beta"]})
-    opts = selectors.player_options(pitch, is_coach=True, own_name=None)
-    assert opts[0]["value"] == "All Players"
-    assert {o["value"] for o in opts} >= {"Alpha", "Beta"}
+    opts = selectors.player_options(["Alpha", "Beta"], is_coach=True, own_name=None)
+    vals = [o["value"] for o in opts]
+    assert "All Players" not in vals          # aggregate removed
+    assert set(vals) == {"Alpha", "Beta"}
+
+
+def test_resolve_player_coach_defaults_and_player_locks():
+    from app.dashboards.hitting_practice import selectors
+    avail = ["Alpha", "Beta", "Cara"]
+    # coach, nothing requested -> the provided default (first-on-latest-date)
+    assert selectors.resolve_player(None, is_coach=True, own_name=None,
+                                    available=avail, default="Beta") == "Beta"
+    # coach, valid request -> honored
+    assert selectors.resolve_player("Cara", is_coach=True, own_name=None,
+                                    available=avail, default="Beta") == "Cara"
+    # coach, no default -> first available
+    assert selectors.resolve_player(None, is_coach=True, own_name=None,
+                                    available=avail) == "Alpha"
+    # player -> locked to their own matched name regardless of request
+    assert selectors.resolve_player("Alpha", is_coach=False, own_name="Cara",
+                                    available=avail) == "Cara"
+    # no players at all -> None (dashboard shows an empty state)
+    assert selectors.resolve_player(None, is_coach=True, own_name=None,
+                                    available=[]) is None
 
 
 def test_practice_layout_has_daterange():
@@ -541,3 +561,22 @@ def test_fan_matches_landing_scale_and_labels_spread():
     # infield-ring (near home) labels are pushed out to >= 108 ft radius
     radii = [float(np.hypot(a.x, a.y)) for a in fig.layout.annotations]
     assert radii and min(radii) >= 108.0 - 1e-9  # infield labels floored to 108 ft (float-epsilon tolerance)
+
+
+def test_practice_light_helpers_and_scoped_load():
+    """Light dropdown/default helpers + SQL-scoped load (the perf change)."""
+    from app.data import practice as P
+    latest = P.latest_session_date()
+    assert latest is not None
+    on_latest = P.players_on_date(latest)
+    names = P.all_player_names()
+    # alphabetical (case-insensitive, matching MySQL's collation)
+    assert [n.lower() for n in on_latest] == sorted(n.lower() for n in on_latest)
+    assert [n.lower() for n in names] == sorted(n.lower() for n in names)
+    assert set(on_latest) <= set(names)          # players-on-latest subset of all
+    assert all(n and n.strip() for n in names)   # no blank dropdown entries
+    if on_latest:
+        p = on_latest[0]
+        df = P.load_pitch_coords(player=p, start=latest, end=latest)  # scoped in SQL
+        if not df.empty:
+            assert set(df["player_name"].unique()) == {p}             # only that player

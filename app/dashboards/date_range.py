@@ -60,12 +60,17 @@ def date_picker(id_prefix: str, start, end, min_date=None, max_date=None):
     )
 
 
-def date_control(id_prefix, anchor, *, min_date=None, max_date=None, preset="season"):
+def date_control(id_prefix, anchor, *, min_date=None, max_date=None, preset="season",
+                 start=None, end=None):
     """Preset dropdown + a calendar (shown only for 'custom'). The calendar keeps
-    id f'{id_prefix}-daterange' so existing downstream callbacks are unchanged."""
+    id f'{id_prefix}-daterange' so existing downstream callbacks are unchanged.
+    Explicit `start`/`end` override the preset's default range (used to open on a
+    specific day while keeping the full min/max bounds for widening)."""
     from dash import html
     rng = preset_range(preset, anchor) or (min_date, max_date)
-    start, end = rng
+    s0, e0 = rng
+    start = start if start is not None else s0
+    end = end if end is not None else e0
     return html.Div([
         dcc.Dropdown(id=f"{id_prefix}-date-preset", options=preset_options(),
                      value=preset, clearable=False, style={"minWidth": "175px"}),

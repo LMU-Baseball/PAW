@@ -76,6 +76,35 @@ def _test_clause(col: str, exclude_test: bool) -> str:
     return f" AND ({col} IS NULL OR {col} NOT LIKE '%%Test%%')"
 
 
+def all_player_names(exclude_test: bool = True) -> list[str]:
+    """Distinct HitTrax player names (alphabetical) -- a light query on sessions
+    for the dropdown, so the dashboard needn't load every player's pitch rows."""
+    where = ("WHERE user_name IS NOT NULL AND TRIM(user_name) <> ''"
+             + _test_clause("user_name", exclude_test))
+    df = query_df(f"SELECT DISTINCT user_name AS name FROM practice_sessions "
+                  f"{where} ORDER BY user_name")
+    return [] if df.empty else [str(n) for n in df["name"].dropna()]
+
+
+def latest_session_date(exclude_test: bool = True):
+    """Most recent session date (the default date the dashboard opens on)."""
+    where = "WHERE session_date IS NOT NULL" + _test_clause("user_name", exclude_test)
+    df = query_df(f"SELECT MAX(session_date) AS d FROM practice_sessions {where}")
+    return None if df.empty or pd.isna(df.iloc[0]["d"]) else df.iloc[0]["d"]
+
+
+def players_on_date(d, exclude_test: bool = True) -> list[str]:
+    """Alphabetical player names with a session on date `d` (for the default
+    player = first of these)."""
+    if d is None:
+        return []
+    where = ("WHERE session_date = :d AND user_name IS NOT NULL AND TRIM(user_name) <> ''"
+             + _test_clause("user_name", exclude_test))
+    df = query_df(f"SELECT DISTINCT user_name AS name FROM practice_sessions "
+                  f"{where} ORDER BY user_name", {"d": str(d)})
+    return [] if df.empty else [str(n) for n in df["name"].dropna()]
+
+
 def load_player_stats(exclude_test: bool = True) -> pd.DataFrame:
     season_start = current_season_start()
     where = f"WHERE player_id IS NOT NULL AND last_practice_date >= '{season_start}'"
@@ -98,8 +127,16 @@ def load_player_stats(exclude_test: bool = True) -> pd.DataFrame:
     return df
 
 
-def load_sessions(exclude_test: bool = True) -> pd.DataFrame:
+def load_sessions(exclude_test: bool = True, player=None,
+                  start=None, end=None) -> pd.DataFrame:
     where = "WHERE session_date IS NOT NULL" + _test_clause("user_name", exclude_test)
+    params: dict = {}
+    if player:
+        where += " AND user_name = :player"
+        params["player"] = player
+    if start and end:
+        where += " AND session_date BETWEEN :start AND :end"
+        params["start"], params["end"] = str(start), str(end)
     return query_df(f"""
         SELECT session_id, session_date,
                user_name AS player_name, player_id,
@@ -111,11 +148,19 @@ def load_sessions(exclude_test: bool = True) -> pd.DataFrame:
           FROM practice_sessions
           {where}
          ORDER BY session_date DESC
-    """)
+    """, params)
 
 
-def load_plays(exclude_test: bool = True) -> pd.DataFrame:
+def load_plays(exclude_test: bool = True, player=None,
+               start=None, end=None) -> pd.DataFrame:
     where = "WHERE play_timestamp IS NOT NULL" + _test_clause("player_name", exclude_test)
+    params: dict = {}
+    if player:
+        where += " AND player_name = :player"
+        params["player"] = player
+    if start and end:
+        where += " AND DATE(play_timestamp) BETWEEN :start AND :end"
+        params["start"], params["end"] = str(start), str(end)
     return query_df(f"""
         SELECT player_name, player_id,
                DATE(play_timestamp) AS play_date,
@@ -124,11 +169,15 @@ def load_plays(exclude_test: bool = True) -> pd.DataFrame:
           FROM practice_plays
           {where}
          ORDER BY play_timestamp
-    """)
+    """, params)
 
 
-def load_pitch_coords(exclude_test: bool = True) -> pd.DataFrame:
-    """Pitch location rows for heatmaps / swing decision (from Swing Decision start)."""
+def load_pitch_coords(exclude_test: bool = True, player=None,
+                      start=None, end=None) -> pd.DataFrame:
+    """Pitch location rows for heatmaps / swing decision (from Swing Decision
+    start). `player`/`start`/`end` scope the load in SQL (the dashboard passes
+    the selected player + date so it never loads every player's rows); all
+    default None = whole dataset (back-compat)."""
     sd = SWING_DECISION_START.strftime("%Y-%m-%d")
     where = (
         "WHERE pp.pitch_location_x IS NOT NULL AND pp.pitch_location_y IS NOT NULL"
@@ -137,6 +186,13 @@ def load_pitch_coords(exclude_test: bool = True) -> pd.DataFrame:
         f" AND DATE(pp.play_timestamp) >= '{sd}'"
     )
     where += _test_clause("pp.player_name", exclude_test)
+    params: dict = {}
+    if player:
+        where += " AND pp.player_name = :player"
+        params["player"] = player
+    if start and end:
+        where += " AND DATE(pp.play_timestamp) BETWEEN :start AND :end"
+        params["start"], params["end"] = str(start), str(end)
     try:
         df = query_df(f"""
             SELECT pp.player_name, pp.player_id, pp.hand,
@@ -149,7 +205,7 @@ def load_pitch_coords(exclude_test: bool = True) -> pd.DataFrame:
               LEFT JOIN practice_sessions ps ON pp.session_id = ps.session_id
               {where}
              ORDER BY pp.play_timestamp
-        """)
+        """, params)
     except Exception:
         return pd.DataFrame(columns=[
             "player_name", "player_id", "hand", "px", "py", "result",

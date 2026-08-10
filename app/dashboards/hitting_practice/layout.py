@@ -24,9 +24,8 @@ def _tile(label, value):
 def sidebar(pitch_df, player) -> html.Div:
     import pandas as pd
     from app.data import practice as P
-    is_all = (not player) or player == "All Players"
-    if is_all:
-        photo, name = PHOTO_PLACEHOLDER, "All Players"
+    if not player:
+        photo, name = PHOTO_PLACEHOLDER, "No players"
     else:
         media = roster_media.player_media_by_name(player)
         photo = media.get("photo_url") or PHOTO_PLACEHOLDER
@@ -64,24 +63,45 @@ def serve_layout() -> html.Div:
     is_coach = bool(getattr(current_user, "is_coach", False))
     own_name = getattr(current_user, "name", None)
 
-    try:
-        pitch_all = P.load_pitch_coords(exclude_test=True)
-    except Exception:
-        pitch_all = pd.DataFrame()
+    # Default view opens on the MOST RECENT session date (a single day), showing
+    # the first-alphabetical player who had a session that day. Everything the
+    # layout needs (bounds, names, latest date, players-on-latest) comes from ONE
+    # sessions query -- not a full all-players pitch load -- then a single scoped
+    # pitch load for the default player (2 round-trips, light render).
+    from datetime import date as _date
+    sessions = P.load_sessions()
+    if sessions is not None and not sessions.empty:
+        s = sessions.copy()
+        s["player_name"] = s["player_name"].astype(str).str.strip()
+        s = s[s["player_name"] != ""]
+        min_d, max_d = s["session_date"].min(), s["session_date"].max()
+        latest = max_d
+        names = sorted(s["player_name"].dropna().unique(), key=str.lower)
+        on_latest = sorted(s.loc[s["session_date"] == latest, "player_name"].unique(),
+                           key=str.lower)
+    else:
+        min_d = max_d = latest = _date.today()
+        names, on_latest = [], []
 
-    min_d, max_d = P.date_bounds()
-    anchor = str(max_d)
-    s0, e0 = dr.preset_range("season", anchor)
-    start_d = max(str(s0), str(min_d))
-    end_d = anchor
-    players = selectors.player_options(pitch_all, is_coach=is_coach, own_name=own_name)
-    default_player = players[0]["value"] if players else "All Players"
+    players = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
+    opt_values = {o["value"] for o in players}
+    on_latest = [n for n in on_latest if n in opt_values]
+    default_player = selectors.resolve_player(
+        None, is_coach=is_coach, own_name=own_name, available=names,
+        default=(on_latest[0] if on_latest else None))
+    start_d = end_d = str(latest)
+
+    try:
+        pitch0 = P.load_pitch_coords(player=default_player, start=latest, end=latest) \
+            if default_player else pd.DataFrame()
+    except Exception:
+        pitch0 = pd.DataFrame()
 
     filters = html.Div([
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_control("prac", anchor, min_date=str(min_d), max_date=str(max_d),
-                            preset="season"),
+            dr.date_control("prac", str(max_d), min_date=str(min_d), max_date=str(max_d),
+                            preset="custom", start=start_d, end=end_d),
         ]),
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),
@@ -108,7 +128,7 @@ def serve_layout() -> html.Div:
         dcc.Store(id="prac-pitch-data"),
         header(back_href="/hitting", back_label="← Hitting"),
         html.Div([
-            html.Div(id="prac-sidebar", children=sidebar(pitch_all, default_player),
+            html.Div(id="prac-sidebar", children=sidebar(pitch0, default_player),
                      style={"width": "240px", "flexShrink": "0"}),
             html.Div([
                 html.H2("HitTrax Practice Analytics",
