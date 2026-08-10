@@ -57,10 +57,12 @@ def test_game_options_tags_video_games():
     from app.dashboards import date_range as dr
     games = pd.DataFrame({"game_id": [10, 20, 30],
                           "GameLabel": ["A", "B", "C"], "game_date": ["d", "d", "d"]})
+    # game_id is an opaque string in options (value = str game_id); video_game_ids
+    # may arrive as ints or strings and is normalized to strings internally.
     opts = dr.game_options(games, video_game_ids={20})
     by_id = {o["value"]: o["label"] for o in opts}
-    assert "🎥" in by_id[20]
-    assert "🎥" not in by_id[10] and "🎥" not in by_id[30]
+    assert "🎥" in by_id["20"]
+    assert "🎥" not in by_id["10"] and "🎥" not in by_id["30"]
     # the aggregate sentinel is still present and first
     assert opts[0]["value"] == dr.ALL_IN_RANGE
     # default (no set) tags nothing

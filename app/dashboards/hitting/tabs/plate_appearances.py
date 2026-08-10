@@ -25,8 +25,11 @@ def _pa_keys(game_df: pd.DataFrame) -> list[tuple]:
 
 
 def _pa_value(key: tuple) -> str:
+    # GameID is an opaque string (numeric surrogate or composite like
+    # "20220311-GoodwinField-1"), so it is NOT int()'d; Inning/PAofInning are
+    # numeric. "|" is a safe delimiter (composite ids use "-", never "|").
     gid, inn, pa = key
-    return f"{int(gid)}|{int(inn)}|{int(pa)}"
+    return f"{gid}|{int(inn)}|{int(pa)}"
 
 
 def pa_choices(game_df: pd.DataFrame) -> list[dict]:
@@ -50,12 +53,13 @@ def _pa_slice(game_df, pa_value):
     if not keys:
         return game_df.iloc[0:0]
     if pa_value:
-        gid, inn, pa = (int(x) for x in pa_value.split("|"))
+        gid_s, inn_s, pa_s = pa_value.split("|", 2)
+        gid, inn, pa = gid_s, int(inn_s), int(pa_s)
     else:
         gid, inn, pa = keys[0]
     mask = (game_df["Inning"] == inn) & (game_df["PAofInning"] == pa)
     if "GameID" in game_df.columns:
-        mask &= (game_df["GameID"] == gid)
+        mask &= (game_df["GameID"].astype(str) == str(gid))
     return game_df[mask]
 
 

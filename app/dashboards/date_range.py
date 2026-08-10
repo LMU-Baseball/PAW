@@ -90,10 +90,10 @@ def game_options(games_df: pd.DataFrame, video_game_ids=None) -> list[dict]:
     empty state)."""
     if games_df is None or games_df.empty:
         return []
-    vids = {int(g) for g in (video_game_ids or set())}
+    vids = {str(g) for g in (video_game_ids or set())}
     opts = [{"label": f"All games in range ({len(games_df)})", "value": ALL_IN_RANGE}]
     for r in games_df.itertuples():
-        gid = int(r.game_id)
+        gid = str(r.game_id)
         label = f"🎥 {r.GameLabel}" if gid in vids else str(r.GameLabel)
         opts.append({"label": label, "value": gid})
     return opts

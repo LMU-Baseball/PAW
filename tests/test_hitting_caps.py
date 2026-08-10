@@ -216,28 +216,27 @@ def test_veteran_fixture_has_both_numeric_and_legacy_game_ids():
     assert (~ids.str.match(r"^[0-9]+$")).any(), "expected some legacy composite GameIDs"
 
 
-def test_games_for_batter_returns_only_numeric_game_ids_for_veteran():
-    # RED before the fix: GAMES holds legacy composite-string GameIDs (e.g.
-    # "20241023-LoyolaMarymount-Private-1") for this veteran alongside his
-    # current numeric ones. Without the REGEXP '^[0-9]+$' guard in the SQL,
-    # `df["game_id"] = df["game_id"].astype(int)` inside games_for_batter
-    # raises ValueError the moment a composite id comes back from the query
-    # -- this crashed the live hitting dashboard for any returning veteran.
+def test_games_for_batter_includes_legacy_composite_game_ids_for_veteran():
+    # Opaque-GameID contract: games_for_batter no longer filters to numeric
+    # surrogate ids. A returning veteran's legacy composite-string games (e.g.
+    # "20241023-LoyolaMarymount-Private-1") now come back too, so the hitting
+    # dashboard can display them. game_id is an opaque string -- NOT int-
+    # castable -- and this test proves the composite ids flow all the way
+    # through (the exact opposite of the pre-refactor numeric-only behavior).
+    import pytest
     df = hitting_caps.games_for_batter(VETERAN)
     assert not df.empty
-    # The line below is exactly what games_for_batter itself executes
-    # internally; if it didn't raise, every game_id must already be
-    # int-castable -- i.e. no composite legacy id leaked through.
-    df["game_id"].astype(int)
+    with pytest.raises((ValueError, TypeError)):
+        df["game_id"].astype(int)
 
 
-def test_games_for_batter_sql_guards_non_numeric_game_ids():
-    # Cheaper, DB-independent companion to the regression test above: pin
-    # down the actual mechanism of the fix (a SQL-level REGEXP filter),
-    # mirroring pitching_caps.games_for_pitcher's fix for the identical bug.
+def test_games_for_batter_has_no_numeric_game_id_guard():
+    # Cheaper, DB-independent companion: pin down the mechanism of the
+    # opaque-GameID refactor -- the SQL-level REGEXP numeric guard is GONE, so
+    # games are scoped by date only and composite-id games list.
     import inspect
     src = inspect.getsource(hitting_caps.games_for_batter)
-    assert "GameID REGEXP '^[0-9]+$'" in src
+    assert "GameID REGEXP" not in src
 
 
 def test_last_n_pas_does_not_crash_for_veteran_with_legacy_game_ids():

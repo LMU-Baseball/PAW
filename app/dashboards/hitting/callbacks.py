@@ -26,10 +26,10 @@ def _resolve_gids(sel):
         return []
     if gid == dr.ALL_IN_RANGE:
         g = hitting_caps.games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
-        return [int(x) for x in g["game_id"]] if not g.empty else []
+        return [str(x) for x in g["game_id"]] if not g.empty else []
     if gid is None:
         return []
-    return [int(gid)]
+    return [str(gid)]
 
 
 def _load_game_df(store) -> pd.DataFrame:
@@ -43,7 +43,7 @@ def _load_game_df(store) -> pd.DataFrame:
                                           store["start"], store["end"])
     if gid is None:
         return pd.DataFrame()
-    return hitting_caps.game_pitches(int(gid), int(store["batter_id"]))
+    return hitting_caps.game_pitches(str(gid), int(store["batter_id"]))
 
 
 def _read_game_df(data_json):
@@ -167,12 +167,12 @@ def register_callbacks(dash_app) -> None:
             if bid is None:
                 return html.Div("Select a hitter.", style={"padding": "12px", "color": "#555"})
             last = hitting_caps.last_n_pas(int(bid), 27)
-            gids = sorted({int(g) for g in last["GameID"]}) if not last.empty else []
+            gids = sorted({str(g) for g in last["GameID"]}) if not last.empty else []
             bip = hitting_caps.bip_points(int(bid), gids)
             if not last.empty and not bip.empty:
-                keys = set(zip(last["GameID"].astype(int), last["Inning"].astype(int),
-                               last["PAofInning"].astype(int)))
-                mask = [(int(g), int(i), int(p)) in keys
+                keys = set(zip(last["GameID"].astype(str), last["Inning"].astype(str),
+                               last["PAofInning"].astype(str)))
+                mask = [(str(g), str(i), str(p)) in keys
                         for g, i, p in zip(bip["GameID"], bip["Inning"], bip["PAofInning"])]
                 bip = bip[mask]
             return last_27.render(last, bip)
@@ -184,11 +184,11 @@ def register_callbacks(dash_app) -> None:
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
                 g = hitting_caps.games_for_batter(int(bid), start=sel.get("start"), end=sel.get("end"))
-                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+                gids = [str(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})
             else:
-                gids = [int(gid)]
+                gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, batter_id=int(bid))
             return videotab.render(vdf, prefix="hit", default_angle="batter_side")
         df = _read_game_df(data_json)

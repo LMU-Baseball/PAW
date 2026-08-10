@@ -73,10 +73,12 @@ def _sibling_ids(*, batter_id, pitcher_id, catcher_id):
 
 
 @cached
-def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=None) -> set[int]:
+def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=None) -> set:
     """Of the given game_ids, the subset that have at least one video clip for the
-    subject (Item 3: used to tag the game dropdown). Empty input -> empty set."""
-    gids = [int(g) for g in (game_ids if isinstance(game_ids, (list, tuple, set)) else [game_ids])]
+    subject (Item 3: used to tag the game dropdown). Empty input -> empty set.
+    GameID is an opaque string (numeric surrogate or composite), so ids are
+    carried as strings, never int()'d."""
+    gids = [str(g) for g in (game_ids if isinstance(game_ids, (list, tuple, set)) else [game_ids])]
     if not gids:
         return set()
     subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)
@@ -95,7 +97,7 @@ def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=No
         """,
         params,
     )
-    return set() if df.empty else {int(g) for g in df["GameID"]}
+    return set() if df.empty else {str(g) for g in df["GameID"]}
 
 
 def video_game_ids(games_df, **subject) -> set:
@@ -106,7 +108,7 @@ def video_game_ids(games_df, **subject) -> set:
     try:
         if games_df is None or getattr(games_df, "empty", True):
             return set()
-        return games_with_video([int(x) for x in games_df["game_id"]], **subject)
+        return games_with_video([str(x) for x in games_df["game_id"]], **subject)
     except Exception:
         return set()
 
@@ -114,7 +116,7 @@ def video_game_ids(games_df, **subject) -> set:
 def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None) -> pd.DataFrame:
     """One row per pitch (angles pivoted to url columns) for a game (or list of
     games) and one subject. Empty full-column frame when there is no video."""
-    gids = [int(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
+    gids = [str(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
     if not gids:
         return pd.DataFrame(columns=_ALL_COLS)
     subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)

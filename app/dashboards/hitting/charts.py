@@ -156,7 +156,7 @@ def all_pas_figure(df: pd.DataFrame) -> go.Figure:
     titles = []
     for seq, (gid, i, p) in enumerate(pa_keys, 1):
         t = f"PA {seq} · Inn {int(i)}"
-        titles.append(f"G{int(gid)} · {t}" if multi_game else t)
+        titles.append(f"G{gid} · {t}" if multi_game else t)
     fig = make_subplots(rows=nrows, cols=ncols, subplot_titles=titles,
                         horizontal_spacing=0.03, vertical_spacing=0.08)
     for idx, key in enumerate(pa_keys):

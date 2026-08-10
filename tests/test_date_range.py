@@ -15,7 +15,9 @@ def test_game_options_prepends_sentinel():
     opts = dr.game_options(_games())
     assert opts[0]["value"] == dr.ALL_IN_RANGE
     assert opts[0]["label"] == "All games in range (2)"
-    assert [o["value"] for o in opts[1:]] == [10, 9]
+    # game_id is an opaque string in dropdown values (numeric surrogate or
+    # composite id), so the sentinel aside, values are strings.
+    assert [o["value"] for o in opts[1:]] == ["10", "9"]
 
 
 def test_game_options_empty():

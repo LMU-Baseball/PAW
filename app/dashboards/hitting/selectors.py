@@ -34,5 +34,5 @@ def game_options(batter_tm_id) -> list[dict]:
     if batter_tm_id is None:
         return []
     df = hitting_caps.games_for_batter(int(batter_tm_id))
-    return [{"label": str(r.GameLabel), "value": int(r.game_id)}
+    return [{"label": str(r.GameLabel), "value": str(r.game_id)}
             for r in df.itertuples()]

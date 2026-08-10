@@ -53,7 +53,7 @@ def game_pitches(game_id, batter_id):
     ph, idp = _in_clause(_sibling_ids(batter_id))
     df = query_df(
         f"SELECT {_PITCH_COLS} FROM GAMES WHERE GameID = :g AND BatterId IN ({ph}) "
-        f"ORDER BY PitchNo", {"g": int(game_id), **idp})
+        f"ORDER BY PitchNo", {"g": str(game_id), **idp})
     return _finish(df)
 
 @cached
@@ -82,15 +82,10 @@ def range_pitches(batter_id, start, end):
 def games_for_batter(batter_id, start=None, end=None):
     """A batter's games, newest first.
 
-    Restricted to numeric GameIDs (see the REGEXP filter below, mirroring
-    pitching_caps.games_for_pitcher): GAMES also holds pre-CAPS-migration
-    scrimmage rows under composite string GameIDs (e.g.
-    "20241023-LoyolaMarymount-Private-1") for RETURNING VETERAN hitters who
-    have both current/backfilled numeric-GameID games and legacy pre-2025
-    games in GAMES. Excluding those composite ids keeps the int-cast below
-    safe -- without the filter, a real veteran hitter (verified live:
-    BatterId 801956, "Danos, Luca") crashes here with
-    `ValueError: invalid literal for int() with base 10`.
+    GameID is treated as an OPAQUE STRING (no numeric-only guard, no int cast),
+    so legacy composite-GameID games (and future cron-loaded ones) appear too.
+    Scoping is by Date only; sort is by Date desc with a GameID-string desc
+    tiebreak for same-date doubleheaders (deterministic).
     """
     ph, idp = _in_clause(_sibling_ids(batter_id))
     date_clause = ""
@@ -98,17 +93,10 @@ def games_for_batter(batter_id, start=None, end=None):
         date_clause = " AND Date BETWEEN :start AND :end"; idp["start"]=str(start); idp["end"]=str(end)
     df = query_df(
         f"SELECT DISTINCT GameID AS game_id, Date AS game_date, HomeTeam, AwayTeam, "
-        f"HomeTeamForeignID FROM GAMES WHERE BatterId IN ({ph}) "
-        f"AND GameID REGEXP '^[0-9]+$'{date_clause}", idp)
+        f"HomeTeamForeignID FROM GAMES WHERE BatterId IN ({ph}){date_clause}", idp)
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
-    df["game_id"] = df["game_id"].astype(int)
-    # GameID is stored as text, so sort numerically in pandas rather than via SQL
-    # ORDER BY (which would sort lexicographically). Same-date ties (doubleheaders)
-    # break by game_id DESC: a deliberate, deterministic tiebreak -- the warehouse
-    # oracle (wh_games_for_batter) has no secondary ORDER BY at all, so its
-    # same-date order is DB-planner incidental/non-deterministic, not a contract
-    # we should copy.
+    df["game_id"] = df["game_id"].astype(str)
     df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
     lmu_home = df["HomeTeamForeignID"] == LMU_TEAM_ID
     df["loc"] = lmu_home.map({True: "vs", False: "@"})
@@ -121,7 +109,7 @@ def games_for_batter(batter_id, start=None, end=None):
 def scoreboard(game_id):
     df = query_df(
         "SELECT Date, HomeTeam, AwayTeam, HomeTeamForeignID, GameType "
-        "FROM GAMES WHERE GameID = :g LIMIT 1", {"g": int(game_id)})
+        "FROM GAMES WHERE GameID = :g LIMIT 1", {"g": str(game_id)})
     if df.empty:
         return {"date": "", "loc": "", "opp": "", "game_type": ""}
     r = df.iloc[0]
@@ -209,34 +197,16 @@ def player_profile(batter_id):
 
 
 @cached
-def lmu_hitters() -> pd.DataFrame:
+def lmu_hitters(season=None) -> pd.DataFrame:
     """One row per LMU hitter (name deduped; canonical id = most-tracked id),
-    scoped to a ~12-month recent-data window.
+    scoped to the given academic-year season (default = current_season()).
 
-    Mirrors hitting_wh.wh_lmu_hitters's dedup logic, but over GAMES/BatterId
-    instead of fact_tm_game_pitch/batter_tm_id -- with one deliberate
-    addition: GAMES holds the FULL CAPS history back to 2022, so an unscoped
-    version of this query would surface 50+ retired alumni the warehouse
-    (current-season-only) never has. The window is anchored to the newest
-    GAMES date, not to today's date -- during the offseason "today" would put
-    the anchor after the season ends and empty the whole list.
-
-    The COUNT(*) DESC dedup tiebreak is computed over the WINDOWED rows only,
-    which incidentally fixes a canonical-id quirk found in the unscoped
-    version: two current hitters (Dunn, JD and Casale, Johnny) have MORE
-    total career pitches under an old pre-2025 BatterId than under their
-    current one, so the unscoped tiebreak picked the stale id. Windowing
-    removes the old id's rows from the count entirely.
-
-    Also guarded by the numeric-GameID filter (mirroring games_for_batter's
-    inline REGEXP form): a hitter can have in-window rows that are ALL legacy
-    composite-GameID (pre-CAPS-migration) games -- such a "ghost" would be
-    listed here but every numeric-GameID-guarded data function
-    (games_for_batter, season_pitches's downstream consumers, etc.) returns
-    empty for them, producing a blank dashboard. Restricting to numeric-
-    GameID rows keeps the dropdown consistent with what the data functions
-    can actually show.
+    Season date-bounds (not a numeric-GameID filter) do the scoping now, so
+    legacy composite-GameID seasons are listable too. The COUNT(*) DESC dedup
+    tiebreak is computed over the season's rows only.
     """
+    from app.data import seasons
+    s, e = seasons.season_bounds(season or seasons.current_season())
     df = query_df(
         f"""
         SELECT Batter, BatterId FROM (
@@ -245,11 +215,11 @@ def lmu_hitters() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, BatterId) AS rn
             FROM GAMES
            WHERE BatterTeam = :team AND BatterId IS NOT NULL
-             AND {_RECENT_WINDOW_CLAUSE} AND GameID REGEXP '^[0-9]+$'
+             AND Date BETWEEN :s AND :e
            GROUP BY Batter, BatterId
         ) t WHERE rn = 1 ORDER BY Batter
         """,
-        {"team": LMU_BATTER_TEAM},
+        {"team": LMU_BATTER_TEAM, "s": s, "e": e},
     )
     if not df.empty:
         df["BatterId"] = df["BatterId"].astype(int)
@@ -259,14 +229,15 @@ def lmu_hitters() -> pd.DataFrame:
 @cached
 def bip_points(batter_id, game_id) -> pd.DataFrame:
     """Balls-in-play landing (x,y) + launch-radial (rx,ry) for a batter and
-    game(s). `game_id` is an int or a list. Empty full-column frame when none.
+    game(s). `game_id` is an opaque string id (or a list of them). Empty
+    full-column frame when none.
 
     Mirrors hitting_wh.wh_bip_points's spray/radial math exactly. Unlike the
     pitch-level transforms (_finish), which NaN out Angle, GAMES stores a real
     launch angle there -- so this reads Angle directly instead of routing
     through _finish.
     """
-    gids = [int(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
+    gids = [str(g) for g in (game_id if isinstance(game_id, (list, tuple)) else [game_id])]
     if not gids:
         return pd.DataFrame(columns=_BIP_COLS)
     ph, idp = _in_clause(_sibling_ids(batter_id))
@@ -308,22 +279,15 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     """The batter's most recent `n` plate appearances (across all games),
     returned through _finish so the shared hitting transforms apply.
 
-    GameID, Inning, and PAofInning are all stored as text in GAMES, so the
-    most-recent-PA window is sorted by their numeric values (CAST ... AS
-    UNSIGNED), not the lexicographic default -- lexicographic order would
-    mis-rank extra innings (e.g. "10" before "2"). Mirrors wh_last_n_pas's
-    date/game/inning/PA ordering over the warehouse's integer columns.
-
-    Both queries below are restricted to numeric GameIDs (see the REGEXP
-    filter, mirroring games_for_batter/pitching_caps.games_for_pitcher):
-    GAMES also holds pre-CAPS-migration scrimmage rows under composite
-    string GameIDs (e.g. "20241023-LoyolaMarymount-Private-1") for RETURNING
-    VETERAN hitters. Without this filter the `int(g)` calls below crash for
-    such a hitter -- CAST(... AS UNSIGNED) in the ORDER BY merely truncates
-    the composite ids rather than crashing, but the raw (uncast) GameID
-    still flows through to `pas`/`all_df` and into the mask comprehension,
-    where the plain `int()` call raises ValueError (verified live: BatterId
-    801956, "Danos, Luca").
+    GameID is an opaque text key (numeric surrogate for warehouse-backfilled
+    games, composite string like "20241023-LoyolaMarymount-Private-1" for
+    legacy/cron games), so it is NOT sorted numerically. The most-recent-PA
+    window sorts by Date DESC (the real chronology), then GameID DESC as a
+    lexicographic tiebreak within a date (composite ids are date-prefixed, so
+    this stays chronological), then Inning/PAofInning by their numeric values
+    (CAST ... AS UNSIGNED) so extra innings rank correctly ("10" after "2").
+    The (GameID, Inning, PAofInning) key is matched as strings on both sides,
+    so composite-GameID veterans no longer crash.
     """
     ph, idp = _in_clause(_sibling_ids(batter_id))
     pas = query_df(
@@ -331,9 +295,9 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
         SELECT d.GameID, d.Inning, d.PAofInning FROM (
           SELECT DISTINCT GameID, Inning, PAofInning, Date
             FROM GAMES
-           WHERE BatterId IN ({ph}) AND GameID REGEXP '^[0-9]+$'
+           WHERE BatterId IN ({ph})
         ) d
-        ORDER BY d.Date DESC, CAST(d.GameID AS UNSIGNED) DESC,
+        ORDER BY d.Date DESC, d.GameID DESC,
                  CAST(d.Inning AS UNSIGNED) DESC, CAST(d.PAofInning AS UNSIGNED) DESC
         LIMIT {int(n)}
         """,
@@ -341,13 +305,12 @@ def last_n_pas(batter_id, n: int = 27) -> pd.DataFrame:
     )
     all_df = _finish(query_df(
         f"SELECT {_PITCH_COLS} FROM GAMES WHERE BatterId IN ({ph}) "
-        f"AND GameID REGEXP '^[0-9]+$' "
         f"ORDER BY GameID, PitchNo", idp,
     ))
     if all_df.empty or pas.empty:
         return all_df
-    keys = set(zip(pas["GameID"].astype(int), pas["Inning"].astype(int),
-                   pas["PAofInning"].astype(int)))
-    mask = [(int(g), int(i), int(p)) in keys
+    keys = set(zip(pas["GameID"].astype(str), pas["Inning"].astype(str),
+                   pas["PAofInning"].astype(str)))
+    mask = [(str(g), str(i), str(p)) in keys
             for g, i, p in zip(all_df["GameID"], all_df["Inning"], all_df["PAofInning"])]
     return all_df[mask].reset_index(drop=True)

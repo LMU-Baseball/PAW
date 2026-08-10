@@ -113,7 +113,7 @@ def test_pitcher_video_returns_data_for_raw_trackman_id(sample):
     pitching dashboard/report now pass post-cutover) must still find video."""
     df = video.pitch_video_df(sample["game_id"], pitcher_id=sample["pitcher_tm_id"])
     assert not df.empty
-    assert sample["game_id"] in video.games_with_video(
+    assert str(sample["game_id"]) in video.games_with_video(
         [sample["game_id"]], pitcher_id=sample["pitcher_tm_id"])
 
 
@@ -135,7 +135,7 @@ def test_catcher_video_returns_data_for_raw_trackman_id(sample):
     catching dashboard now passes post-cutover) must still find video."""
     df = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_tm_id"])
     assert not df.empty
-    assert sample["game_id"] in video.games_with_video(
+    assert str(sample["game_id"]) in video.games_with_video(
         [sample["game_id"]], catcher_id=sample["catcher_tm_id"])
 
 

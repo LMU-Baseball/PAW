@@ -61,7 +61,7 @@ def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
                                "fontSize": "20px", "alignSelf": "center"})
     if not game_id:
         return html.Div()
-    sb = hitting_caps.scoreboard(int(game_id))
+    sb = hitting_caps.scoreboard(str(game_id))
     parts = [p for p in (sb["date"], f"{sb['loc']} {sb['opp']}".strip(),
                          sb["game_type"]) if p]
     return html.Div(" · ".join(parts),
@@ -84,7 +84,7 @@ def serve_layout() -> html.Div:
         max_bound = str(games_df["game_date"].max())
         games = dr.game_options(
             games_df, videodata.video_game_ids(games_df, batter_id=default_batter))
-        default_game = int(games_df.iloc[0]["game_id"])
+        default_game = str(games_df.iloc[0]["game_id"])
         anchor = max_bound
         s0, e0 = dr.preset_range("season", anchor)
         # DEFAULT selected range only -- the calendar's own min/max stay the

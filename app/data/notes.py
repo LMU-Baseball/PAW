@@ -14,7 +14,9 @@ class GameNote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     module = db.Column(db.String(16), nullable=False)
     subject_id = db.Column(db.Integer, nullable=False)
-    game_id = db.Column(db.Integer, nullable=False)
+    # GameID is an opaque string (numeric surrogate for warehouse games,
+    # composite like "20220311-GoodwinField-1" for legacy/cron games).
+    game_id = db.Column(db.String(64), nullable=False)
     text = db.Column(db.Text, nullable=False, default="")
     author_id = db.Column(db.Integer, nullable=True)
     updated_at = db.Column(db.DateTime, nullable=True)
@@ -22,7 +24,7 @@ class GameNote(db.Model):
 
 def _row(module, subject_id, game_id):
     return db.session.scalar(db.select(GameNote).filter_by(
-        module=module, subject_id=int(subject_id), game_id=int(game_id)))
+        module=module, subject_id=int(subject_id), game_id=str(game_id)))
 
 
 def get_note(module, subject_id, game_id) -> str:
@@ -41,7 +43,7 @@ def upsert_note(module, subject_id, game_id, text, author_id=None) -> None:
         return
     row = _row(module, subject_id, game_id)
     if row is None:
-        row = GameNote(module=module, subject_id=int(subject_id), game_id=int(game_id))
+        row = GameNote(module=module, subject_id=int(subject_id), game_id=str(game_id))
         db.session.add(row)
     row.text = text
     row.author_id = author_id
@@ -53,5 +55,5 @@ def delete_note(module, subject_id, game_id) -> None:
     if subject_id is None or game_id is None:
         return
     db.session.execute(db.delete(GameNote).filter_by(
-        module=module, subject_id=int(subject_id), game_id=int(game_id)))
+        module=module, subject_id=int(subject_id), game_id=str(game_id)))
     db.session.commit()
