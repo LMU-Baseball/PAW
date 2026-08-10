@@ -77,8 +77,8 @@ def test_catcher_options_coach(monkeypatch):
     from app.dashboards.catching import selectors
     monkeypatch.setattr(
         "app.data.catching_caps.lmu_catchers",
-        lambda: pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1},
-                              {"Catcher": "Roe, Jane", "CatcherId": 2}]),
+        lambda season=None: pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1},
+                                          {"Catcher": "Roe, Jane", "CatcherId": 2}]),
     )
     opts = selectors.catcher_options(is_coach=True, own_trackman_id=None)
     assert {o["value"] for o in opts} == {1, 2}
@@ -456,6 +456,57 @@ def test_catching_uses_preset_control():
     from app.dashboards.catching import layout
     src = inspect.getsource(layout.serve_layout)
     assert "date_control" in src and "date_picker(" not in src
+
+
+def _find_component(node, comp_id):
+    """Depth-first search for a Dash component whose id == comp_id."""
+    if getattr(node, "id", None) == comp_id:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for c in children:
+        found = _find_component(c, comp_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeypatch):
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.data import seasons
+    monkeypatch.setattr(seasons, "available_seasons",
+                        lambda: ["2025/2026", "2024/2025", "2023/2024"])
+    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    monkeypatch.setattr("app.data.catching_caps.lmu_catchers",
+                        lambda season=None: pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1}]))
+    monkeypatch.setattr("app.data.catching_caps.games_for_catcher",
+                        lambda c, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
+    monkeypatch.setattr("app.data.catching_caps.catcher_profile",
+                        lambda c: {"name": "Doe, John", "class_year": "",
+                                   "position": "", "photo": "", "jersey": ""})
+    monkeypatch.setattr("app.data.catching_caps.framing_season_tiles",
+                        lambda c, season=None: {"games": 0, "pitches": 0,
+                                                "net_strikes": 0, "steal_pct": "—"})
+    with server.app_context():
+        coach = User(email="cat-season@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/catching/"):
+            login_user(coach)
+            from app.dashboards.catching import layout
+            out = layout.serve_layout()
+    dd = _find_component(out, "cat-season")
+    assert dd is not None
+    assert dd.value == "2025/2026"                       # defaults to current season
+    assert [o["value"] for o in dd.options] == ["2025/2026", "2024/2025", "2023/2024"]
+    # sanity: the catcher dropdown is also present in the selector row
+    assert _find_component(out, "catcher-dd") is not None
 
 
 def test_catching_preset_callback_writes_range(server):

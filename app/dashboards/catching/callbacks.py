@@ -22,26 +22,54 @@ def _read_game_df(data_json):
 
 def register_callbacks(dash_app) -> None:
 
+    # Season (outer scope) change -> rescope roster + full-season date range +
+    # calendar bounds. catcher/game/sidebar/scoreboard cascade from these outputs.
     @dash_app.callback(
+        Output("catcher-dd", "options"), Output("catcher-dd", "value"),
         Output("cat-daterange", "start_date"), Output("cat-daterange", "end_date"),
-        Output("cat-cal-wrap", "style"),
-        Input("cat-date-preset", "value"), Input("catcher-dd", "value"),
+        Output("cat-daterange", "min_date_allowed"),
+        Output("cat-daterange", "max_date_allowed"),
+        Output("cat-date-preset", "value"),
+        Input("cat-season", "value"),
         prevent_initial_call=True,
     )
-    def _on_preset(preset, catcher_id):
+    def _on_season(season):
+        from app.data import seasons
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        catchers = selectors.catcher_options(is_coach=is_coach, own_trackman_id=own,
+                                             season=season)
+        default_catcher = selectors.resolve_catcher(
+            catchers[0]["value"] if catchers else None,
+            is_coach=is_coach, own_trackman_id=own)
+        s_b, e_b = seasons.season_bounds(season)
+        return catchers, default_catcher, s_b, e_b, s_b, e_b, "season"
+
+    # Preset -> date range (nested inside the selected season).
+    @dash_app.callback(
+        Output("cat-daterange", "start_date", allow_duplicate=True),
+        Output("cat-daterange", "end_date", allow_duplicate=True),
+        Output("cat-cal-wrap", "style"),
+        Input("cat-date-preset", "value"),
+        State("cat-season", "value"), State("catcher-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_preset(preset, season, catcher_id):
         from dash import no_update
+        from app.data import seasons
         show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
         if preset == "custom":
             return no_update, no_update, show
+        s_b, e_b = seasons.season_bounds(season)
+        if preset == "season":
+            return s_b, e_b, show  # "This Season" == the whole selected academic year
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
-        g = catching_caps.games_for_catcher(cid) if cid else None
-        if g is None or g.empty:
-            return no_update, no_update, show
-        anchor = str(g["game_date"].max())
+        g = catching_caps.games_for_catcher(cid, s_b, e_b) if cid else None
+        anchor = str(g["game_date"].max()) if (g is not None and not g.empty) else e_b
         s, e = dr.preset_range(preset, anchor)
-        s = max(str(s), str(g["game_date"].min()))
+        s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
     @dash_app.callback(
@@ -60,13 +88,26 @@ def register_callbacks(dash_app) -> None:
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games); game_id is an opaque string
         return opts, value
 
+    # Catcher/season -> sidebar (season framing tiles depend only on catcher + season).
     @dash_app.callback(
-        Output("selection", "data"), Output("sidebar", "children"),
-        Output("scoreboard", "children"),
-        Input("catcher-dd", "value"), Input("game-dd", "value"),
-        State("cat-daterange", "start_date"), State("cat-daterange", "end_date"),
+        Output("sidebar", "children"),
+        Input("catcher-dd", "value"), Input("cat-season", "value"),
+        prevent_initial_call=True,
     )
-    def _on_selection(catcher_id, game_id, start, end):
+    def _on_sidebar(catcher_id, season):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
+        return layout.sidebar(cid, season)
+
+    # Selection -> selection store + scoreboard (fresh season/dates as Inputs).
+    @dash_app.callback(
+        Output("selection", "data"), Output("scoreboard", "children"),
+        Input("catcher-dd", "value"), Input("game-dd", "value"),
+        Input("cat-daterange", "start_date"), Input("cat-daterange", "end_date"),
+        Input("cat-season", "value"),
+    )
+    def _on_selection(catcher_id, game_id, start, end, season):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         cid = selectors.resolve_catcher(catcher_id, is_coach=is_coach, own_trackman_id=own)
@@ -75,8 +116,8 @@ def register_callbacks(dash_app) -> None:
             sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
         else:
             sb = layout.scoreboard(game_id)
-        return ({"catcher_id": cid, "game_id": game_id, "start": start, "end": end},
-                layout.sidebar(cid), sb)
+        return ({"catcher_id": cid, "game_id": game_id, "season": season,
+                 "start": start, "end": end}, sb)
 
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))
     def _on_load_data(sel):

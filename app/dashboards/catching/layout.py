@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import catching_caps
+from app.data import catching_caps, seasons
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -21,11 +21,11 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
-def sidebar(catcher_id) -> html.Div:
+def sidebar(catcher_id, season=None) -> html.Div:
     if catcher_id is None:
         return html.Div("Select a catcher.", style={"padding": "12px"})
     prof = catching_caps.catcher_profile(int(catcher_id))
-    summ = catching_caps.framing_season_tiles(int(catcher_id))
+    summ = catching_caps.framing_season_tiles(int(catcher_id), season)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"]) if x])
@@ -70,30 +70,36 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
     own = getattr(current_user, "trackman_id", None)
-    catchers = selectors.catcher_options(is_coach=is_coach, own_trackman_id=own)
+    season = seasons.current_season()
+    s_bound, e_bound = seasons.season_bounds(season)
+    catchers = selectors.catcher_options(is_coach=is_coach, own_trackman_id=own,
+                                         season=season)
     default_catcher = selectors.resolve_catcher(
         catchers[0]["value"] if catchers else None,
         is_coach=is_coach, own_trackman_id=own)
-    games_df = catching_caps.games_for_catcher(default_catcher) if default_catcher else None
+    games_df = (catching_caps.games_for_catcher(default_catcher, s_bound, e_bound)
+                if default_catcher else None)
     if games_df is not None and not games_df.empty:
-        min_bound = str(games_df["game_date"].min())
-        max_bound = str(games_df["game_date"].max())
         games = dr.game_options(
             games_df, videodata.video_game_ids(games_df, catcher_id=default_catcher))
         default_game = str(games_df.iloc[0]["game_id"])
-        anchor = max_bound
-        s0, e0 = dr.preset_range("season", anchor)
-        # DEFAULT selected range only -- the calendar's own min/max stay the
-        # catcher's full history so Custom Range can reach out-of-season data.
-        start_d = max(str(s0), min_bound)
-        end_d = anchor
     else:
-        min_bound = max_bound = None
-        start_d = end_d = None
         games = []
         default_game = None
+    # Season is the OUTER scope; the date range + calendar nest inside the
+    # selected academic year (Aug 1 -> Jul 31). Default range = the whole season.
+    min_bound, max_bound = s_bound, e_bound
+    start_d, end_d = s_bound, e_bound
 
     selector_row = html.Div([
+        html.Div([
+            html.Label("Season", style={"color": "white", "fontWeight": "bold"}),
+            dcc.Dropdown(id="cat-season",
+                         options=[{"label": s, "value": s}
+                                  for s in seasons.available_seasons()],
+                         value=season, clearable=False,
+                         style={"minWidth": "130px"}),
+        ]),
         html.Div([
             html.Label("Catcher", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="catcher-dd", options=catchers, value=default_catcher,
@@ -124,12 +130,13 @@ def serve_layout() -> html.Div:
     return html.Div([
         dcc.Store(id="selection", data={"catcher_id": default_catcher,
                                         "game_id": default_game,
+                                        "season": season,
                                         "start": start_d, "end": end_d}),
         dcc.Store(id="game-data"),
         header(back_href="/catching", back_label="← Catching"),
         html.Div([
             html.Div([
-                html.Div(id="sidebar", children=sidebar(default_catcher)),
+                html.Div(id="sidebar", children=sidebar(default_catcher, season)),
                 notes_ui.note_card("catching"),
             ], style={"width": "260px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,

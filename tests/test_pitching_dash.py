@@ -55,6 +55,58 @@ def test_pitcher_options_coach_nonempty():
     assert opts and {"label", "value"} <= set(opts[0])
 
 
+def _find_component(node, comp_id):
+    """Depth-first search for a Dash component whose id == comp_id."""
+    if getattr(node, "id", None) == comp_id:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for c in children:
+        found = _find_component(c, comp_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeypatch):
+    import pandas as pd
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.data import seasons
+    monkeypatch.setattr(seasons, "available_seasons",
+                        lambda: ["2025/2026", "2024/2025", "2023/2024"])
+    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    monkeypatch.setattr("app.data.pitching_caps.lmu_pitchers",
+                        lambda season=None: pd.DataFrame([{"Pitcher": "Doe, John", "PitcherId": 1}]))
+    monkeypatch.setattr("app.data.pitching_caps.games_for_pitcher",
+                        lambda p, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_profile",
+                        lambda p: {"name": "Doe, John", "class_year": "", "position": "",
+                                   "throws": "", "jersey": "", "photo": ""})
+    monkeypatch.setattr("app.data.pitching_caps.range_summary",
+                        lambda p, *a, **k: {"appearances": 0, "ip": 0, "k_pct": "—",
+                                            "bb_pct": "—", "barrel_pct": "—"})
+    with server.app_context():
+        coach = User(email="pc3@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/pitching/"):
+            login_user(coach)
+            from app.dashboards.pitching import layout
+            out = layout.serve_layout()
+    dd = _find_component(out, "pit-season")
+    assert dd is not None
+    assert dd.value == "2025/2026"                       # defaults to current season
+    assert [o["value"] for o in dd.options] == ["2025/2026", "2024/2025", "2023/2024"]
+    # sanity: the pitcher dropdown is also present in the selector row
+    assert _find_component(out, "pitcher-dd") is not None
+
+
 def test_outing_options_for_real_pitcher(real_pitcher):
     from app.dashboards.pitching import selectors
     opts = selectors.outing_options(real_pitcher)
