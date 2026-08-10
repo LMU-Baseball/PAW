@@ -27,11 +27,11 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
-def sidebar(batter_id, season=None) -> html.Div:
+def sidebar(batter_id, season=None, start=None, end=None) -> html.Div:
     if batter_id is None:
         return html.Div("Select a hitter.", style={"padding": "12px"})
     prof = hitting_caps.player_profile(int(batter_id))
-    slash = hitting_caps.sidebar_stats(int(batter_id), season)
+    slash = hitting_caps.sidebar_stats(int(batter_id), season, start, end)
     qab = slash["qab"]
     qab_txt = f"{round(qab * 100, 1)}%" if qab is not None else "—"
     photo = prof["photo"] or _PHOTO_PLACEHOLDER
@@ -49,7 +49,7 @@ def sidebar(batter_id, season=None) -> html.Div:
                   _tile("SLG", slash["SLG"]), _tile("OBP", slash["OBP"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Slash line = recent-season game data (provisional).",
+        html.Div("Stats reflect the selected date range.",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
@@ -141,7 +141,7 @@ def serve_layout() -> html.Div:
         header(back_href="/hitting", back_label="← Hitting"),
         html.Div([
             html.Div([
-                html.Div(id="sidebar", children=sidebar(default_batter, season)),
+                html.Div(id="sidebar", children=sidebar(default_batter, season, start_d, end_d)),
                 notes_ui.note_card("hitting"),
             ], style={"width": "260px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,

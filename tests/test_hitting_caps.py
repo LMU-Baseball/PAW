@@ -310,6 +310,55 @@ def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
     assert hitting_caps.slash_line(WADAS) == {"BA": ".321", "SLG": ".540", "OBP": ".401"}
 
 
+def test_sidebar_stats_range_equals_season_matches_rollup():
+    """The default 'This Season' view (date range == season bounds) must be
+    byte-identical to the season-scoped rollup -- the fast precalc path must
+    not regress when the range Inputs are wired in."""
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    full = hitting_caps.sidebar_stats(WADAS, season)
+    ranged = hitting_caps.sidebar_stats(WADAS, season, start=str(s), end=str(e))
+    assert ranged == full
+
+
+def test_sidebar_stats_subrange_is_scoped():
+    """A genuine sub-range (narrower than the season) computes on the fly and
+    still returns the same 4-key contract without error."""
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    narrow = hitting_caps.sidebar_stats(WADAS, season, start=str(s), end=str(s))
+    assert set(narrow) == {"qab", "BA", "SLG", "OBP"}
+
+
+def test_sidebar_stats_subrange_matches_rollup_over():
+    """The range path's numbers agree exactly with _rollup_over over the same
+    window -- single source of truth for the slash/QAB math."""
+    g = hitting_caps.games_for_batter(WADAS)
+    start, end = str(g["game_date"].min()), str(g["game_date"].max())
+    from app.data import seasons
+    season = seasons.current_season()
+    s_b, e_b = seasons.season_bounds(season)
+    if (start, end) == (s_b, e_b):
+        import pytest
+        pytest.skip("fixture's full game span equals the season bounds; not a sub-range")
+    out = hitting_caps.sidebar_stats(WADAS, season, start=start, end=end)
+    r = hitting_caps._rollup_over(WADAS, start, end)
+    assert out == {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
+
+
+def test_compute_season_rollup_uses_rollup_over():
+    """_compute_season_rollup is now a thin wrapper over _rollup_over with the
+    season's bounds -- pin down the delegation so the two paths can't drift."""
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    direct = hitting_caps._rollup_over(WADAS, s, e)
+    via_season = hitting_caps._compute_season_rollup(WADAS, season)
+    assert via_season == {**direct, "season_label": season}
+
+
 def test_sidebar_stats_falls_back_to_compute_when_missing(monkeypatch):
     """With no rollup row, the reads fall back to on-the-fly compute (correct,
     just slower) so correctness never depends on a rebuild having run."""

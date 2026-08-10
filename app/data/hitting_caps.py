@@ -150,35 +150,28 @@ def slash_line(batter_id, season=None) -> dict:
     return {"BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 
-def _compute_season_rollup(batter_id, season=None) -> dict:
-    """The hitting season rollup for one batter, computed from raw CAPS.
-
-    Single source of truth for the rollup: runs the SAME season load + PA-frame
-    the sidebar/summary use (`season_pitches` -> `qab_frame`), then the shared
-    `_slash_counts`/`_slash_from_pas`. `precalc.rebuild_hitting` writes this dict
-    to `precalc_hitting_player_season`; `sidebar_stats` et al. read it back (with
-    this function as the compute fallback). No metric is redefined here.
-
-    Scoped to the academic-year `season` (default current_season()); the name is
-    read from that season's rows and `season_label` stores the season label.
+def _rollup_over(batter_id, start, end) -> dict:
+    """The hitting rollup for one batter over an arbitrary [start, end] date
+    window, computed from raw CAPS. Single source of truth for the slash/QAB
+    math: runs the same PA-frame chain (`range_pitches` -> `qab_frame`) then the
+    shared `_slash_counts`/`_slash_from_pas`. `_compute_season_rollup` calls this
+    with a season's bounds; `sidebar_stats`'s range path calls it with the
+    caller's date-range bounds directly -- same function, different window.
     """
-    from app.data import seasons
-    season = season or seasons.current_season()
-    s, e = seasons.season_bounds(season)
     bid = int(batter_id)
     meta = query_df(
         "SELECT Batter FROM GAMES WHERE BatterId = :b AND Date BETWEEN :s AND :e "
-        "ORDER BY Date DESC LIMIT 1", {"b": bid, "s": s, "e": e})
+        "ORDER BY Date DESC LIMIT 1", {"b": bid, "s": start, "e": end})
     name = "" if meta.empty or pd.isna(meta.iloc[0]["Batter"]) else str(meta.iloc[0]["Batter"])
 
-    df = season_pitches(bid, season)
+    df = range_pitches(bid, start, end)
     q = qab_frame(df)
     counts = _slash_counts(q)
     slash = _slash_from_pas(q)
     total = len(q)
     qab_pct = round(float(q["QAB"].sum()) / total, 3) if total else None
     return {
-        "batter_id": bid, "batter_name": name, "season_label": season,
+        "batter_id": bid, "batter_name": name,
         "qab_pct": qab_pct, "ba": slash["BA"], "obp": slash["OBP"], "slg": slash["SLG"],
         "pa": counts["pa"], "ab": counts["ab"], "h": counts["h"],
         "doubles": counts["doubles"], "triples": counts["triples"], "hr": counts["hr"],
@@ -186,10 +179,39 @@ def _compute_season_rollup(batter_id, season=None) -> dict:
     }
 
 
-def sidebar_stats(batter_id, season=None):
-    """QAB% + slash line as a single precalc 1-row read (fixes the profiled 3.2s
-    full-season double-load); compute fallback when the rollup row is absent.
-    `season` (default current_season()) rescopes the KPIs to that academic year."""
+def _compute_season_rollup(batter_id, season=None) -> dict:
+    """The hitting season rollup for one batter, computed from raw CAPS.
+
+    Thin wrapper over `_rollup_over` with the season's date bounds -- the single
+    source of truth for the slash/QAB math lives there now. `precalc.
+    rebuild_hitting` writes this dict to `precalc_hitting_player_season`;
+    `sidebar_stats` et al. read it back (with this function as the compute
+    fallback). No metric is redefined here.
+
+    Scoped to the academic-year `season` (default current_season()); the name is
+    read from that season's rows and `season_label` stores the season label.
+    """
+    from app.data import seasons
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    return {**_rollup_over(batter_id, s, e), "season_label": season}
+
+
+def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
+    """QAB% + slash line, scoped to a date range.
+
+    When `start`/`end` are omitted, or given but equal to `season`'s bounds
+    (the default "This Season" view), read the precalc 1-row rollup as before
+    (fixes the profiled 3.2s full-season double-load; compute fallback when the
+    rollup row is absent) -- this fast path is unchanged. A genuine sub-range
+    (the coach narrowed the calendar/preset) computes on the fly via
+    `_rollup_over` so the sidebar KPIs track the selected date range."""
+    from app.data import seasons
+    if start and end:
+        s_b, e_b = seasons.season_bounds(season or seasons.current_season())
+        if str(start) != s_b or str(end) != e_b:
+            r = _rollup_over(batter_id, start, end)
+            return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
     r = _season_rollup(batter_id, season)
     return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 

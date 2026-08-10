@@ -149,17 +149,20 @@ def register_callbacks(dash_app) -> None:
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value
         return opts, value
 
-    # Hitter/season -> sidebar (season KPIs depend only on batter + season).
+    # Hitter/season/date-range -> sidebar (KPIs rescope to the selected range;
+    # when the range equals the season's bounds, sidebar_stats reads the fast
+    # precalc rollup, so the default "This Season" view is unchanged).
     @dash_app.callback(
         Output("sidebar", "children"),
         Input("hitter-dd", "value"), Input("hit-season", "value"),
+        Input("hit-daterange", "start_date"), Input("hit-daterange", "end_date"),
         prevent_initial_call=True,
     )
-    def _on_sidebar(batter_id, season):
+    def _on_sidebar(batter_id, season, start, end):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
-        return layout.sidebar(bid, season)
+        return layout.sidebar(bid, season, start, end)
 
     # Selection -> selection store + scoreboard (fresh season/dates as Inputs).
     @dash_app.callback(

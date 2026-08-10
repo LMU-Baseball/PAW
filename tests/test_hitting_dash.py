@@ -356,7 +356,7 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
                                    "class_year": "Jr.", "position": "OF",
                                    "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
-                        lambda b, season=None: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
+                        lambda b, *a, **k: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
     with server.app_context():
         coach = User(email="c2@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -410,7 +410,7 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda b: {"name": "Doe, John", "bats": "", "class_year": "",
                                    "position": "", "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
-                        lambda b, season=None: {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"})
+                        lambda b, *a, **k: {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"})
     with server.app_context():
         coach = User(email="c3@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -456,6 +456,23 @@ def test_game_options_refresh_on_hitter_change(server):
     key = next(k for k in app.callback_map if "game-dd.options" in k)
     inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
     assert "hitter-dd.value" in inputs
+
+
+def test_hitting_sidebar_callback_lists_daterange_inputs(server):
+    """The sidebar callback must rescope on the date range, not just batter/
+    season -- mirrors the pitching sidebar (pit-daterange). Otherwise the
+    sidebar KPIs never update when the coach narrows the calendar/preset."""
+    from dash import Dash
+    from app.dashboards.hitting import layout, callbacks, index
+    app = Dash(__name__, server=server, url_base_pathname="/dash/htest3/",
+               suppress_callback_exceptions=True)
+    app.index_string = index.INDEX_STRING
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    key = next(k for k in app.callback_map if "sidebar.children" in k)
+    inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
+    assert "hit-daterange.start_date" in inputs
+    assert "hit-daterange.end_date" in inputs
 
 
 def test_read_game_df_roundtrip_no_futurewarning():
@@ -510,8 +527,8 @@ def test_hitting_layout_has_back_link_and_dark_footnote():
     # header called with the /hitting back-link
     assert 'back_href="/hitting"' in src
     # provisional footnote no longer uses the too-light #888
-    assert '"Slash line = recent-season game data (provisional)."' in src
-    footnote_idx = src.index('"Slash line = recent-season game data (provisional)."')
+    assert '"Stats reflect the selected date range."' in src
+    footnote_idx = src.index('"Stats reflect the selected date range."')
     # the style dict immediately after the footnote uses #555, not #888
     tail = src[footnote_idx:footnote_idx + 300]
     assert '"#555"' in tail and '"#888"' not in tail
