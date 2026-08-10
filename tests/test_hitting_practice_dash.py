@@ -392,6 +392,20 @@ def test_swing_trend_uses_real_dates_not_epoch():
     assert "1774915200000" not in [str(v) for v in xs]
 
 
+def test_swing_decision_trend_hover_and_no_stray_trace():
+    import pandas as pd
+    from app.dashboards.hitting_practice import charts
+    tdf = pd.DataFrame({"play_date": pd.to_datetime(["2026-05-10"]),
+                        "in_zone_pct": [40.0], "chase_pct": [60.0], "score": [-20.9]})
+    fig = charts.swing_decision_trend_fig(tdf)
+    main = [t for t in fig.data if getattr(t, "mode", "") and "markers" in t.mode][0]
+    assert "Swing Decision" in main.hovertemplate
+    # zero-line must not surface as a hover trace ("trace 5")
+    assert all(getattr(t, "hoverinfo", None) == "skip"
+               for t in fig.data if t is not main and getattr(t, "mode", None) == "lines"
+               and t.name in (None, ""))
+
+
 def test_practice_layout_drops_session_and_exclude_controls():
     import inspect
     from app.dashboards.hitting_practice import layout

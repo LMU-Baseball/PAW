@@ -217,7 +217,9 @@ def swing_decision_trend_fig(trend_df: pd.DataFrame) -> go.Figure:
         x = _date_labels(trend_df["play_date"])
         fig.add_trace(go.Scatter(
             x=x, y=trend_df["score"], mode="lines+markers", name="Swing Decision Score",
-            line=dict(color=CRIMSON, width=2), marker=dict(color=CRIMSON, size=9)))
+            line=dict(color=CRIMSON, width=2), marker=dict(color=CRIMSON, size=9),
+            customdata=trend_df["score"],
+            hovertemplate="%{x} — Swing Decision: %{customdata:.1f}%<extra></extra>"))
         fig.add_hline(y=0, line=dict(color="#bbb", width=1))
     fig.update_layout(
         title="Swing Decision Score by Session (In-Zone % − Chase %)",
