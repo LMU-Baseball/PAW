@@ -44,25 +44,33 @@ def test_lmu_catchers_columns():
     assert list(df.columns) == ["CatcherId", "Catcher"]
 
 
-# ------------------------- ghost-player regression ---------------------------
+# ------------------------- season-scoping + opaque-GameID --------------------
 #
-# lmu_catchers scoped its list with a date-only _RECENT_WINDOW_CLAUSE but,
-# before this fix, no numeric-GameID guard -- so a catcher whose only
-# in-window GAMES rows carry legacy composite-string GameIDs (pre-CAPS-
-# migration) would be LISTED here while every numeric-GameID-guarded data
-# function (games_for_catcher, framing_season_tiles) returned empty for them:
-# a coach picking that name from the dropdown got a blank dashboard.
+# Post-refactor lmu_catchers is scoped by SEASON DATE-BOUNDS, not by the old
+# date-only _RECENT_WINDOW + numeric-GameID guard. A catcher whose only
+# appearances are legacy composite-string GameIDs (pre-CAPS-migration) is now
+# EXCLUDED from the current-season roster because those games fall in an
+# earlier season -- NOT because a numeric-GameID guard hides them. And under
+# the opaque-GameID contract, games_for_catcher now SURFACES those composite
+# games (the exact opposite of the pre-refactor numeric-only behavior), so
+# picking such a catcher in their own past season yields real data.
 
-def test_lmu_catchers_excludes_ghost_with_only_legacy_games():
-    # CatcherId 801901 ("Ayers, Robbie") has 13,398 in-window GAMES rows (max
-    # Date 2025-05-16, just inside the ~12-month window), ALL under legacy
-    # composite GameIDs, and zero numeric-GameID rows -- verified live.
+def test_lmu_catchers_excludes_out_of_season_legacy_catcher():
+    # CatcherId 801901 ("Ayers, Robbie") has 13,398 GAMES rows (max Date
+    # 2025-05-16), ALL under legacy composite GameIDs -- an earlier season than
+    # current_season(), verified live. He must NOT appear in the current
+    # season's roster.
     GHOST_ID = 801901
     ids = catching_caps.lmu_catchers()["CatcherId"].values
     assert GHOST_ID not in ids
-    # Confirm he really WAS a ghost (the data function is empty for him), not
-    # merely absent from the roster for some unrelated reason.
-    assert catching_caps.games_for_catcher(GHOST_ID).empty
+    # Opaque-GameID contract: games_for_catcher NO LONGER filters to numeric
+    # surrogate ids, so his legacy composite-string games now come back (this
+    # was the blocker being fixed -- the frame used to be empty for him). The
+    # game_id column is opaque strings, NOT int-castable.
+    g = catching_caps.games_for_catcher(GHOST_ID)
+    assert not g.empty
+    with pytest.raises((ValueError, TypeError)):
+        g["game_id"].astype(int)
 
 
 # ------------------- caught-stealing Inn/Pitcher regression -----------------
@@ -80,6 +88,27 @@ def test_caught_stealing_events_have_inning_and_pitcher_name():
     assert "pitcher_name" in ev.columns
     assert ev["inning"].notna().any()
     assert ev["pitcher_name"].notna().any()
+
+
+def test_games_for_catcher_has_no_numeric_game_id_guard():
+    # Cheaper, DB-independent companion to the regression test above: pin down
+    # the mechanism of the opaque-GameID refactor -- the numeric-GameID guard
+    # (_NUMERIC_GAME_ID_CLAUSE / "GameID REGEXP") is GONE from games_for_catcher,
+    # so games are scoped by date only and composite-id games list.
+    import inspect
+    src = inspect.getsource(catching_caps.games_for_catcher)
+    assert "_NUMERIC_GAME_ID_CLAUSE" not in src
+    assert "GameID REGEXP" not in src
+
+
+def test_lmu_catchers_has_no_numeric_game_id_guard_and_is_season_scoped():
+    # lmu_catchers is now scoped by season date-bounds, not by the numeric-
+    # GameID guard or the ~12-month recent window.
+    import inspect
+    src = inspect.getsource(catching_caps.lmu_catchers)
+    assert "_NUMERIC_GAME_ID_CLAUSE" not in src
+    assert "_RECENT_WINDOW_CLAUSE" not in src
+    assert "season_bounds" in src
 
 
 def test_lmu_catchers_all_have_numeric_game_id_rows():

@@ -30,5 +30,5 @@ def outing_options(pitcher_id) -> list[dict]:
     if pitcher_id is None:
         return []
     df = pitching_caps.games_for_pitcher(int(pitcher_id))
-    return [{"label": str(r.GameLabel), "value": int(r.game_id)}
+    return [{"label": str(r.GameLabel), "value": str(r.game_id)}
             for r in df.itertuples()]

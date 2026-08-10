@@ -31,7 +31,7 @@ def _outings_anchor(sel):
         if not pid or not sel.get("start") or not sel.get("end"):
             return None
         g = pitching_caps.games_for_pitcher(int(pid), start=sel["start"], end=sel["end"])
-        return int(g.iloc[0]["game_id"]) if not g.empty else None
+        return str(g.iloc[0]["game_id"]) if not g.empty else None
     return gid
 
 
@@ -72,7 +72,7 @@ def register_callbacks(dash_app) -> None:
             return [], None
         g = pitching_caps.games_for_pitcher(pid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, pitcher_id=pid))
-        value = int(g.iloc[0]["game_id"]) if not g.empty else None
+        value = str(g.iloc[0]["game_id"]) if not g.empty else None
         return opts, value
 
     @dash_app.callback(
@@ -105,7 +105,7 @@ def register_callbacks(dash_app) -> None:
         elif gid is None:
             return None
         else:
-            df = pitching_caps.game_pitches_for(int(gid), int(sel["pitcher_id"]))
+            df = pitching_caps.game_pitches_for(str(gid), int(sel["pitcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(
@@ -126,11 +126,11 @@ def register_callbacks(dash_app) -> None:
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
                 g = pitching_caps.games_for_pitcher(int(pid), start=sel.get("start"), end=sel.get("end"))
-                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+                gids = [str(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select an outing.", style={"padding": "12px", "color": "#555"})
             else:
-                gids = [int(gid)]
+                gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, pitcher_id=int(pid))
             # Coach prefers the center-field (Broadcast) camera; the component
             # falls back to another angle when a pitch has no broadcast clip.

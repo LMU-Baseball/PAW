@@ -55,7 +55,7 @@ def scoreboard(game_id, start=None, end=None, games_df=None) -> html.Div:
     if not game_id:
         return html.Div()
     try:
-        ctx = pitching_caps.game_context(int(game_id))
+        ctx = pitching_caps.game_context(str(game_id))
     except Exception:
         return html.Div()
     opp = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
@@ -81,7 +81,7 @@ def serve_layout() -> html.Div:
         max_bound = str(games_df["game_date"].max())
         outings = dr.game_options(
             games_df, videodata.video_game_ids(games_df, pitcher_id=default_pitcher))
-        default_game = int(games_df.iloc[0]["game_id"])  # most recent single game
+        default_game = str(games_df.iloc[0]["game_id"])  # most recent single game (opaque id)
         anchor = max_bound
         s0, e0 = dr.preset_range("season", anchor)
         # DEFAULT selected range only -- the calendar's own min/max stay the

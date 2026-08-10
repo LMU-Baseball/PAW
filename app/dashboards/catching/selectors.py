@@ -30,5 +30,5 @@ def game_options(catcher_id) -> list[dict]:
     if catcher_id is None:
         return []
     df = catching_caps.games_for_catcher(int(catcher_id))
-    return [{"label": str(r.GameLabel), "value": int(r.game_id)}
+    return [{"label": str(r.GameLabel), "value": str(r.game_id)}
             for r in df.itertuples()]

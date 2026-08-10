@@ -62,7 +62,10 @@ def _sibling_catcher_ids(catcher_id) -> list[int]:
 def game_pitches_for(game_id, catcher_id) -> pd.DataFrame:
     """A catcher's pitches in a game, unioning split Trackman ids (sibling union)."""
     ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
-    idp["g"] = int(game_id)
+    # GameID is an opaque TEXT key (numeric surrogate for warehouse-backfilled
+    # games, composite string like "20250517-704EddieDField-1" for legacy/cron
+    # games), so it is passed through as a string -- never int()'d.
+    idp["g"] = str(game_id)
     return query_df(
         f"SELECT {_CATCHER_SELECT} FROM GAMES WHERE GameID = :g AND CatcherId IN ({ph}) "
         f"ORDER BY PitchNo",
@@ -114,25 +117,19 @@ def game_context(game_id) -> dict:
 # as-is, with no reformatting.
 
 @cached
-def lmu_catchers() -> pd.DataFrame:
-    """One row per LMU catcher (name deduped; canonical id = most-tracked id
-    within the window), scoped to the same ~12-month recent-data window
-    pitching_caps.lmu_pitchers uses (shared clause: GAMES/PitcherTeam is the
-    same table/column for both slices, so the window is identical).
+def lmu_catchers(season=None) -> pd.DataFrame:
+    """One row per LMU catcher (name deduped; canonical id = most-tracked id),
+    scoped to the given academic-year season (default = current_season()).
 
-    Mirrors catching.wh_lmu_catchers's dedup logic, but over GAMES/CatcherId
-    instead of fact_tm_game_pitch/catcher_id -- windowed for the same reason:
-    GAMES holds full CAPS history back to 2022, so an unscoped version would
-    surface retired alumni the warehouse (current-season-only) never has.
-
-    Also guarded by `_NUMERIC_GAME_ID_CLAUSE`: a catcher can have in-window
-    rows that are ALL legacy composite-GameID (pre-CAPS-migration) games --
-    such a "ghost" would be listed here but every numeric-GameID-guarded data
-    function (games_for_catcher, framing_season_tiles) returns empty for
-    them, producing a blank dashboard (confirmed live for CatcherId 801901,
-    "Ayers, Robbie"). Restricting to numeric-GameID rows keeps the dropdown
-    consistent with what the data functions can actually show.
+    Season date-bounds (not a numeric-GameID filter, and no ~12-month recent
+    window) do the scoping now, so legacy composite-GameID seasons are listable
+    too -- picking a PAST season from the dropdown surfaces that season's
+    catchers, whose games are ALL composite-GameID and were previously hidden.
+    The COUNT(*) DESC dedup tiebreak is computed over the season's rows only.
+    Mirrors hitting_caps.lmu_hitters(season) exactly.
     """
+    from app.data import seasons
+    s, e = seasons.season_bounds(season or seasons.current_season())
     df = query_df(
         f"""
         SELECT CatcherId, Catcher FROM (
@@ -141,12 +138,11 @@ def lmu_catchers() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, CatcherId) AS rn
             FROM GAMES
            WHERE PitcherTeam = :team AND CatcherId IS NOT NULL
-             AND {pitching_caps._RECENT_WINDOW_CLAUSE}
-             AND {_NUMERIC_GAME_ID_CLAUSE}
+             AND Date BETWEEN :s AND :e
            GROUP BY CatcherId, Catcher
         ) t WHERE rn = 1 ORDER BY Catcher
         """,
-        {"team": LMU_PITCHER_TEAM},
+        {"team": LMU_PITCHER_TEAM, "s": s, "e": e},
     )
     if not df.empty:
         df["CatcherId"] = df["CatcherId"].astype(int)
@@ -190,11 +186,11 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
     Optional start/end (inclusive) bound game_date. Sibling-id union, matching
     catching.games_for_catcher's shape/format exactly.
 
-    Restricted to numeric GameIDs (see `_NUMERIC_GAME_ID_CLAUSE`): GAMES also
-    holds pre-CAPS-migration scrimmage rows under composite string GameIDs
-    that predate the warehouse's synced season -- excluding them reproduces
-    the oracle's season boundary exactly and guards the int-cast below from a
-    legacy string GameID (mirroring pitching_caps.games_for_pitcher).
+    GameID is treated as an OPAQUE STRING (no numeric-only guard, no int cast),
+    so legacy composite-GameID games (and future cron-loaded ones) appear too.
+    Scoping is by Date only; sort is by Date desc with a GameID-string desc
+    tiebreak for same-date doubleheaders (deterministic). Mirrors
+    hitting_caps.games_for_batter.
     """
     ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
     date_clause = ""
@@ -208,13 +204,13 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
                HomeTeam AS home_team, AwayTeam AS away_team,
                HomeTeamForeignID AS home_team_id
           FROM GAMES
-         WHERE CatcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}{date_clause}
+         WHERE CatcherId IN ({ph}){date_clause}
         """,
         idp,
     )
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
-    df["game_id"] = df["game_id"].astype(int)
+    df["game_id"] = df["game_id"].astype(str)
     df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
     lmu_home = df["home_team_id"] == LMU_TEAM_ID
     opp = df["away_team"].where(lmu_home, df["home_team"])

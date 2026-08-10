@@ -57,7 +57,7 @@ def register_callbacks(dash_app) -> None:
             return [], None
         g = catching_caps.games_for_catcher(cid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, catcher_id=cid))
-        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
+        value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games); game_id is an opaque string
         return opts, value
 
     @dash_app.callback(
@@ -90,7 +90,7 @@ def register_callbacks(dash_app) -> None:
         elif gid is None:
             return None
         else:
-            df = catching_caps.game_pitches_for(int(gid), int(sel["catcher_id"]))
+            df = catching_caps.game_pitches_for(str(gid), int(sel["catcher_id"]))
         return None if df.empty else df.to_json(orient="split")
 
     @dash_app.callback(
@@ -107,11 +107,11 @@ def register_callbacks(dash_app) -> None:
             gid = sel.get("game_id")
             if gid == dr.ALL_IN_RANGE:
                 g = catching_caps.games_for_catcher(int(cid), start=sel.get("start"), end=sel.get("end"))
-                gids = [int(x) for x in g["game_id"]] if not g.empty else []
+                gids = [str(x) for x in g["game_id"]] if not g.empty else []
             elif gid is None:
                 return html.Div("Select a game.", style={"padding": "12px", "color": "#555"})
             else:
-                gids = [int(gid)]
+                gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, catcher_id=int(cid))
             return videotab.render(vdf, prefix="cat", default_angle="HomeBehind")
         df = _read_game_df(data_json)

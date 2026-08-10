@@ -78,6 +78,20 @@ def range_pitches(batter_id, start, end):
     return _finish(df)
 
 
+def _game_label(game_date, loc, opp) -> str:
+    """Dropdown label for one game: "MM/DD/YY vs Opp".
+
+    Some legacy composite-GameID games carry an empty/unparseable Date (the old
+    numeric-GameID guard used to exclude them; the opaque-GameID contract lets
+    them through). pd.to_datetime(errors="coerce") -> NaT for those, and
+    NaT.strftime raises -- so a NaT date drops the date prefix instead of
+    crashing the whole game list.
+    """
+    ts = pd.to_datetime(game_date, errors="coerce")
+    ds = "" if pd.isna(ts) else ts.strftime("%m/%d/%y")
+    return f"{ds} {loc} {opp}".strip()
+
+
 @cached
 def games_for_batter(batter_id, start=None, end=None):
     """A batter's games, newest first.
@@ -101,7 +115,7 @@ def games_for_batter(batter_id, start=None, end=None):
     lmu_home = df["HomeTeamForeignID"] == LMU_TEAM_ID
     df["loc"] = lmu_home.map({True: "vs", False: "@"})
     df["opp"] = df["AwayTeam"].where(lmu_home, df["HomeTeam"])
-    df["GameLabel"] = [f"{pd.to_datetime(d).strftime('%m/%d/%y')} {l} {o}"
+    df["GameLabel"] = [_game_label(d, l, o)
                        for d, l, o in zip(df["game_date"], df["loc"], df["opp"])]
     return df[["game_id", "game_date", "GameLabel"]]
 

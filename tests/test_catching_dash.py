@@ -164,11 +164,11 @@ def real_catcher():
     """Live-DB fixture (unguarded when DB is up; skips if unreachable/empty).
 
     RAW GAMES.CatcherId (== a player's trackman_id) -- the id space the
-    dashboard now uses everywhere (no warehouse surrogate mapping). Scoped to
-    numeric GameIDs (see pitching_caps._NUMERIC_GAME_ID_CLAUSE): GAMES also
-    holds pre-CAPS-migration rows under composite string GameIDs, and a
-    catcher whose *only* appearances are pre-migration would have zero games
-    in catching_caps.games_for_catcher (which applies this same guard).
+    dashboard now uses everywhere (no warehouse surrogate mapping). Picks the
+    catcher with the most numeric-GameID rows so the fixture lands on a
+    well-tracked current-season catcher; games_for_catcher itself is now
+    GameID-agnostic (opaque-string contract) and returns that catcher's full
+    history, current and legacy alike.
     """
     from sqlalchemy.exc import OperationalError
     from app.db import query_df
@@ -207,7 +207,8 @@ def test_all_tabs_render_live(real_catcher):
     games = catching_caps.games_for_catcher(real_catcher)
     if games.empty:
         pytest.skip("No games found for live catcher")
-    gid = int(games.iloc[0]["game_id"])
+    # game_id is an opaque string (numeric surrogate or composite), never int()'d.
+    gid = str(games.iloc[0]["game_id"])
     df = catching_caps.game_pitches_for(gid, real_catcher)
     if df.empty:
         pytest.skip("No pitch rows for live catcher's game")

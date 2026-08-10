@@ -123,9 +123,12 @@ def test_pitching_aggregate_load_live():
 
 
 def test_outings_anchor_passthrough_concrete_game_id():
+    # A concretely selected outing passes through untouched. game_id is an
+    # opaque string now (numeric surrogate or composite legacy id), so the
+    # anchor carries the composite id verbatim -- no int cast.
     from app.dashboards.pitching.callbacks import _outings_anchor
-    assert _outings_anchor({"pitcher_id": 1, "game_id": 42,
-                            "start": "2026-01-01", "end": "2026-06-01"}) == 42
+    assert _outings_anchor({"pitcher_id": 1, "game_id": "20250517-704EddieDField-1",
+                            "start": "2026-01-01", "end": "2026-06-01"}) == "20250517-704EddieDField-1"
 
 
 def test_outings_anchor_sentinel_resolves_to_most_recent_in_range_game():
@@ -146,10 +149,19 @@ def test_outings_anchor_sentinel_resolves_to_most_recent_in_range_game():
         g = pitching_caps.games_for_pitcher(pid)
         if g.empty:
             pytest.skip("no games")
-        lo, hi = str(g["game_date"].min()), str(g["game_date"].max())
+        # GameID is opaque now, so games_for_pitcher may surface legacy
+        # composite-GameID rows that carry an empty Date; drop those before
+        # deriving the range bounds (the live layout does the same implicitly
+        # by max()-ing the min bound with the season-preset start).
+        dates = sorted(d for d in g["game_date"] if str(d).strip())
+        if not dates:
+            pytest.skip("no dated games")
+        lo, hi = dates[0], dates[-1]
         anchor = _outings_anchor({"pitcher_id": pid, "game_id": ALL_IN_RANGE,
                                   "start": lo, "end": hi})
-        assert isinstance(anchor, int)
+        # Opaque-GameID contract: the resolved anchor game_id is a string now
+        # (games_for_pitcher yields opaque string ids), not an int.
+        assert isinstance(anchor, str)
 
 
 def test_outings_anchor_sentinel_missing_range_returns_none():

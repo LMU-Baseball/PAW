@@ -14,18 +14,17 @@ import pandas as pd
 
 from app.data.pitching import bb_pct, barrel_pct_ev, format_ip, k_pct
 from app.data.cache import cached
+from app.data import seasons
 from app.db import query_df
 
 LMU_TEAM_ID = 78  # GAMES.HomeTeamForeignID/AwayTeamForeignID for LMU.
 LMU_PITCHER_TEAM = "LOY_LIO"  # GAMES.PitcherTeam code for LMU (same as the fact table's).
 
-# GAMES also holds pre-CAPS-migration scrimmage rows under composite string
-# GameIDs (e.g. "20241019-LoyolaMarymount-1") that predate the warehouse's
-# synced season -- see games_for_pitcher. Restricting to numeric GameIDs
-# conveniently reproduces the oracle's season boundary exactly wherever a
-# query has no other date bound (verified live for season_summary/
-# range_summary's whole-career branches: with this filter, totals for a real
-# fixture pitcher are byte-identical to pitching.py's warehouse-scoped ones).
+# NOTE: pitching_caps's own read path no longer uses this -- GameID is opaque
+# now, scoped by season Date bounds instead of a numeric-GameID REGEXP. It is
+# retained here purely as a backward-compat export for catching_caps, which
+# still imports it (see catching_caps.py, owned by the catching worker). Remove
+# once catching_caps stops importing it.
 _NUMERIC_GAME_ID_CLAUSE = "GameID REGEXP '^[0-9]+$'"
 
 # GAMES CamelCase -> the exact snake_case names app.data.pitching's transforms
@@ -101,11 +100,15 @@ def _sibling_pitcher_ids(pitcher_id) -> list[int]:
 
 
 def game_pitches(game_id, pitcher_id) -> pd.DataFrame:
-    """A single raw pitcher_id's pitches in one game (no sibling union)."""
+    """A single raw pitcher_id's pitches in one game (no sibling union).
+
+    `game_id` is an opaque string key (numeric surrogate for warehouse-
+    backfilled games, composite string like "20241019-LoyolaMarymount-1" for
+    legacy/cron games), so it is bound as a string -- never int()-cast."""
     df = query_df(
         f"SELECT {_PITCH_SELECT} FROM GAMES WHERE GameID = :g AND PitcherId = :p "
         f"ORDER BY PitchNo",
-        {"g": int(game_id), "p": int(pitcher_id)},
+        {"g": str(game_id), "p": int(pitcher_id)},
     )
     return _add_batters_faced(df)
 
@@ -114,7 +117,7 @@ def game_pitches(game_id, pitcher_id) -> pd.DataFrame:
 def game_pitches_for(game_id, pitcher_id) -> pd.DataFrame:
     """A pitcher's pitches in a game, unioning split Trackman ids (dashboard/report use)."""
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
-    idp["g"] = int(game_id)
+    idp["g"] = str(game_id)
     df = query_df(
         f"SELECT {_PITCH_SELECT} FROM GAMES WHERE GameID = :g AND PitcherId IN ({ph}) "
         f"ORDER BY PitchNo",
@@ -127,16 +130,16 @@ def game_pitches_for(game_id, pitcher_id) -> pd.DataFrame:
 def range_pitches_for(pitcher_id, start, end) -> pd.DataFrame:
     """All of a pitcher's pitches across in-range games (sibling-id union).
 
-    Guarded by `_NUMERIC_GAME_ID_CLAUSE` so a custom pre-2025 range can't pull
-    in pre-CAPS-migration composite-GameID scrimmage rows (see
-    `games_for_pitcher`); in-season ranges are all-numeric and unaffected.
+    GameID is an opaque string (no numeric-only guard), so a custom range over
+    a legacy/pre-2025 season now pulls in its composite-GameID games too --
+    scoping is by `Date BETWEEN` only. Mirrors hitting_caps.range_pitches.
     """
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
     idp["start"] = str(start)
     idp["end"] = str(end)
     df = query_df(
         f"SELECT {_PITCH_SELECT} FROM GAMES WHERE PitcherId IN ({ph}) "
-        f"AND Date BETWEEN :start AND :end AND {_NUMERIC_GAME_ID_CLAUSE} "
+        f"AND Date BETWEEN :start AND :end "
         f"ORDER BY GameID, PitchNo",
         idp,
     )
@@ -159,7 +162,7 @@ def game_context(game_id) -> dict:
     dim = query_df(
         "SELECT Date, GameType, HomeTeam, AwayTeam, HomeTeamForeignID "
         "FROM GAMES WHERE GameID = :g LIMIT 1",
-        {"g": int(game_id)},
+        {"g": str(game_id)},
     )
     if dim.empty:
         raise KeyError(f"No GAMES row for game_id={game_id}")
@@ -169,7 +172,7 @@ def game_context(game_id) -> dict:
     runs = query_df(
         "SELECT `Top.Bottom` AS top_bottom, COALESCE(SUM(RunsScored), 0) AS runs "
         "FROM GAMES WHERE GameID = :g GROUP BY `Top.Bottom`",
-        {"g": int(game_id)},
+        {"g": str(game_id)},
     ).set_index("top_bottom")["runs"].to_dict()
     away_runs = int(runs.get("Top", 0))
     home_runs = int(runs.get("Bottom", 0))
@@ -207,10 +210,10 @@ def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
     Mirrors the warehouse's vw_pitcher_appearance_velo. Adds `season_label`
     (derived, since GAMES has none) for velo_trend's season-partitioned LAG.
 
-    Restricted to numeric GameIDs (see `_NUMERIC_GAME_ID_CLAUSE`) so
-    `recent_outings`/`velo_trend` don't surface pre-CAPS-migration composite-
-    GameID scrimmages/older seasons the warehouse oracle never showed --
-    same season-boundary reasoning as `games_for_pitcher`.
+    GameID is opaque here (no numeric-only guard): `recent_outings` needs to
+    anchor on a past-season game's appearance and `velo_trend` shows the full
+    per-appearance history, so legacy composite-GameID appearances must
+    surface too. `recent_outings` still date-clips to the selected game.
     """
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
     df = query_df(
@@ -223,7 +226,6 @@ def _pitcher_velo_appearances(pitcher_id) -> pd.DataFrame:
                COUNT(*) AS pitch_count
           FROM GAMES
          WHERE PitcherId IN ({ph}) AND TaggedPitchType IN ('Fastball', 'Sinker')
-           AND {_NUMERIC_GAME_ID_CLAUSE}
          GROUP BY GameID, Date, GameType, HomeTeam, AwayTeam
         """,
         idp,
@@ -250,7 +252,7 @@ def recent_outings(pitcher_id, game_id, n: int = 5) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=cols)
     df = df.sort_values("game_date", ascending=False, kind="mergesort").reset_index(drop=True)
-    this_date = df.loc[df["game_id"] == int(game_id), "game_date"]
+    this_date = df.loc[df["game_id"].astype(str) == str(game_id), "game_date"]
     if not this_date.empty:
         df = df[df["game_date"] <= this_date.iloc[0]]
     return df[cols].head(n).reset_index(drop=True)
@@ -299,40 +301,18 @@ def report_data_version(pitcher_id) -> str:
 # pitcher_name, however, builds "First Last" from tm_player, so
 # pitcher_name() here must split "Last, First" -> "First Last" to match.
 
-# Shared trailing-~12-month window (anchored to the newest LMU GAMES date, not
-# today's date -- see hitting_caps._RECENT_WINDOW_CLAUSE for the same
-# rationale: during the offseason an anchor on "today" would empty the list).
-# Scopes lmu_pitchers() to current pitchers instead of GAMES's full history
-# back to 2022.
-_RECENT_WINDOW_CLAUSE = """Date >= (
-               SELECT DATE_FORMAT(
-                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
-                        '%Y-%m-%d')
-                 FROM GAMES
-                WHERE PitcherTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-             )"""
-
-
 @cached
-def lmu_pitchers() -> pd.DataFrame:
-    """One row per LMU pitcher (name deduped; canonical id = most-tracked id
-    within the window), scoped to a ~12-month recent-data window.
+def lmu_pitchers(season=None) -> pd.DataFrame:
+    """One row per LMU pitcher (name deduped; canonical id = most-tracked id),
+    scoped to the given academic-year season (default = current_season()).
 
     Mirrors pitching.wh_lmu_pitchers's dedup logic, but over GAMES/PitcherId
-    instead of fact_tm_game_pitch/pitcher_id -- windowed for the same reason
-    hitting_caps.lmu_hitters is: GAMES holds full CAPS history back to 2022,
-    so an unscoped version would surface retired alumni the warehouse
-    (current-season-only) never has.
-
-    Also guarded by `_NUMERIC_GAME_ID_CLAUSE`: a pitcher can have in-window
-    rows that are ALL legacy composite-GameID (pre-CAPS-migration) games --
-    such a "ghost" would be listed here but every numeric-GameID-guarded data
-    function (games_for_pitcher, season_summary, range_summary, velo views)
-    returns empty for them, producing a blank dashboard. Restricting to
-    numeric-GameID rows keeps the dropdown consistent with what the data
-    functions can actually show, and also means the COUNT(*) dedup tiebreak
-    is computed over current-era rows only.
+    instead of fact_tm_game_pitch/pitcher_id. Season date-bounds (not a
+    numeric-GameID filter) do the scoping now, so legacy composite-GameID
+    seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed over
+    the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
     """
+    s, e = seasons.season_bounds(season or seasons.current_season())
     df = query_df(
         f"""
         SELECT PitcherId, Pitcher FROM (
@@ -341,11 +321,11 @@ def lmu_pitchers() -> pd.DataFrame:
                                     ORDER BY COUNT(*) DESC, PitcherId) AS rn
             FROM GAMES
            WHERE PitcherTeam = :team AND PitcherId IS NOT NULL
-             AND {_RECENT_WINDOW_CLAUSE} AND {_NUMERIC_GAME_ID_CLAUSE}
+             AND Date BETWEEN :s AND :e
            GROUP BY PitcherId, Pitcher
         ) t WHERE rn = 1 ORDER BY Pitcher
         """,
-        {"team": LMU_PITCHER_TEAM},
+        {"team": LMU_PITCHER_TEAM, "s": s, "e": e},
     )
     if not df.empty:
         df["PitcherId"] = df["PitcherId"].astype(int)
@@ -399,13 +379,11 @@ def games_for_pitcher(pitcher_id, start=None, end=None) -> pd.DataFrame:
     Optional start/end (inclusive) bound game_date. Sibling-id union, matching
     pitching.games_for_pitcher's shape/format exactly.
 
-    Restricted to numeric GameIDs (see the REGEXP filter below): GAMES also
-    holds pre-CAPS-migration scrimmage rows under composite string GameIDs
-    (e.g. "20241019-LoyolaMarymount-1", verified live back to 2024 for a real
-    LMU pitcher) that predate the warehouse's synced season. Excluding them
-    conveniently reproduces the oracle's season boundary exactly (verified:
-    unbounded output is byte-identical to pitching.games_for_pitcher's for a
-    real fixture), not just a defensive int-cast guard.
+    GameID is treated as an OPAQUE STRING (no numeric-only guard, no int cast),
+    so legacy composite-GameID outings (and future cron-loaded ones) appear
+    too. Scoping is by Date only; sort is by Date desc with a GameID-string
+    desc tiebreak for same-date doubleheaders (deterministic). Mirrors
+    hitting_caps.games_for_batter.
     """
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
     date_clause = ""
@@ -419,19 +397,13 @@ def games_for_pitcher(pitcher_id, start=None, end=None) -> pd.DataFrame:
                HomeTeam AS home_team, AwayTeam AS away_team,
                HomeTeamForeignID AS home_team_id
           FROM GAMES
-         WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}{date_clause}
+         WHERE PitcherId IN ({ph}){date_clause}
         """,
         idp,
     )
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "GameLabel"])
-    # GameID is stored as text in GAMES; pre-CAPS-migration scrimmage rows use
-    # composite string ids (e.g. "20241019-LoyolaMarymount-1") that predate the
-    # numeric GameID convention -- excluded above via REGEXP so the int-cast
-    # below never blows up on a real pitcher's older history (verified live:
-    # this raw pitcher id has 38 such legacy rows going back to 2024). Numeric
-    # ids still sort in pandas (not SQL ORDER BY, which would be lexicographic).
-    df["game_id"] = df["game_id"].astype(int)
+    df["game_id"] = df["game_id"].astype(str)
     df = df.sort_values(["game_date", "game_id"], ascending=[False, False]).reset_index(drop=True)
     lmu_home = df["home_team_id"] == LMU_TEAM_ID
     opp = df["away_team"].where(lmu_home, df["home_team"])
@@ -489,23 +461,31 @@ def recent_games(limit: int = 25) -> pd.DataFrame:
 # ======================== SEASON / RANGE SUMMARIES ==========================
 #
 # Both mirror pitching.py's warehouse versions exactly (same keys/format),
-# scoped to a raw pitcher_id's sibling-id union. Neither takes a game_id, so
-# there's no natural date bound to keep GAMES's pre-CAPS-migration composite-
-# string-GameID scrimmage rows (see games_for_pitcher) out of "whole career"
-# totals -- both apply the same _NUMERIC_GAME_ID_CLAUSE games_for_pitcher
-# uses, which happens to reproduce the warehouse's synced-season boundary
-# exactly (verified live: with the filter, a real fixture pitcher's totals
-# are byte-identical to the oracle's).
+# scoped to a raw pitcher_id's sibling-id union. Neither takes a game_id, and
+# GameID is now opaque (no numeric-only guard), so the "season" boundary that
+# used to be a byproduct of the numeric-GameID filter is now made explicit:
+# the whole-season branches scope by the current season's Date bounds
+# (seasons.season_bounds(seasons.current_season())). Genuine sub-ranges still
+# compute from range_pitches_for. This mirrors hitting_caps, whose season
+# rollup is likewise date-scoped (via season_pitches) rather than
+# GameID-filtered.
 
 def season_summary(pitcher_id) -> dict:
-    """Coarse season tiles: appearances (distinct games) + total pitches + K + BB."""
+    """Coarse season tiles: appearances (distinct games) + total pitches + K + BB.
+
+    Currently unused by the dashboard (range_summary drives the sidebar);
+    kept for API completeness and scoped to the current season's Date bounds.
+    """
+    s, e = seasons.season_bounds(seasons.current_season())
     ph, idp = _in_clause(_sibling_pitcher_ids(pitcher_id))
+    idp["s"] = s
+    idp["e"] = e
     df = query_df(
         f"""
         SELECT COUNT(DISTINCT GameID) AS apps, COUNT(*) AS pitches,
                SUM(KorBB = 'Strikeout') AS k, SUM(KorBB = 'Walk') AS bb
           FROM GAMES
-         WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}
+         WHERE PitcherId IN ({ph}) AND Date BETWEEN :s AND :e
         """,
         idp,
     )
@@ -532,26 +512,36 @@ def _summary_tiles(df) -> dict:
     }
 
 
-def _numeric_career_df(pitcher_id):
-    """Whole-career, numeric-GameID-only pitch df for a pitcher (sibling union)."""
+def _season_pitch_df(pitcher_id):
+    """Current-season pitch df for a pitcher (sibling union).
+
+    Scoped by the current season's Date bounds (GameID is opaque now), which
+    replaces the old numeric-GameID filter as the season boundary.
+    """
+    s, e = seasons.season_bounds(seasons.current_season())
     ph, idp = _in_clause(_sibling_pitcher_ids(int(pitcher_id)))
+    idp["s"] = s
+    idp["e"] = e
     return query_df(
         f"SELECT {_PITCH_SELECT} FROM GAMES "
-        f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}", idp)
+        f"WHERE PitcherId IN ({ph}) AND Date BETWEEN :s AND :e", idp)
 
 
 def _compute_season_rollup(pitcher_id) -> dict:
-    """Phase 4 pitching season rollup: the whole-numeric-career sidebar tiles
-    plus the numeric date span, computed from raw CAPS. This is exactly what
+    """Phase 4 pitching season rollup: the current-season sidebar tiles plus
+    the season's date span, computed from raw CAPS. This is exactly what
     range_summary returns for a range that covers the pitcher's whole span (the
     default 'season' sidebar view); precalc.rebuild_pitching stores it and
     range_summary reads it back (this function is the compute fallback)."""
     pid = int(pitcher_id)
-    df = _numeric_career_df(pid)
+    df = _season_pitch_df(pid)
+    s, e = seasons.season_bounds(seasons.current_season())
     ph, idp = _in_clause(_sibling_pitcher_ids(pid))
+    idp["s"] = s
+    idp["e"] = e
     span = query_df(
         f"SELECT MIN(Date) AS mn, MAX(Date) AS mx FROM GAMES "
-        f"WHERE PitcherId IN ({ph}) AND {_NUMERIC_GAME_ID_CLAUSE}", idp)
+        f"WHERE PitcherId IN ({ph}) AND Date BETWEEN :s AND :e", idp)
     mn = None if span.empty or pd.isna(span.iloc[0]["mn"]) else str(span.iloc[0]["mn"])
     mx = None if span.empty or pd.isna(span.iloc[0]["mx"]) else str(span.iloc[0]["mx"])
     return {"pitcher_id": pid, "pitcher_name": pitcher_name(pid),

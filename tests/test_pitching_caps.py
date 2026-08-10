@@ -82,20 +82,59 @@ def test_lmu_pitchers_columns():
 
 def test_lmu_pitchers_all_have_numeric_game_id_rows():
     # No-ghost property (mirrors catching_caps/hitting_caps's regression):
-    # lmu_pitchers used to scope purely by the date-only _RECENT_WINDOW_CLAUSE,
-    # so a pitcher whose only in-window games carried legacy composite-string
-    # GameIDs would be listed while every numeric-GameID-guarded data function
-    # (games_for_pitcher, season_summary, range_summary, velo views) returned
-    # empty for them. Checked as a single SQL set-membership query rather than
-    # N per-id round trips.
+    # lmu_pitchers is now scoped by the current season's Date bounds
+    # (seasons.season_bounds), and the current season is the warehouse-
+    # backfilled one whose games all carry numeric surrogate GameIDs. So every
+    # listed pitcher should still have >=1 numeric-GameID row -- i.e. no
+    # "ghost" whose only in-season games are legacy composite-string GameIDs
+    # (which would leave every game-level data function empty for them).
+    # Checked as a single SQL set-membership query rather than N per-id round
+    # trips (the module no longer exposes a _NUMERIC_GAME_ID_CLAUSE constant,
+    # so the numeric REGEXP is inlined here, mirroring test_hitting_caps).
     ids = set(pitching_caps.lmu_pitchers()["PitcherId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT PitcherId FROM GAMES "
         "WHERE PitcherTeam = :t AND PitcherId IS NOT NULL "
-        f"AND {pitching_caps._NUMERIC_GAME_ID_CLAUSE}",
+        "AND GameID REGEXP '^[0-9]+$'",
         {"t": pitching_caps.LMU_PITCHER_TEAM},
     )["PitcherId"].astype(int))
     assert ids <= current_ids
+
+
+def test_games_for_pitcher_has_no_numeric_game_id_guard():
+    # Opaque-GameID contract (mirrors test_hitting_caps.
+    # test_games_for_batter_has_no_numeric_game_id_guard): games_for_pitcher no
+    # longer filters to numeric surrogate ids. The SQL-level REGEXP numeric
+    # guard is GONE, so outings are scoped by date only and a returning
+    # veteran's legacy composite-string games (e.g. "20241019-LoyolaMarymount-1")
+    # list too. game_id is an opaque string -- never int-cast.
+    import inspect
+    src = inspect.getsource(pitching_caps.games_for_pitcher)
+    assert "GameID REGEXP" not in src
+    assert "astype(int)" not in src
+
+
+def test_lmu_pitchers_season_scoped_and_past_seasons_surface():
+    # The season-dropdown blocker: a PAST season's roster + outings used to be
+    # invisible because the numeric-GameID guard hid legacy composite-GameID
+    # games. lmu_pitchers(season) is now date-scoped (seasons.season_bounds),
+    # so passing no arg == current season, and a past season returns its own
+    # roster whose pitchers' outings surface.
+    from app.data import seasons
+    assert pitching_caps.lmu_pitchers().equals(
+        pitching_caps.lmu_pitchers(seasons.current_season()))
+    past = [s for s in seasons.available_seasons() if s != seasons.current_season()]
+    if not past:
+        pytest.skip("no past season in GAMES to exercise the season dropdown")
+    roster = pitching_caps.lmu_pitchers(past[0])
+    assert list(roster.columns) == ["PitcherId", "Pitcher"]
+    if roster.empty:
+        pytest.skip("past-season roster empty")
+    pid = int(roster.iloc[0]["PitcherId"])
+    g = pitching_caps.games_for_pitcher(pid, *seasons.season_bounds(past[0]))
+    assert not g.empty  # past-season outings now surface (were hidden pre-fix)
+    # game_id is opaque: string values, not necessarily int-castable
+    assert all(isinstance(v, str) for v in g["game_id"])
 
 
 def test_report_data_version_present():

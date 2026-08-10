@@ -239,6 +239,24 @@ def test_games_for_batter_has_no_numeric_game_id_guard():
     assert "GameID REGEXP" not in src
 
 
+def test_game_label_is_nat_safe():
+    # Opaque-GameID contract surfaces legacy composite games, some of which
+    # carry an empty/unparseable Date. The dropdown label must not crash on
+    # those (NaT.strftime raises) -- it drops the date prefix instead.
+    assert hitting_caps._game_label("", "vs", "USC") == "vs USC"
+    assert hitting_caps._game_label(None, "@", "UCLA") == "@ UCLA"
+    assert hitting_caps._game_label("2025-05-17", "vs", "Pepp") == "05/17/25 vs Pepp"
+
+
+def test_games_for_batter_unscoped_does_not_crash_for_veteran():
+    # Regression: a veteran with an empty-Date legacy composite game crashed
+    # the unscoped game list at the GameLabel strftime (live-verified on the
+    # committed pilot). Now it renders string labels without raising.
+    g = hitting_caps.games_for_batter(VETERAN)
+    assert not g.empty
+    assert g["GameLabel"].map(lambda s: isinstance(s, str)).all()
+
+
 def test_last_n_pas_does_not_crash_for_veteran_with_legacy_game_ids():
     # RED before the fix: last_n_pas's `all_df["GameID"]` (selected via
     # _PITCH_COLS, unfiltered) carries the same composite legacy GameIDs
