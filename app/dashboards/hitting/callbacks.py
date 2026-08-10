@@ -79,26 +79,54 @@ def register_callbacks(dash_app) -> None:
 
     # Preset dropdown (or a new hitter) -> refresh the date range; 'custom' just
     # reveals the calendar and leaves the current dates untouched.
+    # Season (outer scope) change -> rescope roster + full-season date range +
+    # calendar bounds. hitter/game/sidebar/scoreboard cascade from these outputs.
     @dash_app.callback(
+        Output("hitter-dd", "options"), Output("hitter-dd", "value"),
         Output("hit-daterange", "start_date"), Output("hit-daterange", "end_date"),
-        Output("hit-cal-wrap", "style"),
-        Input("hit-date-preset", "value"), Input("hitter-dd", "value"),
+        Output("hit-daterange", "min_date_allowed"),
+        Output("hit-daterange", "max_date_allowed"),
+        Output("hit-date-preset", "value"),
+        Input("hit-season", "value"),
         prevent_initial_call=True,
     )
-    def _on_preset(preset, batter_id):
+    def _on_season(season):
+        from app.data import seasons
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        hitters = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own,
+                                           season=season)
+        default_batter = selectors.resolve_batter(
+            hitters[0]["value"] if hitters else None,
+            is_coach=is_coach, own_trackman_id=own)
+        s_b, e_b = seasons.season_bounds(season)
+        return hitters, default_batter, s_b, e_b, s_b, e_b, "season"
+
+    # Preset -> date range (nested inside the selected season).
+    @dash_app.callback(
+        Output("hit-daterange", "start_date", allow_duplicate=True),
+        Output("hit-daterange", "end_date", allow_duplicate=True),
+        Output("hit-cal-wrap", "style"),
+        Input("hit-date-preset", "value"),
+        State("hit-season", "value"), State("hitter-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_preset(preset, season, batter_id):
         from dash import no_update
+        from app.data import seasons
         show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
         if preset == "custom":
             return no_update, no_update, show
+        s_b, e_b = seasons.season_bounds(season)
+        if preset == "season":
+            return s_b, e_b, show  # "This Season" == the whole selected academic year
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
-        g = hitting_caps.games_for_batter(bid) if bid else None
-        if g is None or g.empty:
-            return no_update, no_update, show
-        anchor = str(g["game_date"].max())
+        g = hitting_caps.games_for_batter(bid, s_b, e_b) if bid else None
+        anchor = str(g["game_date"].max()) if (g is not None and not g.empty) else e_b
         s, e = dr.preset_range(preset, anchor)
-        s = max(str(s), str(g["game_date"].min()))
+        s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
     # Date range change -> refresh the game options within that range (players locked).
@@ -115,17 +143,29 @@ def register_callbacks(dash_app) -> None:
             return [], None
         g = hitting_caps.games_for_batter(bid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, batter_id=bid))
-        value = int(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games)
+        value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value
         return opts, value
 
-    # Selection -> selection store + sidebar + scoreboard.
+    # Hitter/season -> sidebar (season KPIs depend only on batter + season).
     @dash_app.callback(
-        Output("selection", "data"), Output("sidebar", "children"),
-        Output("scoreboard", "children"),
-        Input("hitter-dd", "value"), Input("game-dd", "value"),
-        State("hit-daterange", "start_date"), State("hit-daterange", "end_date"),
+        Output("sidebar", "children"),
+        Input("hitter-dd", "value"), Input("hit-season", "value"),
+        prevent_initial_call=True,
     )
-    def _on_selection(batter_id, game_id, start, end):
+    def _on_sidebar(batter_id, season):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
+        return layout.sidebar(bid, season)
+
+    # Selection -> selection store + scoreboard (fresh season/dates as Inputs).
+    @dash_app.callback(
+        Output("selection", "data"), Output("scoreboard", "children"),
+        Input("hitter-dd", "value"), Input("game-dd", "value"),
+        Input("hit-daterange", "start_date"), Input("hit-daterange", "end_date"),
+        Input("hit-season", "value"),
+    )
+    def _on_selection(batter_id, game_id, start, end, season):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         bid = selectors.resolve_batter(batter_id, is_coach=is_coach, own_trackman_id=own)
@@ -134,8 +174,8 @@ def register_callbacks(dash_app) -> None:
             sb = layout.scoreboard(dr.ALL_IN_RANGE, start, end, g)
         else:
             sb = layout.scoreboard(game_id)
-        return ({"batter_id": bid, "game_id": game_id, "start": start, "end": end},
-                layout.sidebar(bid), sb)
+        return ({"batter_id": bid, "game_id": game_id, "season": season,
+                 "start": start, "end": end}, sb)
 
     # Selection -> load the game pitch df into the game-data store.
     @dash_app.callback(Output("game-data", "data"), Input("selection", "data"))

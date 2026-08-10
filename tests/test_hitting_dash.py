@@ -71,7 +71,7 @@ def test_resolve_batter_coach_passes_through():
 def test_hitter_options_coach_lists_all(monkeypatch):
     from app.dashboards.hitting import selectors
     monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
-                        lambda: pd.DataFrame(
+                        lambda season=None: pd.DataFrame(
                             [{"Batter": "Doe, John", "BatterId": 1},
                              {"Batter": "Roe, Jane", "BatterId": 2}]))
     opts = selectors.hitter_options(is_coach=True, own_trackman_id=None)
@@ -348,15 +348,15 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     from app.auth.models import User
     from flask_login import login_user
     monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
-                        lambda: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
+                        lambda season=None: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
     monkeypatch.setattr("app.data.hitting_caps.games_for_batter",
-                        lambda b: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
+                        lambda b, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
     monkeypatch.setattr("app.data.hitting_caps.player_profile",
                         lambda b: {"name": "Doe, John", "bats": "Right",
                                    "class_year": "Jr.", "position": "OF",
                                    "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
-                        lambda b: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
+                        lambda b, season=None: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
     with server.app_context():
         coach = User(email="c2@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -373,8 +373,60 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     tree = str(out)
     assert "The Paw" in tree and "/logout" in tree
     assert "Back to home" not in tree
+    assert "hit-season" in tree  # academic-year Season dropdown is rendered
     # computed slash line reached the sidebar tiles
     assert ".321" in tree
+
+
+def _find_component(node, comp_id):
+    """Depth-first search for a Dash component whose id == comp_id."""
+    if getattr(node, "id", None) == comp_id:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for c in children:
+        found = _find_component(c, comp_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeypatch):
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.data import seasons
+    monkeypatch.setattr(seasons, "available_seasons",
+                        lambda: ["2025/2026", "2024/2025", "2023/2024"])
+    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
+                        lambda season=None: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
+    monkeypatch.setattr("app.data.hitting_caps.games_for_batter",
+                        lambda b, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
+    monkeypatch.setattr("app.data.hitting_caps.player_profile",
+                        lambda b: {"name": "Doe, John", "bats": "", "class_year": "",
+                                   "position": "", "photo": "", "jersey": ""})
+    monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
+                        lambda b, season=None: {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"})
+    with server.app_context():
+        coach = User(email="c3@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/hitting/"):
+            login_user(coach)
+            from app.dashboards.hitting import layout
+            out = layout.serve_layout()
+    dd = _find_component(out, "hit-season")
+    assert dd is not None
+    assert dd.value == "2025/2026"                       # defaults to current season
+    assert [o["value"] for o in dd.options] == ["2025/2026", "2024/2025", "2023/2024"]
+    # it is the first control in the selector row
+    row = _find_component(out, "hitter-dd")  # sanity: hitter dd also present
+    assert row is not None
 
 
 def test_register_callbacks_adds_callbacks(server):

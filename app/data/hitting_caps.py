@@ -15,18 +15,6 @@ from app.data.cache import cached
 LMU_BATTER_TEAM = "LOY_LIO"
 LMU_TEAM_ID = 78
 
-# Shared trailing-~12-month window (anchored to the newest LMU GAMES date, not
-# today's date -- see lmu_hitters docstring for why). Reused by lmu_hitters
-# (which hitter names to list) and season_pitches (which pitches count toward
-# that hitter's season stats) so both are scoped consistently.
-_RECENT_WINDOW_CLAUSE = """Date >= (
-               SELECT DATE_FORMAT(
-                        DATE_SUB(STR_TO_DATE(MAX(Date), '%Y-%m-%d'), INTERVAL 12 MONTH),
-                        '%Y-%m-%d')
-                 FROM GAMES
-                WHERE BatterTeam = :team AND Date REGEXP '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-             )"""
-
 # GAMES columns the transforms consume (already correctly named).
 _PITCH_COLS = (
     "PlateLocSide, PlateLocHeight, PitchCall, PlayResult, KorBB, TaggedHitType, "
@@ -57,14 +45,18 @@ def game_pitches(game_id, batter_id):
     return _finish(df)
 
 @cached
-def season_pitches(batter_id):
-    """Season pitches, windowed to the trailing ~12 months (see
-    _RECENT_WINDOW_CLAUSE) rather than a batter's full GAMES history."""
+def season_pitches(batter_id, season=None):
+    """Pitches for the batter within an academic-year season (default =
+    current_season()). Season date-bounds (Aug 1 -> Jul 31) replace the old
+    trailing-12-month window, so any season -- including legacy composite-GameID
+    ones -- loads, and the sidebar rescopes when the Season dropdown changes."""
+    from app.data import seasons
+    s, e = seasons.season_bounds(season or seasons.current_season())
     ph, idp = _in_clause(_sibling_ids(batter_id))
-    idp["team"] = LMU_BATTER_TEAM
+    idp["s"] = s; idp["e"] = e
     df = query_df(
         f"SELECT {_PITCH_COLS} FROM GAMES WHERE BatterId IN ({ph}) "
-        f"AND {_RECENT_WINDOW_CLAUSE} "
+        f"AND Date BETWEEN :s AND :e "
         f"ORDER BY GameID, PitchNo", idp)
     return _finish(df)
 
@@ -135,50 +127,62 @@ def scoreboard(game_id):
             "game_type": "" if pd.isna(r["GameType"]) else str(r["GameType"])}
 
 
-def _season_rollup(batter_id) -> dict:
-    """Phase 4: read the precalc season rollup (1-row); fall back to on-the-fly
-    compute when the row is absent (pre-rebuild, unbuilt player, or table not
-    yet created) so correctness never depends on a rebuild having run."""
-    from app.data import precalc  # lazy: precalc imports hitting_caps for rebuild
-    row = precalc.read_hitting_season(int(batter_id))
-    return row if row is not None else _compute_season_rollup(batter_id)
+def _season_rollup(batter_id, season=None) -> dict:
+    """Read the precalc season rollup (1-row); fall back to on-the-fly compute
+    when the row is absent (pre-rebuild, unbuilt player, or table not yet
+    created) so correctness never depends on a rebuild having run.
+
+    The precalc table currently holds the CURRENT season only (per-season
+    precalc is a later increment), so a non-current `season` always computes on
+    the fly -- correct, just not the ~0.2s single-row read the current season
+    gets."""
+    from app.data import seasons, precalc  # lazy: precalc imports hitting_caps
+    season = season or seasons.current_season()
+    if season == seasons.current_season():
+        row = precalc.read_hitting_season(int(batter_id))
+        if row is not None:
+            return row
+    return _compute_season_rollup(batter_id, season)
 
 
-def season_qab_rate(batter_id) -> float | None:
-    return _season_rollup(batter_id)["qab_pct"]
+def season_qab_rate(batter_id, season=None) -> float | None:
+    return _season_rollup(batter_id, season)["qab_pct"]
 
 
-def slash_line(batter_id) -> dict:
-    r = _season_rollup(batter_id)
+def slash_line(batter_id, season=None) -> dict:
+    r = _season_rollup(batter_id, season)
     return {"BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 
-def _compute_season_rollup(batter_id) -> dict:
-    """The Phase 4 hitting season rollup for one batter, computed from raw CAPS.
+def _compute_season_rollup(batter_id, season=None) -> dict:
+    """The hitting season rollup for one batter, computed from raw CAPS.
 
     Single source of truth for the rollup: runs the SAME season load + PA-frame
     the sidebar/summary use (`season_pitches` -> `qab_frame`), then the shared
     `_slash_counts`/`_slash_from_pas`. `precalc.rebuild_hitting` writes this dict
     to `precalc_hitting_player_season`; `sidebar_stats` et al. read it back (with
     this function as the compute fallback). No metric is redefined here.
+
+    Scoped to the academic-year `season` (default current_season()); the name is
+    read from that season's rows and `season_label` stores the season label.
     """
+    from app.data import seasons
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
     bid = int(batter_id)
     meta = query_df(
-        "SELECT Batter, Date FROM GAMES WHERE BatterId = :b "
-        "AND GameID REGEXP '^[0-9]+$' ORDER BY Date DESC LIMIT 1", {"b": bid})
+        "SELECT Batter FROM GAMES WHERE BatterId = :b AND Date BETWEEN :s AND :e "
+        "ORDER BY Date DESC LIMIT 1", {"b": bid, "s": s, "e": e})
     name = "" if meta.empty or pd.isna(meta.iloc[0]["Batter"]) else str(meta.iloc[0]["Batter"])
-    season_label = ""
-    if not meta.empty and not pd.isna(meta.iloc[0]["Date"]):
-        season_label = str(pd.to_datetime(meta.iloc[0]["Date"]).year)
 
-    df = season_pitches(bid)
+    df = season_pitches(bid, season)
     q = qab_frame(df)
     counts = _slash_counts(q)
     slash = _slash_from_pas(q)
     total = len(q)
     qab_pct = round(float(q["QAB"].sum()) / total, 3) if total else None
     return {
-        "batter_id": bid, "batter_name": name, "season_label": season_label,
+        "batter_id": bid, "batter_name": name, "season_label": season,
         "qab_pct": qab_pct, "ba": slash["BA"], "obp": slash["OBP"], "slg": slash["SLG"],
         "pa": counts["pa"], "ab": counts["ab"], "h": counts["h"],
         "doubles": counts["doubles"], "triples": counts["triples"], "hr": counts["hr"],
@@ -186,10 +190,11 @@ def _compute_season_rollup(batter_id) -> dict:
     }
 
 
-def sidebar_stats(batter_id):
+def sidebar_stats(batter_id, season=None):
     """QAB% + slash line as a single precalc 1-row read (fixes the profiled 3.2s
-    full-season double-load); compute fallback when the rollup row is absent."""
-    r = _season_rollup(batter_id)
+    full-season double-load); compute fallback when the rollup row is absent.
+    `season` (default current_season()) rescopes the KPIs to that academic year."""
+    r = _season_rollup(batter_id, season)
     return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
 
 

@@ -16,10 +16,11 @@ def resolve_batter(requested_id, *, is_coach: bool, own_trackman_id):
     return int(requested_id) if requested_id not in (None, "") else None
 
 
-def hitter_options(*, is_coach: bool, own_trackman_id) -> list[dict]:
-    """Dropdown options for the hitter selector (value = batter_tm_id)."""
+def hitter_options(*, is_coach: bool, own_trackman_id, season=None) -> list[dict]:
+    """Dropdown options for the hitter selector (value = batter_tm_id), scoped
+    to the given academic-year season (default = current_season())."""
     if is_coach:
-        df = hitting_caps.lmu_hitters()
+        df = hitting_caps.lmu_hitters(season)
         return [{"label": str(r.Batter), "value": int(r.BatterId)}
                 for r in df.itertuples()]
     if own_trackman_id is None:
