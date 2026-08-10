@@ -7,6 +7,8 @@ DataFrame -- no SQL, no warehouse. Percentages are returned as NUMERIC.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -320,7 +322,22 @@ _RESULT_LABELS = {
 }
 
 
-def pretty_result(call: str) -> str:
+def _spaced(s: str) -> str:
+    """'HomeRun' -> 'Home Run'. Mirrors app.data.video._spaced -- kept as a
+    tiny local copy rather than an import to avoid coupling this pure,
+    no-SQL module to video.py's DB-backed one."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(s))
+
+
+def pretty_result(call: str, play_result: str | None = None) -> str:
+    """Human label for a pitch's result. When the ball was put in play,
+    prefer the real batted-ball outcome (``play_result``, e.g. "Single",
+    "HomeRun" -> "Home Run") over the generic "In Play" pitch_call label;
+    otherwise fall back to the ``_RESULT_LABELS`` mapping of ``call``."""
+    if play_result is not None and not (isinstance(play_result, float) and pd.isna(play_result)):
+        pr = str(play_result)
+        if pr not in ("Undefined", "None", ""):
+            return _spaced(pr)
     return _RESULT_LABELS.get(call, call)
 
 
@@ -393,10 +410,20 @@ def _add_zone(fig: go.Figure) -> None:
     fig.add_shape(type="rect", line=dict(color="black", width=2), **_SZ)
 
 
+def result_labels(d: pd.DataFrame) -> pd.Series:
+    """Pretty result label per pitch, using play_result when the column is
+    present (the live CAPS read path always includes it -- see
+    pitching_caps._PITCH_SELECT) and falling back to the pitch_call-only
+    label otherwise (e.g. minimal hand-built frames in tests)."""
+    if "play_result" not in d.columns:
+        return d["pitch_call"].map(pretty_result)
+    return d.apply(lambda r: pretty_result(r["pitch_call"], r["play_result"]), axis=1)
+
+
 def fig_location(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
     d["_pt"] = pitch_type(d)
-    d["_res"] = d["pitch_call"].map(pretty_result)
+    d["_res"] = result_labels(d)
     fig = go.Figure()
     for pt, sub in d.groupby("_pt"):
         fig.add_trace(go.Scatter(
@@ -412,7 +439,7 @@ def fig_location(df: pd.DataFrame) -> go.Figure:
 def fig_location_split(df: pd.DataFrame) -> go.Figure:
     d = df.dropna(subset=["plate_loc_side", "plate_loc_height"]).copy()
     d["_pt"] = pitch_type(d)
-    d["_res"] = d["pitch_call"].map(pretty_result)
+    d["_res"] = result_labels(d)
     fig = go.Figure()
     for pt, sub in d.groupby("_pt"):
         fig.add_trace(go.Scatter(

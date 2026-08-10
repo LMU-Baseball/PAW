@@ -67,6 +67,14 @@ def test_pretty_result_maps_calls():
     assert P.pretty_result("Nonsense") == "Nonsense"  # unknown passes through
 
 
+def test_pretty_result_prefers_real_outcome():
+    assert P.pretty_result("InPlay", "Single") == "Single"
+    assert P.pretty_result("InPlay", "HomeRun") == "Home Run"
+    assert P.pretty_result("StrikeCalled", None) == "Called Strike"
+    assert P.pretty_result("InPlay", "Undefined") == "In Play"   # falls back
+    assert P.pretty_result("InPlay") == "In Play"                # single-arg back-compat
+
+
 def test_game_overall_line_counts_are_consistent(outing_df):
     line = P.game_overall_line(outing_df)
     assert line["pitches"] == len(outing_df)
@@ -139,6 +147,16 @@ def test_figure_builders_return_figures(outing_df):
         fig = fn(outing_df)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) >= 1
+
+
+def test_fig_location_shows_real_outcome_not_in_play(outing_df):
+    """The outing_df fixture has two InPlay pitches with real outcomes
+    (Out, Single); the hover customdata should show those, not 'In Play'."""
+    fig = P.fig_location(outing_df)
+    labels = {row[0] for trace in fig.data for row in trace.customdata}
+    assert "Out" in labels
+    assert "Single" in labels
+    assert "In Play" not in labels
 
 
 def test_velo_trend_figure():

@@ -351,6 +351,25 @@ def test_movement_profile_apply_filters():
     assert set(lm.apply_filters(df, pitch_types=["Slider"])["tagged_pitch_type"]) == {"Slider"}
 
 
+def test_movement_profile_uses_real_outcome_for_in_play():
+    import pandas as pd
+    from app.data import pitching as P
+    from app.dashboards.pitching.tabs import location_movement as lm
+    df = pd.DataFrame({
+        "balls": [0, 1, 0], "strikes": [0, 2, 0],
+        "pitch_call": ["StrikeSwinging", "InPlay", "InPlay"],
+        "play_result": ["Undefined", "Single", "HomeRun"],
+        "batter_side": ["Right", "Left", "Right"],
+        "tagged_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "auto_pitch_type": ["Fastball", "Slider", "Fastball"],
+        "rel_speed": [92.0, 84.0, 91.0]})
+    # the table's Result column shows the granular outcome, not "In Play"
+    assert list(lm.all_pitches(df)["Result"]) == ["Swinging Strike", "Single", "Home Run"]
+    # the filter matches on the granular outcome too
+    assert list(lm.apply_filters(df, results=["Home Run"])["pitch_call"]) == ["InPlay"]
+    assert "In Play" not in set(P.result_labels(df))
+
+
 def test_movement_profile_render_has_filters(outing_df):
     from app.dashboards.pitching.tabs import location_movement as lm
     s = str(lm.render(outing_df))

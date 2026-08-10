@@ -29,7 +29,7 @@ def all_pitches(df: pd.DataFrame) -> pd.DataFrame:
         "Count": df["balls"].astype("Int64").astype(str) + "-"
                  + df["strikes"].astype("Int64").astype(str),
         "Velo": df["rel_speed"].round(1),
-        "Result": df["pitch_call"].map(P.pretty_result),
+        "Result": P.result_labels(df),
     }).reset_index(drop=True)
 
 
@@ -61,7 +61,7 @@ def apply_filters(df: pd.DataFrame, *, pitch_types=None, counts=None,
               + d["strikes"].astype("Int64").astype(str))
         d = d[cs.isin(counts)]
     if results is not None:
-        d = d[d["pitch_call"].map(P.pretty_result).isin(results)]
+        d = d[P.result_labels(d).isin(results)]
     if hand and hand != "All":
         d = d[d["batter_side"] == hand]
     return d
@@ -69,7 +69,7 @@ def apply_filters(df: pd.DataFrame, *, pitch_types=None, counts=None,
 
 def _filter_row(df: pd.DataFrame) -> html.Div:
     counts = P.count_states(df)
-    results = sorted({P.pretty_result(c) for c in df["pitch_call"].dropna().unique()})
+    results = sorted(P.result_labels(df).dropna().unique())
     ctl = {"minWidth": "180px"}
     return html.Div([
         dcc.Dropdown(id="lm-count", multi=True, placeholder="Count(s)",
