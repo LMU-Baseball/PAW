@@ -234,16 +234,23 @@ def player_profile(batter_id):
 
 
 @cached
-def lmu_hitters(season=None) -> pd.DataFrame:
+def lmu_hitters(season=None, start=None, end=None) -> pd.DataFrame:
     """One row per LMU hitter (name deduped; canonical id = most-tracked id),
     scoped to the given academic-year season (default = current_season()).
 
     Season date-bounds (not a numeric-GameID filter) do the scoping now, so
     legacy composite-GameID seasons are listable too. The COUNT(*) DESC dedup
     tiebreak is computed over the season's rows only.
+
+    When both `start` and `end` are given, they replace the season's date
+    bounds (the coach's date-range dropdown nests inside the season, so this
+    narrows the roster to hitters with data in that window -- e.g. the
+    Hitter dropdown refresh on `*-daterange` change).
     """
     from app.data import seasons
     s, e = seasons.season_bounds(season or seasons.current_season())
+    if start is not None and end is not None:
+        s, e = str(start), str(end)
     df = query_df(
         f"""
         SELECT Batter, BatterId FROM (

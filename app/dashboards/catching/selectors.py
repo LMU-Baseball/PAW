@@ -15,11 +15,17 @@ def resolve_catcher(requested_id, *, is_coach: bool, own_trackman_id):
     return int(requested_id) if requested_id not in (None, "") else None
 
 
-def catcher_options(*, is_coach: bool, own_trackman_id, season=None) -> list[dict]:
+def catcher_options(*, is_coach: bool, own_trackman_id, season=None,
+                     start=None, end=None) -> list[dict]:
     """Dropdown options for the catcher selector (value = CatcherId), scoped to
-    the given academic-year season (default = current_season())."""
+    the given academic-year season (default = current_season()) and, when both
+    `start` and `end` are given, further scoped to that date range (coach only
+    -- a player's own option is never filtered by date, so narrowing the range
+    can't hide a player from their own dashboard)."""
     if is_coach:
-        df = catching_caps.lmu_catchers(season)
+        df = (catching_caps.lmu_catchers(season, start=start, end=end)
+              if start is not None and end is not None
+              else catching_caps.lmu_catchers(season))
         return [{"label": str(r.Catcher), "value": int(r.CatcherId)}
                 for r in df.itertuples()]
     cid = resolve_catcher(None, is_coach=False, own_trackman_id=own_trackman_id)

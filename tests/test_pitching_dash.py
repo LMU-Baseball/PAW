@@ -55,6 +55,53 @@ def test_pitcher_options_coach_nonempty():
     assert opts and {"label", "value"} <= set(opts[0])
 
 
+def test_pitcher_options_coach_scoped_by_date_range():
+    from app.data import seasons
+    from app.dashboards.pitching import selectors
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    opts_all = selectors.pitcher_options(is_coach=True, own_trackman_id=None, season=season)
+    opts_1900 = selectors.pitcher_options(is_coach=True, own_trackman_id=None, season=season,
+                                          start="1900-01-01", end="1900-01-02")
+    assert opts_all and opts_1900 == []
+    opts_window = selectors.pitcher_options(is_coach=True, own_trackman_id=None, season=season,
+                                            start=str(s), end=str(e))
+    assert {o["value"] for o in opts_window} == {o["value"] for o in opts_all}
+
+
+def test_pitcher_options_player_ignores_date_range():
+    """Task 5: a player's own option must NEVER be filtered out by the date
+    range -- date-range filtering can't hide a player from their own
+    dashboard, even if their own outings fall outside the selected window."""
+    from app.dashboards.pitching import selectors
+    opts = selectors.pitcher_options(is_coach=False, own_trackman_id=555,
+                                     start="1900-01-01", end="1900-01-02")
+    assert len(opts) == 1 and opts[0]["value"] == 555
+
+
+def test_pitcher_dd_options_callback_registered(server):
+    """Task 5: date-range change must also refresh pitcher-dd.options (a
+    sibling callback to the outing-dd refresh), narrowing the Pitcher
+    dropdown to players with data in the selected range."""
+    from dash import Dash
+    from app.dashboards.pitching import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/ptest2/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    outs = {str(k) for k in app.callback_map}
+    assert any("pitcher-dd.options" in o for o in outs)
+
+
+def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
+    """The Task 5 first-paint pitcher options must be scoped to the season-
+    default range (start_d, end_d), not every pitcher in the season."""
+    import inspect
+    from app.dashboards.pitching import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "start=start_d, end=end_d" in src
+
+
 def _find_component(node, comp_id):
     """Depth-first search for a Dash component whose id == comp_id."""
     if getattr(node, "id", None) == comp_id:
@@ -81,7 +128,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda: ["2025/2026", "2024/2025", "2023/2024"])
     monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
     monkeypatch.setattr("app.data.pitching_caps.lmu_pitchers",
-                        lambda season=None: pd.DataFrame([{"Pitcher": "Doe, John", "PitcherId": 1}]))
+                        lambda season=None, start=None, end=None: pd.DataFrame(
+                            [{"Pitcher": "Doe, John", "PitcherId": 1}]))
     monkeypatch.setattr("app.data.pitching_caps.games_for_pitcher",
                         lambda p, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
     monkeypatch.setattr("app.data.pitching_caps.pitcher_profile",

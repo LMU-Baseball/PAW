@@ -87,6 +87,29 @@ def register_callbacks(dash_app) -> None:
         s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
+    # Date-range change -> refresh the pitcher dropdown to only those with data
+    # in range (coach-only; a player's own option is never filtered by date --
+    # pitcher_options's is_coach=False branch ignores start/end -- so date-range
+    # filtering can never hide a player from their own dashboard). Keep the
+    # current selection if it's still valid, else fall back to the first
+    # available pitcher.
+    @dash_app.callback(
+        Output("pitcher-dd", "options", allow_duplicate=True),
+        Output("pitcher-dd", "value", allow_duplicate=True),
+        Input("pit-daterange", "start_date"), Input("pit-daterange", "end_date"),
+        State("pit-season", "value"), State("pitcher-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_daterange_pitchers(start, end, season, current_pitcher_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        opts = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                         season=season, start=start, end=end)
+        values = {o["value"] for o in opts}
+        value = current_pitcher_id if current_pitcher_id in values else (
+            opts[0]["value"] if opts else None)
+        return opts, value
+
     # Pitcher or date-range change -> refresh the outing options for that pitcher
     # (pitcher-dd is an Input, not State, so switching pitchers re-lists their
     # outings rather than keeping the previous/default pitcher's).

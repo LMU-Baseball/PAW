@@ -101,6 +101,20 @@ def test_games_for_catcher_has_no_numeric_game_id_guard():
     assert "GameID REGEXP" not in src
 
 
+def test_lmu_catchers_scopes_by_date():
+    # Task 5: the Catcher dropdown on the game dashboards must narrow to
+    # players with data in the selected date range (nested inside the season).
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    full = set(catching_caps.lmu_catchers(season)["CatcherId"])
+    ranged = set(catching_caps.lmu_catchers(season, start=str(s), end=str(e))["CatcherId"])
+    assert ranged <= full
+    assert ranged == full          # start/end == the season's own bounds
+    empty = catching_caps.lmu_catchers(season, start="1900-01-01", end="1900-01-02")
+    assert empty.empty
+
+
 def test_lmu_catchers_has_no_numeric_game_id_guard_and_is_season_scoped():
     # lmu_catchers is now scoped by season date-bounds, not by the numeric-
     # GameID guard or the ~12-month recent window.

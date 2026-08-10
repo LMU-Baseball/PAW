@@ -117,7 +117,7 @@ def game_context(game_id) -> dict:
 # as-is, with no reformatting.
 
 @cached
-def lmu_catchers(season=None) -> pd.DataFrame:
+def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
     """One row per LMU catcher (name deduped; canonical id = most-tracked id),
     scoped to the given academic-year season (default = current_season()).
 
@@ -127,9 +127,15 @@ def lmu_catchers(season=None) -> pd.DataFrame:
     catchers, whose games are ALL composite-GameID and were previously hidden.
     The COUNT(*) DESC dedup tiebreak is computed over the season's rows only.
     Mirrors hitting_caps.lmu_hitters(season) exactly.
+
+    When both `start` and `end` are given, they replace the season's date
+    bounds (the coach's date-range dropdown nests inside the season, so this
+    narrows the roster to catchers with data in that window).
     """
     from app.data import seasons
     s, e = seasons.season_bounds(season or seasons.current_season())
+    if start is not None and end is not None:
+        s, e = str(start), str(end)
     df = query_df(
         f"""
         SELECT CatcherId, Catcher FROM (

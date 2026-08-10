@@ -73,10 +73,27 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     s_bound, e_bound = seasons.season_bounds(season)
-    pitchers = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    pitchers_all = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
     default_pitcher = selectors.resolve_pitcher(
-        pitchers[0]["value"] if pitchers else None,
+        pitchers_all[0]["value"] if pitchers_all else None,
         is_coach=is_coach, own_trackman_id=own)
+    # Season is the OUTER scope; the date range + calendar nest inside the
+    # selected academic year (Aug 1 -> Jul 31). Default range = the whole season.
+    min_bound, max_bound = s_bound, e_bound
+    start_d, end_d = s_bound, e_bound
+
+    # First-paint options scoped to that same season-default range (mirrors
+    # the _on_daterange_pitchers callback) -- not every pitcher in the season.
+    # Fallback mirrors _on_daterange_pitchers exactly: if the unscoped default
+    # isn't in the range-scoped options, fall back to the first available
+    # option's value (or None) -- NOT resolve_pitcher(), which would force a
+    # player-role user back to their own id even when it's not among `pitchers`.
+    pitchers = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                         season=season, start=start_d, end=end_d)
+    pitcher_values = {p["value"] for p in pitchers}
+    if default_pitcher not in pitcher_values:
+        default_pitcher = pitchers[0]["value"] if pitchers else None
+
     games_df = (pitching_caps.games_for_pitcher(default_pitcher, s_bound, e_bound)
                 if default_pitcher else None)
     if games_df is not None and not games_df.empty:
@@ -86,10 +103,6 @@ def serve_layout() -> html.Div:
     else:
         outings = []
         default_game = None
-    # Season is the OUTER scope; the date range + calendar nest inside the
-    # selected academic year (Aug 1 -> Jul 31). Default range = the whole season.
-    min_bound, max_bound = s_bound, e_bound
-    start_d, end_d = s_bound, e_bound
 
     selector_row = html.Div([
         html.Div([

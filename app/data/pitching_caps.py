@@ -302,7 +302,7 @@ def report_data_version(pitcher_id) -> str:
 # pitcher_name() here must split "Last, First" -> "First Last" to match.
 
 @cached
-def lmu_pitchers(season=None) -> pd.DataFrame:
+def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
     """One row per LMU pitcher (name deduped; canonical id = most-tracked id),
     scoped to the given academic-year season (default = current_season()).
 
@@ -311,8 +311,14 @@ def lmu_pitchers(season=None) -> pd.DataFrame:
     numeric-GameID filter) do the scoping now, so legacy composite-GameID
     seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed over
     the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
+
+    When both `start` and `end` are given, they replace the season's date
+    bounds (the coach's date-range dropdown nests inside the season, so this
+    narrows the roster to pitchers with data in that window).
     """
     s, e = seasons.season_bounds(season or seasons.current_season())
+    if start is not None and end is not None:
+        s, e = str(start), str(end)
     df = query_df(
         f"""
         SELECT PitcherId, Pitcher FROM (

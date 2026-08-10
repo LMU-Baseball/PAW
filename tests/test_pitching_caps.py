@@ -114,6 +114,20 @@ def test_games_for_pitcher_has_no_numeric_game_id_guard():
     assert "astype(int)" not in src
 
 
+def test_lmu_pitchers_scopes_by_date():
+    # Task 5: the Pitcher dropdown on the game dashboards must narrow to
+    # players with data in the selected date range (nested inside the season).
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    full = set(pitching_caps.lmu_pitchers(season)["PitcherId"])
+    ranged = set(pitching_caps.lmu_pitchers(season, start=str(s), end=str(e))["PitcherId"])
+    assert ranged <= full
+    assert ranged == full          # start/end == the season's own bounds
+    empty = pitching_caps.lmu_pitchers(season, start="1900-01-01", end="1900-01-02")
+    assert empty.empty
+
+
 def test_lmu_pitchers_season_scoped_and_past_seasons_surface():
     # The season-dropdown blocker: a PAST season's roster + outings used to be
     # invisible because the numeric-GameID guard hid legacy composite-GameID

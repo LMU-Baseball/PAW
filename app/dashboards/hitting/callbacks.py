@@ -129,6 +129,29 @@ def register_callbacks(dash_app) -> None:
         s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
+    # Date-range change -> refresh the hitter dropdown to only those with data
+    # in range (coach-only; a player's own option is never filtered by date --
+    # hitter_options's is_coach=False branch ignores start/end -- so date-range
+    # filtering can never hide a player from their own dashboard). Keep the
+    # current selection if it's still valid, else fall back to the first
+    # available hitter.
+    @dash_app.callback(
+        Output("hitter-dd", "options", allow_duplicate=True),
+        Output("hitter-dd", "value", allow_duplicate=True),
+        Input("hit-daterange", "start_date"), Input("hit-daterange", "end_date"),
+        State("hit-season", "value"), State("hitter-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_daterange_hitters(start, end, season, current_batter_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        opts = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own,
+                                        season=season, start=start, end=end)
+        values = {o["value"] for o in opts}
+        value = current_batter_id if current_batter_id in values else (
+            opts[0]["value"] if opts else None)
+        return opts, value
+
     # Hitter or date-range change -> refresh the game options for that hitter
     # within the range. (hitter-dd is an Input, not State, so switching hitters
     # re-lists that hitter's games -- otherwise the game dropdown stays stuck on

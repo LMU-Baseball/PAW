@@ -158,6 +158,20 @@ def test_lmu_hitters_shape_and_window():
     assert "Hackman, Owen" not in set(new["Batter"])
 
 
+def test_lmu_hitters_scopes_by_date():
+    # Task 5: the Hitter dropdown on the game dashboards must narrow to
+    # players with data in the selected date range (nested inside the season).
+    from app.data import seasons
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    full = set(hitting_caps.lmu_hitters(season)["BatterId"])
+    ranged = set(hitting_caps.lmu_hitters(season, start=str(s), end=str(e))["BatterId"])
+    assert ranged <= full
+    assert ranged == full          # start/end == the season's own bounds
+    empty = hitting_caps.lmu_hitters(season, start="1900-01-01", end="1900-01-02")
+    assert empty.empty
+
+
 def test_lmu_hitters_all_have_numeric_game_id_rows():
     # No-ghost property (mirrors catching_caps/pitching_caps's regression):
     # lmu_hitters used to scope purely by the date-only _RECENT_WINDOW_CLAUSE,

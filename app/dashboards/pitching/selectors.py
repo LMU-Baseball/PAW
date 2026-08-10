@@ -15,11 +15,17 @@ def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
     return int(requested_id) if requested_id not in (None, "") else None
 
 
-def pitcher_options(*, is_coach: bool, own_trackman_id, season=None) -> list[dict]:
+def pitcher_options(*, is_coach: bool, own_trackman_id, season=None,
+                     start=None, end=None) -> list[dict]:
     """Dropdown options for the pitcher selector (value = PitcherId), scoped to
-    the given academic-year season (default = current_season())."""
+    the given academic-year season (default = current_season()) and, when both
+    `start` and `end` are given, further scoped to that date range (coach only
+    -- a player's own option is never filtered by date, so narrowing the range
+    can't hide a player from their own dashboard)."""
     if is_coach:
-        df = pitching_caps.lmu_pitchers(season)
+        df = (pitching_caps.lmu_pitchers(season, start=start, end=end)
+              if start is not None and end is not None
+              else pitching_caps.lmu_pitchers(season))
         return [{"label": str(r.Pitcher), "value": int(r.PitcherId)}
                 for r in df.itertuples()]
     pid = resolve_pitcher(None, is_coach=False, own_trackman_id=own_trackman_id)

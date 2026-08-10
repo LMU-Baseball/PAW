@@ -76,10 +76,27 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     s_bound, e_bound = seasons.season_bounds(season)
-    hitters = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    hitters_all = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own, season=season)
     default_batter = selectors.resolve_batter(
-        hitters[0]["value"] if hitters else None,
+        hitters_all[0]["value"] if hitters_all else None,
         is_coach=is_coach, own_trackman_id=own)
+    # Season is the OUTER scope; the date range + calendar nest inside the
+    # selected academic year (Aug 1 -> Jul 31). Default range = the whole season.
+    min_bound, max_bound = s_bound, e_bound
+    start_d, end_d = s_bound, e_bound
+
+    # First-paint options scoped to that same season-default range (mirrors
+    # the _on_daterange_hitters callback) -- not every hitter in the season.
+    # Fallback mirrors _on_daterange_hitters exactly: if the unscoped default
+    # isn't in the range-scoped options, fall back to the first available
+    # option's value (or None) -- NOT resolve_batter(), which would force a
+    # player-role user back to their own id even when it's not among `hitters`.
+    hitters = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own,
+                                       season=season, start=start_d, end=end_d)
+    hitter_values = {h["value"] for h in hitters}
+    if default_batter not in hitter_values:
+        default_batter = hitters[0]["value"] if hitters else None
+
     games_df = (hitting_caps.games_for_batter(default_batter, s_bound, e_bound)
                 if default_batter else None)
     if games_df is not None and not games_df.empty:
@@ -89,10 +106,6 @@ def serve_layout() -> html.Div:
     else:
         games = []
         default_game = None
-    # Season is the OUTER scope; the date range + calendar nest inside the
-    # selected academic year (Aug 1 -> Jul 31). Default range = the whole season.
-    min_bound, max_bound = s_bound, e_bound
-    start_d, end_d = s_bound, e_bound
 
     selector_row = html.Div([
         html.Div([

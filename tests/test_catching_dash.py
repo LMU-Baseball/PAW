@@ -84,6 +84,54 @@ def test_catcher_options_coach(monkeypatch):
     assert {o["value"] for o in opts} == {1, 2}
 
 
+def test_catcher_options_coach_scoped_by_date_range():
+    from app.data import seasons
+    from app.dashboards.catching import selectors
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    opts_all = selectors.catcher_options(is_coach=True, own_trackman_id=None, season=season)
+    opts_1900 = selectors.catcher_options(is_coach=True, own_trackman_id=None, season=season,
+                                          start="1900-01-01", end="1900-01-02")
+    assert opts_all and opts_1900 == []
+    opts_window = selectors.catcher_options(is_coach=True, own_trackman_id=None, season=season,
+                                            start=str(s), end=str(e))
+    assert {o["value"] for o in opts_window} == {o["value"] for o in opts_all}
+
+
+def test_catcher_options_player_ignores_date_range():
+    """Task 5: a player's own option must NEVER be filtered out by the date
+    range -- date-range filtering can't hide a player from their own
+    dashboard, even if their own appearances fall outside the selected
+    window."""
+    from app.dashboards.catching import selectors
+    opts = selectors.catcher_options(is_coach=False, own_trackman_id=555,
+                                     start="1900-01-01", end="1900-01-02")
+    assert len(opts) == 1 and opts[0]["value"] == 555
+
+
+def test_catcher_dd_options_callback_registered(server):
+    """Task 5: date-range change must also refresh catcher-dd.options (a
+    sibling callback to the game-dd refresh), narrowing the Catcher dropdown
+    to players with data in the selected range."""
+    from dash import Dash
+    from app.dashboards.catching import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/cattest3/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    outs = {str(k) for k in app.callback_map}
+    assert any("catcher-dd.options" in o for o in outs)
+
+
+def test_layout_scopes_first_paint_catchers_to_season_default_range(server):
+    """The Task 5 first-paint catcher options must be scoped to the season-
+    default range (start_d, end_d), not every catcher in the season."""
+    import inspect
+    from app.dashboards.catching import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "start=start_d, end=end_d" in src
+
+
 def test_build_catching_dash_mounts(server):
     rules = {r.rule for r in server.url_map.iter_rules()}
     assert "/dash/catching/" in rules
@@ -483,7 +531,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda: ["2025/2026", "2024/2025", "2023/2024"])
     monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
     monkeypatch.setattr("app.data.catching_caps.lmu_catchers",
-                        lambda season=None: pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1}]))
+                        lambda season=None, start=None, end=None: pd.DataFrame(
+                            [{"Catcher": "Doe, John", "CatcherId": 1}]))
     monkeypatch.setattr("app.data.catching_caps.games_for_catcher",
                         lambda c, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
     monkeypatch.setattr("app.data.catching_caps.catcher_profile",

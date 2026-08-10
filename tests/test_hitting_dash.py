@@ -90,6 +90,34 @@ def test_hitter_options_player_is_single_self(monkeypatch):
     assert opts[0]["label"] == "Wadas, Zach"
 
 
+def test_hitter_options_player_ignores_date_range(monkeypatch):
+    """Task 5: a player's own option must NEVER be filtered out by the date
+    range -- date-range filtering can't hide a player from their own
+    dashboard, even if their own at-bats fall outside the selected window."""
+    from app.dashboards.hitting import selectors
+    monkeypatch.setattr("app.data.hitting_caps.player_profile",
+                        lambda b: {"name": "Wadas, Zach", "bats": "Right",
+                                   "class_year": "", "position": "", "photo": "",
+                                   "jersey": ""})
+    opts = selectors.hitter_options(is_coach=False, own_trackman_id=806253,
+                                    start="1900-01-01", end="1900-01-02")
+    assert len(opts) == 1 and opts[0]["value"] == 806253
+
+
+def test_hitter_options_coach_scoped_by_date_range():
+    from app.data import seasons
+    from app.dashboards.hitting import selectors
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    opts_all = selectors.hitter_options(is_coach=True, own_trackman_id=None, season=season)
+    opts_1900 = selectors.hitter_options(is_coach=True, own_trackman_id=None, season=season,
+                                         start="1900-01-01", end="1900-01-02")
+    assert opts_all and opts_1900 == []
+    opts_window = selectors.hitter_options(is_coach=True, own_trackman_id=None, season=season,
+                                           start=str(s), end=str(e))
+    assert {o["value"] for o in opts_window} == {o["value"] for o in opts_all}
+
+
 def _fake_pitches():
     return pd.DataFrame([
         {"PlateLocSide": 0.2, "PlateLocHeight": 2.5, "TaggedPitchType": "Fastball",
@@ -348,7 +376,8 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     from app.auth.models import User
     from flask_login import login_user
     monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
-                        lambda season=None: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
+                        lambda season=None, start=None, end=None: pd.DataFrame(
+                            [{"Batter": "Doe, John", "BatterId": 1}]))
     monkeypatch.setattr("app.data.hitting_caps.games_for_batter",
                         lambda b, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
     monkeypatch.setattr("app.data.hitting_caps.player_profile",
@@ -403,7 +432,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda: ["2025/2026", "2024/2025", "2023/2024"])
     monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
     monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
-                        lambda season=None: pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}]))
+                        lambda season=None, start=None, end=None: pd.DataFrame(
+                            [{"Batter": "Doe, John", "BatterId": 1}]))
     monkeypatch.setattr("app.data.hitting_caps.games_for_batter",
                         lambda b, *a, **k: pd.DataFrame(columns=["game_id", "game_date", "GameLabel"]))
     monkeypatch.setattr("app.data.hitting_caps.player_profile",
@@ -456,6 +486,30 @@ def test_game_options_refresh_on_hitter_change(server):
     key = next(k for k in app.callback_map if "game-dd.options" in k)
     inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
     assert "hitter-dd.value" in inputs
+
+
+def test_hitter_dd_options_callback_registered(server):
+    """Task 5: the date-range change must also refresh hitter-dd.options (a
+    sibling callback to the game-dd refresh above), so the Hitter dropdown
+    narrows to players with data in the selected range."""
+    from dash import Dash
+    from app.dashboards.hitting import layout, callbacks, index
+    app = Dash(__name__, server=server, url_base_pathname="/dash/htest4/",
+               suppress_callback_exceptions=True)
+    app.index_string = index.INDEX_STRING
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    outs = {str(k) for k in app.callback_map}
+    assert any("hitter-dd.options" in o for o in outs)
+
+
+def test_layout_scopes_first_paint_hitters_to_season_default_range(server):
+    """The Task 5 first-paint hitter options must be scoped to the season-
+    default range (start_d, end_d), not every hitter in the season."""
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "start=start_d, end=end_d" in src
 
 
 def test_hitting_sidebar_callback_lists_daterange_inputs(server):
