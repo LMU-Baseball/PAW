@@ -46,18 +46,18 @@ def ev_body(df: pd.DataFrame, active_zones) -> html.Div:
 
 def sds_zone_chip_row(df: pd.DataFrame) -> html.Div:
     """Zone chips that define the in-zone set for the Swing Decision Score.
-    Defaults to zones 1-9 selected; deselected zones count as chases. Absent
-    zones are greyed/disabled. Separate from the sfz EV/distance chips above."""
-    present = {int(z) for z in df["zone_section"].dropna().unique()} \
-        if not df.empty and "zone_section" in df.columns else set(_ZONES)
+    Defaults to zones 1-9 selected; deselected zones count as chases. All 13
+    zones are selectable regardless of whether pitches exist there -- an
+    empty selected zone simply contributes nothing to the score. Separate
+    from the sfz EV/distance chips above."""
     default_active = list(range(1, 10))
     chips = [html.Button(
         f"Zone {z}", id={"type": "sds-chip", "index": z}, n_clicks=0,
-        disabled=z not in present,
-        style=chip_style(active=z in default_active, present=z in present))
+        disabled=False,
+        style=chip_style(active=z in default_active, present=True))
         for z in _ZONES]
     return html.Div([dcc.Store(id="sds-active", data=default_active),
-                     dcc.Store(id="sds-present", data=sorted(present)),
+                     dcc.Store(id="sds-present", data=list(_ZONES)),
                      html.Div(chips)], style={"margin": "6px 0"})
 
 

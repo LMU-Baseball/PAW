@@ -288,6 +288,29 @@ def test_sds_chip_row_defaults_to_zones_1_through_9():
     assert list(active.data) == list(range(1, 10))
 
 
+def _collect_buttons(node):
+    """Return every html.Button anywhere in the tree."""
+    from dash import html
+    found = [node] if isinstance(node, html.Button) else []
+    ch = getattr(node, "children", None)
+    kids = ch if isinstance(ch, (list, tuple)) else ([ch] if ch is not None else [])
+    for k in kids:
+        found.extend(_collect_buttons(k))
+    return found
+
+
+def test_sds_chips_all_enabled_even_when_zone_empty():
+    """Item 6: every sds-* zone chip stays enabled/selectable, even for zones
+    with no pitches -- an empty selected zone just contributes nothing."""
+    import pandas as pd
+    from app.dashboards.hitting_practice.tabs import swing_frequency as sf
+    df = pd.DataFrame({"zone_section": [1, 2, 3]})   # zones 4-13 absent
+    row = sf.sds_zone_chip_row(df)
+    buttons = _collect_buttons(row)
+    assert len(buttons) == 13
+    assert all(getattr(b, "disabled", False) is False for b in buttons)
+
+
 def test_sds_trend_body_recomputes_with_in_zones():
     import pandas as pd
     from app.dashboards.hitting_practice.tabs import swing_frequency as sf

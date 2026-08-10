@@ -182,9 +182,6 @@ def register_callbacks(dash_app) -> None:
         if not tid:
             return active
         z = tid["index"]
-        present = set(present or [])
-        if z not in present:                  # disabled/empty zone -> ignore
-            return active
         active = list(active or [])
         return [x for x in active if x != z] if z in active else active + [z]
 
