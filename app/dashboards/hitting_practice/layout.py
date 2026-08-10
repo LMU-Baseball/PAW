@@ -89,10 +89,15 @@ def serve_layout() -> html.Div:
     default_player = selectors.resolve_player(
         None, is_coach=is_coach, own_name=own_name, available=names,
         default=(on_latest[0] if on_latest else None))
-    start_d = end_d = str(latest)
+    # Default the date filter to "This Season" (same preset behavior as the game
+    # dashboards) instead of a single day, clamped to the data's own bounds.
+    s0, e0 = dr.preset_range("season", str(max_d))
+    start_d, end_d = max(str(s0), str(min_d)), str(e0)
 
     try:
-        pitch0 = P.load_pitch_coords(player=default_player, start=latest, end=latest) \
+        pitch0 = P.load_pitch_coords(player=default_player,
+                                     start=_date.fromisoformat(start_d),
+                                     end=_date.fromisoformat(end_d)) \
             if default_player else pd.DataFrame()
     except Exception:
         pitch0 = pd.DataFrame()
@@ -101,7 +106,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
             dr.date_control("prac", str(max_d), min_date=str(min_d), max_date=str(max_d),
-                            preset="custom", start=start_d, end=end_d),
+                            preset="season", start=start_d, end=end_d),
         ]),
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),
