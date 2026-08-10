@@ -25,39 +25,50 @@ def _safe(fn):
 
 def warm_caches() -> None:
     """Populate the @cached roster/games/video/sidebar reads for each dashboard's
-    default view. Mirrors what serve_layout queries for the default player."""
+    default view. Mirrors what serve_layout queries for the default player IN THE
+    CURRENT SEASON (the dropdown's default), so the warmed cache keys match the
+    scoped reads serve_layout actually makes. Also warms the Season dropdown's
+    own queries (available_seasons/current_season)."""
     from app.data import hitting_caps as H, pitching_caps as P
-    from app.data import catching_caps as C, video
+    from app.data import catching_caps as C, video, seasons
 
-    hitters = _safe(H.lmu_hitters)
+    _safe(seasons.available_seasons)          # Season dropdown options
+    season = _safe(seasons.current_season)    # dropdown default
+    if not season:
+        return
+    s_b, e_b = seasons.season_bounds(season)
+
+    hitters = _safe(lambda: H.lmu_hitters(season))
     if hitters is not None and not hitters.empty:
         bid = int(hitters.iloc[0]["BatterId"])
-        g = _safe(lambda: H.games_for_batter(bid))
-        _safe(lambda: H.sidebar_stats(bid))
+        g = _safe(lambda: H.games_for_batter(bid, s_b, e_b))
+        _safe(lambda: H.sidebar_stats(bid, season))
         _safe(lambda: H.player_profile(bid))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, batter_id=bid))
-            gid = int(g.iloc[0]["game_id"])  # default (most-recent) game
+            gid = str(g.iloc[0]["game_id"])  # default (most-recent) game; opaque id
             _safe(lambda: H.game_pitches(gid, bid))  # default tab's game-data
 
-    pitchers = _safe(P.lmu_pitchers)
+    pitchers = _safe(lambda: P.lmu_pitchers(season))
     if pitchers is not None and not pitchers.empty:
         pid = int(pitchers.iloc[0]["PitcherId"])
-        g = _safe(lambda: P.games_for_pitcher(pid))
+        g = _safe(lambda: P.games_for_pitcher(pid, s_b, e_b))
         _safe(lambda: P.pitcher_profile(pid))
+        _safe(lambda: P.range_summary(pid, s_b, e_b))  # season-bounds sidebar read
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, pitcher_id=pid))
-            gid = int(g.iloc[0]["game_id"])
+            gid = str(g.iloc[0]["game_id"])
             _safe(lambda: P.game_pitches_for(gid, pid))
 
-    catchers = _safe(C.lmu_catchers)
+    catchers = _safe(lambda: C.lmu_catchers(season))
     if catchers is not None and not catchers.empty:
         cid = int(catchers.iloc[0]["CatcherId"])
-        g = _safe(lambda: C.games_for_catcher(cid))
+        g = _safe(lambda: C.games_for_catcher(cid, s_b, e_b))
         _safe(lambda: C.catcher_profile(cid))
+        _safe(lambda: C.framing_season_tiles(cid, season))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
-            gid = int(g.iloc[0]["game_id"])
+            gid = str(g.iloc[0]["game_id"])
             _safe(lambda: C.game_pitches_for(gid, cid))
 
 
