@@ -512,13 +512,13 @@ def _summary_tiles(df) -> dict:
     }
 
 
-def _season_pitch_df(pitcher_id):
-    """Current-season pitch df for a pitcher (sibling union).
+def _season_pitch_df(pitcher_id, season=None):
+    """Pitch df for a pitcher within an academic-year season (sibling union;
+    default = current_season()).
 
-    Scoped by the current season's Date bounds (GameID is opaque now), which
-    replaces the old numeric-GameID filter as the season boundary.
-    """
-    s, e = seasons.season_bounds(seasons.current_season())
+    Scoped by the season's Date bounds (GameID is opaque now), which replaces
+    the old numeric-GameID filter as the season boundary."""
+    s, e = seasons.season_bounds(season or seasons.current_season())
     ph, idp = _in_clause(_sibling_pitcher_ids(int(pitcher_id)))
     idp["s"] = s
     idp["e"] = e
@@ -527,15 +527,19 @@ def _season_pitch_df(pitcher_id):
         f"WHERE PitcherId IN ({ph}) AND Date BETWEEN :s AND :e", idp)
 
 
-def _compute_season_rollup(pitcher_id) -> dict:
-    """Phase 4 pitching season rollup: the current-season sidebar tiles plus
-    the season's date span, computed from raw CAPS. This is exactly what
-    range_summary returns for a range that covers the pitcher's whole span (the
-    default 'season' sidebar view); precalc.rebuild_pitching stores it and
-    range_summary reads it back (this function is the compute fallback)."""
+def _compute_season_rollup(pitcher_id, season=None) -> dict:
+    """Pitching season rollup: the season's sidebar tiles plus its date span,
+    computed from raw CAPS. This is exactly what range_summary returns for a
+    range that covers a season's whole span (the default 'season' sidebar view);
+    precalc.rebuild_pitching stores one row per (pitcher, season) and
+    range_summary reads it back (this function is the compute fallback).
+
+    Scoped to the academic-year `season` (default current_season()); the stored
+    `season_label` is that season."""
     pid = int(pitcher_id)
-    df = _season_pitch_df(pid)
-    s, e = seasons.season_bounds(seasons.current_season())
+    season = season or seasons.current_season()
+    df = _season_pitch_df(pid, season)
+    s, e = seasons.season_bounds(season)
     ph, idp = _in_clause(_sibling_pitcher_ids(pid))
     idp["s"] = s
     idp["e"] = e
@@ -545,26 +549,32 @@ def _compute_season_rollup(pitcher_id) -> dict:
     mn = None if span.empty or pd.isna(span.iloc[0]["mn"]) else str(span.iloc[0]["mn"])
     mx = None if span.empty or pd.isna(span.iloc[0]["mx"]) else str(span.iloc[0]["mx"])
     return {"pitcher_id": pid, "pitcher_name": pitcher_name(pid),
+            "season_label": season,
             "min_date": mn, "max_date": mx, **_summary_tiles(df)}
 
 
 def range_summary(pitcher_id, start=None, end=None) -> dict:
     """Date-range-scoped sidebar tiles: Appearances / IP / K% / Walk% / Barrel%.
 
-    Phase 4: when the request covers the pitcher's whole numeric span (the
-    default 'season' view passes start<=min & end>=max) or omits dates entirely,
-    read the 1-row precalc rollup instead of loading the full season; a genuine
-    sub-range still computes on the fly. Compute fallback when no rollup row."""
-    from app.data import precalc  # lazy: precalc imports pitching_caps for rebuild
+    When the request omits dates, read the current season's 1-row rollup. When
+    the range exactly matches an academic season's bounds -- which is what the
+    Season dropdown's default range is -- read THAT (pitcher, season) rollup
+    instead of loading the full season. A genuine sub-range (coach narrowed via
+    a preset / custom range) still computes on the fly. Compute fallback when no
+    rollup row (pre-rebuild / unbuilt)."""
+    from app.data import precalc, seasons  # lazy: precalc imports pitching_caps
     pid = int(pitcher_id)
-    row = precalc.read_pitching_season(pid)
 
     def _tiles_from(r):
         return {k: r[k] for k in ("appearances", "ip", "k_pct", "bb_pct", "barrel_pct")}
 
     if not (start and end):
+        row = precalc.read_pitching_season(pid)  # current season
         return _tiles_from(row) if row else _tiles_from(_compute_season_rollup(pid))
-    if row and row.get("min_date") and str(start) <= row["min_date"] and str(end) >= row["max_date"]:
-        return _tiles_from(row)  # range covers the whole numeric span -> rollup
+    for lbl in seasons.available_seasons():
+        sb, eb = seasons.season_bounds(lbl)
+        if str(start) == sb and str(end) == eb:  # full-season range -> that season's rollup
+            row = precalc.read_pitching_season(pid, lbl)
+            return _tiles_from(row) if row else _tiles_from(_compute_season_rollup(pid, lbl))
     df = range_pitches_for(pid, start, end)  # genuine sub-range: compute
     return _summary_tiles(df)

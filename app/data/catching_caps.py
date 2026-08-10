@@ -235,7 +235,8 @@ def _compute_season_rollup(catcher_id, season=None) -> dict:
     it."""
     from app.data.catching import _pct
     from app.data import seasons
-    s, e = seasons.season_bounds(season or seasons.current_season())
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
     cid = int(catcher_id)
     ph, idp = _in_clause(_sibling_catcher_ids(cid))
     idp["s"] = s; idp["e"] = e
@@ -269,20 +270,18 @@ def _compute_season_rollup(catcher_id, season=None) -> dict:
             "net_strikes": str(stolen - lost),
             "steal_pct": "—" if steal is None else f"{steal}%",
         }
-    return {"catcher_id": cid, "catcher_name": catcher_name(cid), **tiles}
+    return {"catcher_id": cid, "catcher_name": catcher_name(cid),
+            "season_label": season, **tiles}
 
 
 def framing_season_tiles(catcher_id, season=None) -> dict:
     """Season sidebar tiles, read from the 1-row precalc catching rollup with a
     compute fallback. Return shape unchanged. `season` (default current_season())
-    rescopes to that academic year; the precalc row covers the current season
-    only, so a non-current season computes on the fly (mirrors
-    hitting_caps._season_rollup)."""
+    rescopes to that academic year. The precalc table holds one row per
+    (catcher, season), so ANY season is a ~0.2s single-row read; the compute
+    fallback covers a pre-rebuild / unbuilt (catcher, season)."""
     from app.data import seasons, precalc  # lazy: precalc imports catching_caps
     season = season or seasons.current_season()
-    if season == seasons.current_season():
-        row = precalc.read_catching_season(int(catcher_id))
-        if row is not None:
-            return {k: row[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
-    r = _compute_season_rollup(catcher_id, season)
+    row = precalc.read_catching_season(int(catcher_id), season)
+    r = row if row is not None else _compute_season_rollup(catcher_id, season)
     return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}

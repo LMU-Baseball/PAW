@@ -132,13 +132,13 @@ def test_framing_season_tiles_uses_precalc_when_present(monkeypatch):
     sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
                 "games": "12", "pitches": "800", "net_strikes": "15",
                 "steal_pct": "4.2%"}
-    monkeypatch.setattr(precalc, "read_catching_season", lambda c: sentinel)
+    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: sentinel)
     assert catching_caps.framing_season_tiles(RAW_CID) == {
         "games": "12", "pitches": "800", "net_strikes": "15", "steal_pct": "4.2%"}
 
 
 def test_framing_season_tiles_falls_back_to_compute_when_missing(monkeypatch):
     from app.data import precalc
-    monkeypatch.setattr(precalc, "read_catching_season", lambda c: None)
+    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: None)
     out = catching_caps.framing_season_tiles(RAW_CID)
     assert set(out) == {"games", "pitches", "net_strikes", "steal_pct"}

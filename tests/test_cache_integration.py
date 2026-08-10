@@ -69,7 +69,7 @@ def test_rebuild_clears_read_cache(monkeypatch):
     cleared = []
     monkeypatch.setattr(cache, "clear_all", lambda: cleared.append(1))
     monkeypatch.setattr(hitting_caps, "lmu_hitters",
-                        lambda: pd.DataFrame({"BatterId": []}))
+                        lambda season=None: pd.DataFrame({"BatterId": []}))
     monkeypatch.setattr(precalc, "ensure_tables", lambda engine=None: None)
     monkeypatch.setattr(precalc, "_replace_rows", lambda e, t, r: len(r))
     precalc.rebuild_hitting(engine=object())

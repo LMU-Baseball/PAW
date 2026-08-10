@@ -303,7 +303,7 @@ def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
                 "qab_pct": 0.512, "ba": ".321", "obp": ".401", "slg": ".540",
                 "pa": 10, "ab": 9, "h": 3, "doubles": 1, "triples": 0,
                 "hr": 1, "bb": 1, "so": 2}
-    monkeypatch.setattr(precalc, "read_hitting_season", lambda b: sentinel)
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: sentinel)
     assert hitting_caps.sidebar_stats(WADAS) == {
         "qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401"}
     assert hitting_caps.season_qab_rate(WADAS) == 0.512
@@ -314,7 +314,7 @@ def test_sidebar_stats_falls_back_to_compute_when_missing(monkeypatch):
     """With no rollup row, the reads fall back to on-the-fly compute (correct,
     just slower) so correctness never depends on a rebuild having run."""
     from app.data import precalc
-    monkeypatch.setattr(precalc, "read_hitting_season", lambda b: None)
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: None)
     out = hitting_caps.sidebar_stats(WADAS)
     assert set(out) == {"qab", "BA", "SLG", "OBP"}
     assert out["BA"] != "" and out["OBP"] != ""

@@ -132,17 +132,13 @@ def _season_rollup(batter_id, season=None) -> dict:
     when the row is absent (pre-rebuild, unbuilt player, or table not yet
     created) so correctness never depends on a rebuild having run.
 
-    The precalc table currently holds the CURRENT season only (per-season
-    precalc is a later increment), so a non-current `season` always computes on
-    the fly -- correct, just not the ~0.2s single-row read the current season
-    gets."""
+    The precalc table holds one row per (batter, season), so ANY season is a
+    ~0.2s single-row read; the compute fallback covers a pre-rebuild / unbuilt
+    (batter, season)."""
     from app.data import seasons, precalc  # lazy: precalc imports hitting_caps
     season = season or seasons.current_season()
-    if season == seasons.current_season():
-        row = precalc.read_hitting_season(int(batter_id))
-        if row is not None:
-            return row
-    return _compute_season_rollup(batter_id, season)
+    row = precalc.read_hitting_season(int(batter_id), season)
+    return row if row is not None else _compute_season_rollup(batter_id, season)
 
 
 def season_qab_rate(batter_id, season=None) -> float | None:

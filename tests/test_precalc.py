@@ -18,10 +18,29 @@ def rebuilt():
 
 
 def test_rebuild_populates_every_lmu_hitter(rebuilt):
-    hitters = hitting_caps.lmu_hitters()
-    assert rebuilt == len(hitters)
-    for bid in hitters["BatterId"]:
+    from app.data import seasons
+    # per-season precalc: one row per DISTINCT (batter, season) across every season.
+    expected = sum(hitting_caps.lmu_hitters(s)["BatterId"].nunique()
+                   for s in seasons.available_seasons())
+    assert rebuilt == expected
+    for bid in hitting_caps.lmu_hitters()["BatterId"]:  # current-season rows present
         assert precalc.read_hitting_season(int(bid)) is not None
+
+
+def test_rebuild_covers_past_seasons(rebuilt):
+    from app.data import seasons
+    past = [s for s in seasons.available_seasons() if s != seasons.current_season()]
+    assert past, "expected more than one season of data"
+    lbl = past[0]
+    roster = hitting_caps.lmu_hitters(lbl)
+    assert not roster.empty
+    bid = int(roster.iloc[0]["BatterId"])
+    row = precalc.read_hitting_season(bid, lbl)
+    assert row is not None and row["season_label"] == lbl
+    comp = hitting_caps._compute_season_rollup(bid, lbl)  # matches a past-season compute
+    for k in ("qab_pct", "ba", "obp", "slg", "pa", "ab", "h",
+              "doubles", "triples", "hr", "bb", "so"):
+        assert row[k] == comp[k], k
 
 
 def test_rebuild_is_idempotent(rebuilt):
@@ -48,9 +67,11 @@ def rebuilt_pitching():
 
 
 def test_pitching_rebuild_populates_every_lmu_pitcher(rebuilt_pitching):
-    pit = pitching_caps.lmu_pitchers()
-    assert rebuilt_pitching == len(pit)
-    for pid in pit["PitcherId"]:
+    from app.data import seasons
+    expected = sum(pitching_caps.lmu_pitchers(s)["PitcherId"].nunique()
+                   for s in seasons.available_seasons())
+    assert rebuilt_pitching == expected
+    for pid in pitching_caps.lmu_pitchers()["PitcherId"]:
         assert precalc.read_pitching_season(int(pid)) is not None
 
 
@@ -80,9 +101,11 @@ def rebuilt_catching():
 
 
 def test_catching_rebuild_populates_every_lmu_catcher(rebuilt_catching):
-    cat = catching_caps.lmu_catchers()
-    assert rebuilt_catching == len(cat)
-    for cid in cat["CatcherId"]:
+    from app.data import seasons
+    expected = sum(catching_caps.lmu_catchers(s)["CatcherId"].nunique()
+                   for s in seasons.available_seasons())
+    assert rebuilt_catching == expected
+    for cid in catching_caps.lmu_catchers()["CatcherId"]:
         assert precalc.read_catching_season(int(cid)) is not None
 
 

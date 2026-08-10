@@ -142,15 +142,17 @@ def test_report_data_version_present():
     assert pitching_caps.report_data_version(RAW_PID) != "none"
 
 
-def test_range_summary_uses_precalc_when_range_covers_span(monkeypatch):
-    """A range covering the pitcher's whole numeric span (the default season
-    view) reads the 1-row rollup instead of loading the season."""
-    from app.data import precalc
+def test_range_summary_uses_precalc_when_range_matches_season_bounds(monkeypatch):
+    """A range that exactly matches an academic season's bounds (the Season
+    dropdown's default range) reads that (pitcher, season) rollup instead of
+    loading the season."""
+    from app.data import precalc, seasons
+    s_b, e_b = seasons.season_bounds(seasons.current_season())
     sentinel = {"min_date": "2025-11-01", "max_date": "2026-05-16",
                 "appearances": "7", "ip": "12.1", "k_pct": "30.0%",
                 "bb_pct": "6.0%", "barrel_pct": "5.0%"}
-    monkeypatch.setattr(precalc, "read_pitching_season", lambda p: sentinel)
-    out = pitching_caps.range_summary(RAW_PID, "2025-11-01", "2026-05-16")
+    monkeypatch.setattr(precalc, "read_pitching_season", lambda p, season=None: sentinel)
+    out = pitching_caps.range_summary(RAW_PID, s_b, e_b)
     assert out == {"appearances": "7", "ip": "12.1", "k_pct": "30.0%",
                    "bb_pct": "6.0%", "barrel_pct": "5.0%"}
 
