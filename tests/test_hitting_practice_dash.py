@@ -398,12 +398,21 @@ def test_swing_decision_trend_hover_and_no_stray_trace():
     tdf = pd.DataFrame({"play_date": pd.to_datetime(["2026-05-10"]),
                         "in_zone_pct": [40.0], "chase_pct": [60.0], "score": [-20.9]})
     fig = charts.swing_decision_trend_fig(tdf)
-    main = [t for t in fig.data if getattr(t, "mode", "") and "markers" in t.mode][0]
-    assert "Swing Decision" in main.hovertemplate
-    # zero-line must not surface as a hover trace ("trace 5")
-    assert all(getattr(t, "hoverinfo", None) == "skip"
-               for t in fig.data if t is not main and getattr(t, "mode", None) == "lines"
-               and t.name in (None, ""))
+    # Only the main markers trace should be a data trace at all -- the zero
+    # line must not leak into fig.data as a second (unnamed) hoverable trace.
+    assert len(fig.data) == 1
+    main = fig.data[0]
+    assert "markers" in main.mode
+    tmpl = main.hovertemplate
+    assert "%{x}" in tmpl
+    assert "Swing Decision:" in tmpl
+    assert "%{customdata:.1f}" in tmpl or "%{y:.1f}" in tmpl
+    assert "%<extra></extra>" in tmpl
+    # The zero reference line is drawn as a layout shape (from add_hline),
+    # never as a trace -- so it can't surface as "trace N" on hover.
+    zero_lines = [s for s in fig.layout.shapes
+                  if s.type == "line" and s.y0 == 0 and s.y1 == 0]
+    assert len(zero_lines) == 1
 
 
 def test_practice_layout_drops_session_and_exclude_controls():
