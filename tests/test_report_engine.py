@@ -23,6 +23,34 @@ def test_html_to_pdf_returns_pdf_bytes():
     assert len(out) > 1000
 
 
+def test_html_to_pdf_works_across_threads():
+    """Regression: the sync Playwright driver is greenlet-pinned to its creating
+    thread, so the shared browser MUST live on a dedicated render thread. Render
+    once (warming the singleton), then render again from a SECOND thread; a
+    thread-affinity bug would raise `greenlet.error: cannot switch to a different
+    thread` on the second call. Both must return valid %PDF- bytes.
+    """
+    import threading
+    from app.reports.pdf import html_to_pdf
+
+    first = html_to_pdf("<html><body><h1>T1</h1></body></html>")
+    assert first[:5] == b"%PDF-"
+
+    results: dict = {}
+
+    def _render():
+        try:
+            results["pdf"] = html_to_pdf("<html><body><h1>T2</h1></body></html>")
+        except Exception as exc:  # capture greenlet.error et al. for the assert
+            results["err"] = exc
+
+    t = threading.Thread(target=_render)
+    t.start()
+    t.join(timeout=90)
+    assert "err" not in results, f"cross-thread render raised: {results.get('err')!r}"
+    assert results.get("pdf", b"")[:5] == b"%PDF-"
+
+
 def test_with_base_injects_into_existing_head():
     from app.reports.pdf import _with_base
     out = _with_base(

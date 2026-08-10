@@ -1,60 +1,122 @@
-"""Render HTML to PDF bytes using headless Chromium (Playwright)."""
+"""Render HTML to PDF bytes using headless Chromium (Playwright).
+
+A single headless Chromium is launched once and reused across calls: launching a
+fresh browser per render cost ~1.5-2s each (the dominant miss-path cost).
+
+Concurrency is the tricky part. The sync Playwright API is not merely
+non-thread-safe -- it is pinned (via greenlet) to the exact OS thread that
+created it: touching any Playwright object (even `browser.is_connected()`) from a
+different thread raises `greenlet.error: cannot switch to a different thread`. A
+mere `threading.Lock` does NOT help, because Werkzeug/Flask serve each request on
+a fresh, unpooled thread that then dies -- so the thread that built the singleton
+is gone by the next request, and every later report would 500.
+
+The fix: ONE long-lived daemon "render thread" owns Playwright + Chromium, and
+ALL Playwright calls execute on it. Callers submit the html to a queue and block
+on a Future; the render thread does the actual rendering and hands bytes (or the
+exception) back. Callers never touch a Playwright object, so it doesn't matter
+which thread they run on.
+"""
 from __future__ import annotations
 
 import atexit
+import queue
 import re
 import threading
+from concurrent.futures import Future
 from html import escape
 
 from playwright.sync_api import sync_playwright
 
 _MARGIN = {"top": "0.5in", "bottom": "0.5in", "left": "0.5in", "right": "0.5in"}
 
-# A single headless Chromium is launched once and reused across calls: launching
-# a fresh browser per render cost ~1.5-2s each (the dominant miss-path cost). The
-# sync Playwright API is NOT thread-safe, so every Playwright call (browser
-# launch, page create/render, shutdown) is serialized under _LOCK -- Flask serves
-# on multiple threads, and the report ZIP route renders pitchers back-to-back.
-# Serializing renders is fine: it still beats relaunching Chromium every time.
-_LOCK = threading.Lock()
-_playwright = None  # the started sync_playwright() driver
-_browser = None     # the shared Chromium instance
+# How long a caller waits for its PDF before giving up (a stuck Chromium must not
+# hang the request thread forever). Generous: cold launch + render is a few sec.
+_RENDER_TIMEOUT = 60.0
+
+_JOBS: "queue.Queue[tuple[str, Future] | None]" = queue.Queue()
+_START_LOCK = threading.Lock()
+_render_thread: threading.Thread | None = None
+_SHUTDOWN = object()  # sentinel job: close browser + stop playwright, then exit
 
 
-def _ensure_browser():
-    """Return the shared Chromium, launching (or relaunching) it if needed.
+def _render_loop() -> None:
+    """The render thread's body: own Playwright/Chromium; serve jobs one at a time.
 
-    Must be called with _LOCK held. Relaunches when the browser was never
-    started or has since crashed/disconnected.
+    Everything Playwright here -- start, launch, new_page, set_content, pdf,
+    page.close, and the final close/stop -- runs on THIS thread only.
     """
-    global _playwright, _browser
-    if _playwright is None:
-        _playwright = sync_playwright().start()
-    if _browser is None or not _browser.is_connected():
-        _browser = _playwright.chromium.launch()
-    return _browser
+    playwright = None
+    browser = None
+    try:
+        while True:
+            job = _JOBS.get()
+            if job is None or job[0] is _SHUTDOWN:
+                break
+            html, fut = job
+            if not fut.set_running_or_notify_cancel():
+                continue
+            try:
+                if playwright is None:
+                    playwright = sync_playwright().start()
+                # Relaunch a browser that was never started or has since crashed.
+                if browser is None or not browser.is_connected():
+                    browser = playwright.chromium.launch()
+                page = browser.new_page()
+                try:
+                    page.set_content(html, wait_until="load")
+                    pdf = page.pdf(format="Letter", print_background=True,
+                                   margin=_MARGIN)
+                finally:
+                    page.close()
+                fut.set_result(pdf)
+            except Exception as exc:  # surface real render failures to the caller
+                # Drop a possibly-wedged browser so the next job relaunches clean.
+                try:
+                    if browser is not None and not browser.is_connected():
+                        browser = None
+                except Exception:
+                    browser = None
+                fut.set_exception(exc)
+    finally:
+        try:
+            if browser is not None and browser.is_connected():
+                browser.close()
+        except Exception:
+            pass
+        try:
+            if playwright is not None:
+                playwright.stop()
+        except Exception:
+            pass
+
+
+def _ensure_render_thread() -> None:
+    """Start the daemon render thread once (thread-safe lazy init)."""
+    global _render_thread
+    if _render_thread is not None and _render_thread.is_alive():
+        return
+    with _START_LOCK:
+        if _render_thread is None or not _render_thread.is_alive():
+            _render_thread = threading.Thread(
+                target=_render_loop, name="pdf-render", daemon=True)
+            _render_thread.start()
 
 
 @atexit.register
 def _shutdown() -> None:
-    """Close the browser and stop Playwright at interpreter exit.
+    """Signal the render thread to tear down Chromium on its own thread, join.
 
-    Guarded so it never raises during shutdown (the driver may already be gone).
+    Fully guarded so it never raises at interpreter exit.
     """
-    global _playwright, _browser
-    with _LOCK:
-        try:
-            if _browser is not None and _browser.is_connected():
-                _browser.close()
-        except Exception:
-            pass
-        try:
-            if _playwright is not None:
-                _playwright.stop()
-        except Exception:
-            pass
-        _browser = None
-        _playwright = None
+    t = _render_thread
+    if t is None or not t.is_alive():
+        return
+    try:
+        _JOBS.put((_SHUTDOWN, Future()))
+        t.join(timeout=5.0)
+    except Exception:
+        pass
 
 
 def _with_base(html: str, base_url: str | None) -> str:
@@ -80,22 +142,16 @@ def _with_base(html: str, base_url: str | None) -> str:
 def html_to_pdf(html: str, base_url: str | None = None) -> bytes:
     """Convert a full HTML document to PDF bytes.
 
-    Reuses a shared headless Chromium across calls (see _LOCK/_ensure_browser).
+    Submits the render to a shared, long-lived Chromium owned by a dedicated
+    render thread (see _render_loop) and blocks for the result -- safe to call
+    from any thread (Werkzeug hands each request a fresh, unpooled thread).
     `base_url` sets the document base so relative asset URLs resolve.
 
     All report assets (fonts, logos, chart PNGs) are inlined as data: URIs, so
     there is no network to wait on -- wait_until="load" is correct and avoids
     the pointless idle wait "networkidle" imposed.
     """
-    with _LOCK:
-        browser = _ensure_browser()
-        page = browser.new_page()
-        try:
-            page.set_content(_with_base(html, base_url), wait_until="load")
-            return page.pdf(
-                format="Letter",
-                print_background=True,
-                margin=_MARGIN,
-            )
-        finally:
-            page.close()
+    _ensure_render_thread()
+    fut: Future = Future()
+    _JOBS.put((_with_base(html, base_url), fut))
+    return fut.result(timeout=_RENDER_TIMEOUT)
