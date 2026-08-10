@@ -2,8 +2,10 @@
 
 Ports loaders/transforms from BRADhaskell/lmu-baseball-practice-analytics
 `dashboard/app.py` onto PAW's shared analytics MySQL (MYSQL_* → same RDS that
-holds the Trackman warehouse). Tables: PRACTICE_PLAYS, PRACTICE_SESSIONS,
-player_stats_summary.
+holds the Trackman warehouse). Tables: PRACTICE_PLAYS, PRACTICE_SESSIONS.
+(`player_stats_summary` was part of the original app's schema but was never
+created here -- `load_player_stats` computes the same shape from the two
+tables above instead; see its docstring.)
 """
 from __future__ import annotations
 
@@ -117,20 +119,72 @@ def players_in_range(start, end, exclude_test: bool = True) -> list[str]:
     return [] if df.empty else [str(n) for n in df["name"].dropna()]
 
 
-def load_player_stats(exclude_test: bool = True) -> pd.DataFrame:
+def load_player_stats(exclude_test: bool = True, player: str | None = None) -> pd.DataFrame:
+    """Per-player summary (sessions/plays/EV/distance/hit-type rates) for
+    players active this season, aggregated straight from PRACTICE_SESSIONS +
+    PRACTICE_PLAYS (mirrors the aggregation in `app/ingest/hittrax.py`'s
+    `_PLAYER_STATS_SQL`).
+
+    This used to `SELECT ... FROM player_stats_summary` -- a table ported
+    from the original Streamlit app (which maintained it via its own ETL)
+    that was never created in PAW's MySQL instance. Every call threw
+    `Table 'player_stats_summary' doesn't exist`, and the Session Tables tab
+    called this unconditionally on every render, so that tab could never
+    load (looked like a freeze: the spinner never resolves, and re-clicking
+    the tab just re-fires the same failing callback).
+
+    `player` scopes the aggregate to one player in SQL -- the dashboard only
+    ever needs the selected player's row, not every active player's."""
     season_start = current_season_start()
-    where = f"WHERE player_id IS NOT NULL AND last_practice_date >= '{season_start}'"
-    where += _test_clause("player_name", exclude_test)
+    where = f"WHERE ps.last_practice_date >= '{season_start}'"
+    where += _test_clause("ps.player_name", exclude_test)
+    params: dict = {}
+    if player:
+        where += " AND ps.player_name = :player"
+        params["player"] = player
     df = query_df(f"""
-        SELECT player_id, player_name, total_plays, total_sessions,
-               avg_exit_velocity, max_exit_velocity,
-               avg_distance, max_distance,
-               hard_hit_rate, fly_ball_rate, line_drive_rate,
-               last_practice_date
-          FROM player_stats_summary
+        SELECT
+            ap.player_id,
+            ps.player_name,
+            COALESCE(pp.total_plays, 0) AS total_plays,
+            COALESCE(ps.total_sessions, 0) AS total_sessions,
+            pp.avg_exit_velocity, pp.max_exit_velocity,
+            pp.avg_distance, pp.max_distance,
+            pp.hard_hit_rate, pp.fly_ball_rate, pp.line_drive_rate,
+            ps.last_practice_date
+          FROM (
+                SELECT player_id FROM PRACTICE_SESSIONS WHERE player_id IS NOT NULL
+                UNION
+                SELECT player_id FROM PRACTICE_PLAYS WHERE player_id IS NOT NULL
+               ) ap
+          LEFT JOIN (
+                SELECT player_id, MAX(user_name) AS player_name,
+                       COUNT(*) AS total_sessions,
+                       MAX(session_date) AS last_practice_date
+                  FROM PRACTICE_SESSIONS
+                 WHERE player_id IS NOT NULL
+                 GROUP BY player_id
+               ) ps ON ps.player_id = ap.player_id
+          LEFT JOIN (
+                SELECT player_id,
+                       COUNT(*) AS total_plays,
+                       AVG(exit_velocity) AS avg_exit_velocity,
+                       MAX(exit_velocity) AS max_exit_velocity,
+                       AVG(distance_feet) AS avg_distance,
+                       MAX(distance_feet) AS max_distance,
+                       SUM(CASE WHEN exit_velocity >= 95 THEN 1 ELSE 0 END) * 100.0
+                           / NULLIF(COUNT(exit_velocity), 0) AS hard_hit_rate,
+                       SUM(CASE WHEN hit_type = 3 THEN 1 ELSE 0 END) * 100.0
+                           / NULLIF(COUNT(*), 0) AS fly_ball_rate,
+                       SUM(CASE WHEN hit_type = 2 THEN 1 ELSE 0 END) * 100.0
+                           / NULLIF(COUNT(*), 0) AS line_drive_rate
+                  FROM PRACTICE_PLAYS
+                 WHERE player_id IS NOT NULL
+                 GROUP BY player_id
+               ) pp ON pp.player_id = ap.player_id
           {where}
          ORDER BY total_plays DESC
-    """)
+    """, params)
     for col in ("total_plays", "total_sessions", "avg_exit_velocity",
                 "max_exit_velocity", "avg_distance", "max_distance",
                 "hard_hit_rate", "fly_ball_rate", "line_drive_rate"):

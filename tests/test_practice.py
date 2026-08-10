@@ -124,6 +124,43 @@ def test_players_in_range_no_start_end_falls_back_to_all_names():
     assert P.players_in_range(None, None) == P.all_player_names()
 
 
+def test_load_player_stats_does_not_crash_and_has_expected_columns(monkeypatch):
+    """Task 8 regression: `load_player_stats` used to `SELECT ... FROM
+    player_stats_summary` -- a table ported from the original Streamlit app
+    that was never created in PAW's MySQL instance. Every call raised
+    `ProgrammingError: Table 'player_stats_summary' doesn't exist`, and the
+    HitTrax Session Tables tab called this unconditionally on every render,
+    so that tab could never load (the coach-reported "freeze": the callback
+    fails every time, so the spinner never resolves and re-clicking just
+    re-fires the same failing call). Widen the season window so this
+    assertion holds even when the live season-to-date window is empty
+    (offseason)."""
+    monkeypatch.setattr(P, "current_season_start", lambda: "2000-01-01")
+    df = P.load_player_stats()
+    expected_cols = {
+        "player_id", "player_name", "total_plays", "total_sessions",
+        "avg_exit_velocity", "max_exit_velocity", "avg_distance",
+        "max_distance", "hard_hit_rate", "fly_ball_rate",
+        "line_drive_rate", "last_practice_date",
+    }
+    assert expected_cols <= set(df.columns)
+    assert len(df) > 0  # real practice history exists in PRACTICE_SESSIONS/PLAYS
+
+
+def test_load_player_stats_scoped_by_player_filters_in_sql(monkeypatch):
+    """Task 8: `load_player_stats(player=...)` must filter server-side to
+    that one player's row, not load every active player and discard the
+    rest in Python (the Session Tables tab only ever needs one player)."""
+    monkeypatch.setattr(P, "current_season_start", lambda: "2000-01-01")
+    unscoped = P.load_player_stats()
+    assert len(unscoped) > 1  # more than one active player in the live data
+    demo = unscoped.iloc[0]["player_name"]
+    scoped = P.load_player_stats(player=demo)
+    assert len(scoped) == 1
+    assert scoped.iloc[0]["player_name"] == demo
+    assert len(scoped) < len(unscoped)
+
+
 def test_hit_type_counts():
     plays = pd.DataFrame({"hit_type": [0, 1, 2, 2, 3]})
     c = P.hit_type_counts(plays)

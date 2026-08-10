@@ -114,7 +114,8 @@ def register_callbacks(dash_app) -> None:
         if tab == "sessions":
             sessions = P.load_sessions(exclude_test=exclude_test, player=player,
                                        start=start, end=end)
-            stats = P.load_player_stats(exclude_test=exclude_test)  # small summary table
+            # Scoped: only this player's summary row (not every active player).
+            stats = P.load_player_stats(exclude_test=exclude_test, player=player)
             return session_tables.render(stats, sessions, player=player)
         return html.Div()
 
