@@ -110,6 +110,14 @@ def test_resolve_player_coach_defaults_and_player_locks():
     # no players at all -> None (dashboard shows an empty state)
     assert selectors.resolve_player(None, is_coach=True, own_name=None,
                                     available=[]) is None
+    # Task 3: date range has zero players -> keep the current selection rather
+    # than blanking (e.g. a custom range with no HitTrax data yet).
+    assert selectors.resolve_player("Alpha", is_coach=True, own_name=None,
+                                    available=[]) == "Alpha"
+    # requested player has no data in the new range, but others do -> reselect
+    # the first available player instead of blanking.
+    assert selectors.resolve_player("Zed", is_coach=True, own_name=None,
+                                    available=avail) == "Alpha"
 
 
 def test_practice_layout_has_daterange():
@@ -379,6 +387,25 @@ def test_on_filters_signature_dropped_session_exclude():
     assert 'Input("prac-session"' not in src
     assert 'Input("prac-exclude-test"' not in src
     assert 'Output("prac-session"' not in src
+
+
+def test_on_filters_scopes_player_options_to_date_range():
+    """Task 3: _on_filters must rebuild the Player dropdown from players in the
+    selected date range (not every player who has ever had a session)."""
+    import inspect
+    from app.dashboards.hitting_practice import callbacks
+    src = inspect.getsource(callbacks)
+    assert "P.players_in_range(" in src
+    assert "P.all_player_names()" not in src
+
+
+def test_layout_scopes_first_paint_to_season_default_range():
+    """Task 3: the initial player list/options at first paint must also be
+    scoped to the season-default date range, not the all-time roster."""
+    import inspect
+    from app.dashboards.hitting_practice import layout
+    src = inspect.getsource(layout)
+    assert "P.players_in_range(start_d, end_d)" in src
 
 
 def test_spray_distribution_fan_builds_cells():

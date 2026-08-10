@@ -76,23 +76,27 @@ def serve_layout() -> html.Div:
         s = s[s["player_name"] != ""]
         min_d, max_d = s["session_date"].min(), s["session_date"].max()
         latest = max_d
-        names = sorted(s["player_name"].dropna().unique(), key=str.lower)
-        on_latest = sorted(s.loc[s["session_date"] == latest, "player_name"].unique(),
-                           key=str.lower)
+        on_latest_all = sorted(s.loc[s["session_date"] == latest, "player_name"].unique(),
+                               key=str.lower)
     else:
         min_d = max_d = latest = _date.today()
-        names, on_latest = [], []
+        on_latest_all = []
 
-    players = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
-    opt_values = {o["value"] for o in players}
-    on_latest = [n for n in on_latest if n in opt_values]
-    default_player = selectors.resolve_player(
-        None, is_coach=is_coach, own_name=own_name, available=names,
-        default=(on_latest[0] if on_latest else None))
     # Default the date filter to "This Season" (same preset behavior as the game
     # dashboards) instead of a single day, clamped to the data's own bounds.
     s0, e0 = dr.preset_range("season", str(max_d))
     start_d, end_d = max(str(s0), str(min_d)), str(e0)
+
+    # First paint's player list/options are scoped to that same season-default
+    # range -- not every player who has EVER had a session -- so the dropdown
+    # matches what _on_filters will show once the date-range callback fires.
+    names = P.players_in_range(start_d, end_d)
+    players = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
+    opt_values = {o["value"] for o in players}
+    on_latest = [n for n in on_latest_all if n in opt_values]
+    default_player = selectors.resolve_player(
+        None, is_coach=is_coach, own_name=own_name, available=names,
+        default=(on_latest[0] if on_latest else None))
 
     try:
         pitch0 = P.load_pitch_coords(player=default_player,

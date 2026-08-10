@@ -51,7 +51,9 @@ def register_callbacks(dash_app) -> None:
     def _on_filters(player, ds, de):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own_name = getattr(current_user, "name", None)
-        names = P.all_player_names()  # light query; no all-players pitch load
+        # Scoped to the selected date range -- a player with no HitTrax data in
+        # range shouldn't appear in the dropdown (light query; no pitch load).
+        names = P.players_in_range(ds, de)
         popts = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
         start = date.fromisoformat(ds[:10]) if ds else None
         end = date.fromisoformat(de[:10]) if de else None

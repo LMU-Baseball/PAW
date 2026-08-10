@@ -105,6 +105,18 @@ def players_on_date(d, exclude_test: bool = True) -> list[str]:
     return [] if df.empty else [str(n) for n in df["name"].dropna()]
 
 
+def players_in_range(start, end, exclude_test: bool = True) -> list[str]:
+    """Alphabetical player names with a session in [start, end] (for scoping the
+    Player dropdown to the selected date range)."""
+    if not start or not end:
+        return all_player_names(exclude_test)
+    where = ("WHERE session_date BETWEEN :s AND :e AND user_name IS NOT NULL "
+             "AND TRIM(user_name) <> ''" + _test_clause("user_name", exclude_test))
+    df = query_df(f"SELECT DISTINCT user_name AS name FROM PRACTICE_SESSIONS "
+                  f"{where} ORDER BY user_name", {"s": str(start), "e": str(end)})
+    return [] if df.empty else [str(n) for n in df["name"].dropna()]
+
+
 def load_player_stats(exclude_test: bool = True) -> pd.DataFrame:
     season_start = current_season_start()
     where = f"WHERE player_id IS NOT NULL AND last_practice_date >= '{season_start}'"

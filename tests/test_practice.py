@@ -109,6 +109,21 @@ def test_apply_filters_player_and_session():
     assert out2.empty
 
 
+def test_players_in_range_scopes_by_date():
+    """Task 3: the HitTrax Player dropdown must be scoped to the selected date
+    range -- players_in_range(d, d) should agree with the existing single-day
+    helper, and always be a subset of every player who ever has a session."""
+    everyone = set(P.all_player_names())
+    d = P.latest_session_date()
+    on_last = set(P.players_in_range(str(d), str(d)))
+    assert on_last <= everyone
+    assert on_last == set(P.players_on_date(d))  # single-day equivalence
+
+
+def test_players_in_range_no_start_end_falls_back_to_all_names():
+    assert P.players_in_range(None, None) == P.all_player_names()
+
+
 def test_hit_type_counts():
     plays = pd.DataFrame({"hit_type": [0, 1, 2, 2, 3]})
     c = P.hit_type_counts(plays)
