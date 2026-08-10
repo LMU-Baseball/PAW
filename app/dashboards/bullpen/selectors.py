@@ -15,8 +15,10 @@ def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
     return int(requested_id) if requested_id not in (None, "") else None
 
 
-def pitcher_options(*, is_coach: bool, own_trackman_id) -> list[dict]:
-    df = B.lmu_bullpen_pitchers()
+def pitcher_options(*, is_coach: bool, own_trackman_id, start=None, end=None) -> list[dict]:
+    """Pitcher dropdown options, scoped to [start, end] when both are given
+    (no args = every LMU pitcher who's ever had a bullpen)."""
+    df = B.lmu_bullpen_pitchers(start=start, end=end)
     if is_coach:
         return [{"label": str(r.pitcher), "value": int(r.pitcher_id)}
                 for r in df.itertuples()]

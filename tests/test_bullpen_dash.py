@@ -30,6 +30,28 @@ def test_pitcher_options_coach_nonempty():
     assert opts and {"label", "value"} <= set(opts[0])
 
 
+def test_pitcher_options_scoped_by_date_range():
+    from app.dashboards.bullpen import selectors
+    opts_all = selectors.pitcher_options(is_coach=True, own_trackman_id=None)
+    opts_1900 = selectors.pitcher_options(is_coach=True, own_trackman_id=None,
+                                          start="1900-01-01", end="1900-01-02")
+    assert opts_all and opts_1900 == []
+    opts_window = selectors.pitcher_options(is_coach=True, own_trackman_id=None,
+                                            start="2025-09-01", end="2026-05-13")
+    assert GEIS in {o["value"] for o in opts_window}
+
+
+def test_bullpen_pitcher_dd_options_callback_registered(server):
+    from dash import Dash
+    from app.dashboards.bullpen import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/bptest3/",
+               suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    outs = {str(k) for k in app.callback_map}
+    assert any("bp-pitcher-dd.options" in o for o in outs)
+
+
 def test_session_dropdown_options_labels():
     from app.dashboards.bullpen import selectors
     df = pd.DataFrame({"date": ["2026-05-13", "2026-05-06"], "pitches": [18, 17]})
@@ -242,6 +264,15 @@ def test_register_callbacks_adds_callbacks(server):
 def test_build_bullpen_dash_mounts(server):
     rules = {r.rule for r in server.url_map.iter_rules()}
     assert any(r.startswith("/dash/bullpen/") for r in rules)
+
+
+def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
+    """The Task 4 first-paint pitcher options must be scoped to the season-default
+    range (start_d, end_d), not every pitcher who's ever thrown a bullpen."""
+    import inspect
+    from app.dashboards.bullpen import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert "start=start_d, end=end_d" in src
 
 
 def test_bullpen_layout_uses_preset_dropdown(server):

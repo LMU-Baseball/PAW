@@ -34,15 +34,24 @@ def _teams_clause():
     return f"PitcherTeam IN ({marks})", params
 
 
-def lmu_bullpen_pitchers() -> pd.DataFrame:
-    """LMU pitchers present in BULLPEN, newest-session first."""
+def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
+    """LMU pitchers present in BULLPEN, newest-session first.
+
+    When both `start` and `end` are given, only pitchers with a bullpen
+    session in [start, end] are returned (scopes the Pitcher dropdown to the
+    selected date range). No args = unscoped, unchanged behavior.
+    """
     clause, params = _teams_clause()
+    where = f"{clause} AND PitcherId IS NOT NULL"
+    if start is not None and end is not None:
+        where += " AND DATE(Date) BETWEEN :start AND :end"
+        params = {**params, "start": str(start), "end": str(end)}
     return query_df(
         f"""
         SELECT PitcherId AS pitcher_id, MAX(Pitcher) AS pitcher,
                COUNT(DISTINCT Date) AS sessions, MAX(Date) AS last_date
           FROM BULLPEN
-         WHERE {clause} AND PitcherId IS NOT NULL
+         WHERE {where}
          GROUP BY PitcherId
          ORDER BY last_date DESC, pitcher
         """,

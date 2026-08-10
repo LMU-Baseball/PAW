@@ -59,15 +59,25 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
     own = getattr(current_user, "trackman_id", None)
-    pitchers = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own)
+    pitchers_all = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own)
     default_pitcher = selectors.resolve_pitcher(
-        pitchers[0]["value"] if pitchers else None, is_coach=is_coach, own_trackman_id=own)
+        pitchers_all[0]["value"] if pitchers_all else None, is_coach=is_coach, own_trackman_id=own)
 
     anchor = _bullpen_anchor(default_pitcher)
     s0, e0 = dr.preset_range("season", anchor)
     start_d, end_d = str(s0), str(e0)
     # WINDOW_MIN remains the calendar min; end bound = today
     cal_max = date.today().isoformat()
+
+    # First-paint options scoped to that same season-default range (mirrors
+    # the _on_daterange_pitchers callback) -- not every pitcher who's ever
+    # thrown a bullpen.
+    pitchers = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                         start=start_d, end=end_d)
+    pitcher_values = {p["value"] for p in pitchers}
+    if default_pitcher not in pitcher_values:
+        default_pitcher = selectors.resolve_pitcher(
+            pitchers[0]["value"] if pitchers else None, is_coach=is_coach, own_trackman_id=own)
     sess = B.session_options(default_pitcher, start_d, end_d) if default_pitcher is not None else None
     session_opts = selectors.session_dropdown_options(sess)
     default_session = session_opts[0]["value"] if session_opts else None

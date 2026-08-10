@@ -36,6 +36,25 @@ def register_callbacks(dash_app) -> None:
         s, e = dr.preset_range(preset, anchor)
         return max(str(s), layout.WINDOW_MIN), str(e), show
 
+    # Date-range change -> refresh pitcher dropdown to only those with a bullpen
+    # in range; keep the current selection if it's still valid, else fall back
+    # to the first available pitcher (coach-only; players stay locked to self).
+    @dash_app.callback(
+        Output("bp-pitcher-dd", "options"), Output("bp-pitcher-dd", "value"),
+        Input("bp-daterange", "start_date"), Input("bp-daterange", "end_date"),
+        State("bp-pitcher-dd", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_daterange_pitchers(start, end, current_pitcher_id):
+        is_coach = bool(getattr(current_user, "is_coach", False))
+        own = getattr(current_user, "trackman_id", None)
+        opts = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                         start=start, end=end)
+        values = {o["value"] for o in opts}
+        value = current_pitcher_id if current_pitcher_id in values else (
+            opts[0]["value"] if opts else None)
+        return opts, value
+
     # Pitcher or date-range change -> refresh session dropdown (default most-recent).
     @dash_app.callback(
         Output("bp-session-dd", "options"), Output("bp-session-dd", "value"),

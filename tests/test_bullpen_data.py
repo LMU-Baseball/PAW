@@ -13,6 +13,18 @@ def test_lmu_pitchers_include_geis():
     assert {"pitcher_id", "pitcher", "sessions"} <= set(p.columns)
 
 
+def test_lmu_bullpen_pitchers_scopes_by_date():
+    everyone = set(B.lmu_bullpen_pitchers()["pitcher_id"])
+    ranged = set(B.lmu_bullpen_pitchers(start="1900-01-01", end="1900-01-02")["pitcher_id"])
+    assert ranged == set()          # no bullpens in 1900
+    assert everyone                 # sanity: unscoped still returns pitchers
+
+
+def test_lmu_bullpen_pitchers_scoped_within_window_matches_geis():
+    scoped = set(int(x) for x in B.lmu_bullpen_pitchers(start=WINDOW[0], end=WINDOW[1])["pitcher_id"])
+    assert GEIS in scoped
+
+
 def test_sessions_and_pitches_for_geis():
     s = B.sessions_for(GEIS)
     assert not s.empty and {"date", "pitches"} <= set(s.columns)
