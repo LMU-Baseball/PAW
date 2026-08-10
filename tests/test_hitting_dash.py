@@ -441,6 +441,23 @@ def test_register_callbacks_adds_callbacks(server):
     assert len(app.callback_map) > before
 
 
+def test_game_options_refresh_on_hitter_change(server):
+    """Regression: switching the hitter must refresh the game dropdown, so
+    hitter-dd is an INPUT (not State) of the game-dd.options callback. Otherwise
+    the game list stays stuck on the previous/default hitter's games."""
+    from dash import Dash
+    from app.dashboards.hitting import layout, callbacks, index
+    app = Dash(__name__, server=server, url_base_pathname="/dash/htest2/",
+               suppress_callback_exceptions=True)
+    app.index_string = index.INDEX_STRING
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    # find the callback that outputs game-dd.options and assert hitter-dd.value is an Input
+    key = next(k for k in app.callback_map if "game-dd.options" in k)
+    inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
+    assert "hitter-dd.value" in inputs
+
+
 def test_read_game_df_roundtrip_no_futurewarning():
     from app.dashboards.hitting import callbacks
 

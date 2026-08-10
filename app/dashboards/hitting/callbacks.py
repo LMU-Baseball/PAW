@@ -129,11 +129,14 @@ def register_callbacks(dash_app) -> None:
         s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
-    # Date range change -> refresh the game options within that range (players locked).
+    # Hitter or date-range change -> refresh the game options for that hitter
+    # within the range. (hitter-dd is an Input, not State, so switching hitters
+    # re-lists that hitter's games -- otherwise the game dropdown stays stuck on
+    # the previous/default hitter's games.)
     @dash_app.callback(
         Output("game-dd", "options"), Output("game-dd", "value"),
         Input("hit-daterange", "start_date"), Input("hit-daterange", "end_date"),
-        State("hitter-dd", "value"), prevent_initial_call=True,
+        Input("hitter-dd", "value"), prevent_initial_call=True,
     )
     def _on_range(start, end, batter_id):
         is_coach = bool(getattr(current_user, "is_coach", False))

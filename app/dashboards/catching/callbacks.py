@@ -72,10 +72,13 @@ def register_callbacks(dash_app) -> None:
         s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
+    # Catcher or date-range change -> refresh the game options for that catcher
+    # (catcher-dd is an Input, not State, so switching catchers re-lists their
+    # games rather than keeping the previous/default catcher's).
     @dash_app.callback(
         Output("game-dd", "options"), Output("game-dd", "value"),
         Input("cat-daterange", "start_date"), Input("cat-daterange", "end_date"),
-        State("catcher-dd", "value"), prevent_initial_call=True,
+        Input("catcher-dd", "value"), prevent_initial_call=True,
     )
     def _on_range(start, end, catcher_id):
         is_coach = bool(getattr(current_user, "is_coach", False))

@@ -87,10 +87,13 @@ def register_callbacks(dash_app) -> None:
         s = max(str(s), s_b); e = min(str(e), e_b)  # nest inside the season
         return s, str(e), show
 
+    # Pitcher or date-range change -> refresh the outing options for that pitcher
+    # (pitcher-dd is an Input, not State, so switching pitchers re-lists their
+    # outings rather than keeping the previous/default pitcher's).
     @dash_app.callback(
         Output("outing-dd", "options"), Output("outing-dd", "value"),
         Input("pit-daterange", "start_date"), Input("pit-daterange", "end_date"),
-        State("pitcher-dd", "value"), prevent_initial_call=True,
+        Input("pitcher-dd", "value"), prevent_initial_call=True,
     )
     def _on_range(start, end, pitcher_id):
         is_coach = bool(getattr(current_user, "is_coach", False))

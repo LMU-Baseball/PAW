@@ -109,7 +109,8 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
             dr.date_control("cat", (end_d or date.today().isoformat()),
-                            min_date=min_bound, max_date=max_bound, preset="season"),
+                            min_date=min_bound, max_date=max_bound, preset="season",
+                            start=start_d, end=end_d),
         ]),
         html.Div([
             html.Label("Game", style={"color": "white", "fontWeight": "bold"}),
