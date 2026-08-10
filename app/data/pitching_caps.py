@@ -99,6 +99,7 @@ def _sibling_pitcher_ids(pitcher_id) -> list[int]:
     return [int(x) for x in ids["PitcherId"]] or [int(pitcher_id)]
 
 
+@cached
 def game_pitches(game_id, pitcher_id) -> pd.DataFrame:
     """A single raw pitcher_id's pitches in one game (no sibling union).
 
