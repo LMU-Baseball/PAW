@@ -100,7 +100,17 @@ def test_trend_by_session_columns_and_sorting():
     df = B.trend_by_session(GEIS, *WINDOW)
     assert not df.empty
     assert {"date", "tagged_pitch_type", "pitches", "velo_avg", "velo_max",
-            "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread"} <= set(df.columns)
+            "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread",
+            "strike_pct"} <= set(df.columns)
     # grouped/sorted by (type, date)
     assert list(df[["tagged_pitch_type", "date"]].itertuples(index=False, name=None)) == \
         sorted(df[["tagged_pitch_type", "date"]].itertuples(index=False, name=None))
+
+
+def test_trend_by_session_has_numeric_strike_pct():
+    df = B.trend_by_session(GEIS, *WINDOW)
+    assert not df.empty
+    non_null = df["strike_pct"].dropna()
+    assert not non_null.empty
+    assert all(isinstance(v, (int, float)) for v in non_null)
+    assert non_null.between(0, 100).all()

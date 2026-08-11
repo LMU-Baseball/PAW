@@ -200,10 +200,10 @@ _METRIC_SERIES = {
     "spin": [("spin_avg", "Spin Rate", None, False),
              ("eff_avg", "Efficiency %", "dot", True)],
     "movement": [("ivb_avg", "IVB", None, False), ("hb_avg", "HB", "dash", False)],
-    "command": [("loc_spread", "Location Spread", None, False)],
+    "strikepct": [("strike_pct", "Strike %", None, False)],
 }
 _METRIC_YTITLE = {"velocity": "mph", "spin": "rpm", "movement": "inches",
-                  "command": "spread"}
+                  "strikepct": "%"}
 
 
 def trend_small_multiples(df, metric):

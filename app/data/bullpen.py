@@ -205,10 +205,14 @@ def trend_by_session(pitcher_id, start, end) -> pd.DataFrame:
     `loc_spread` = RMS distance of (PlateLocSide, PlateLocHeight) from the
     group's mean location — a command-CONSISTENCY proxy (lower = tighter),
     NOT true command (bullpens have no intended-target column). None when a
-    group has <2 located pitches.
+    group has <2 located pitches. Retained for potential future use even
+    though it's no longer surfaced in the Development Trends UI.
+
+    `strike_pct` reuses the same zone-based `strike_pct()` definition as the
+    report header KPI and sidebar tile, for consistency across the app.
     """
     cols = ["date", "tagged_pitch_type", "pitches", "velo_avg", "velo_max",
-            "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread"]
+            "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread", "strike_pct"]
     df = query_df(
         """
         SELECT DATE(Date) AS date, TaggedPitchType AS tagged_pitch_type,
@@ -240,6 +244,7 @@ def trend_by_session(pitcher_id, start, end) -> pd.DataFrame:
             "spin_avg": _r1(sub["spin_rate"].mean()), "eff_avg": _r1(sub["spin_eff"].mean()),
             "ivb_avg": _r1(sub["ind_vert_break"].mean()), "hb_avg": _r1(sub["horz_break"].mean()),
             "loc_spread": spread,
+            "strike_pct": strike_pct(sub),
         })
     return (pd.DataFrame(rows, columns=cols)
             .sort_values(["tagged_pitch_type", "date"]).reset_index(drop=True))

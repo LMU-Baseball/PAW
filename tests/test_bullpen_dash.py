@@ -76,7 +76,8 @@ def _trend_df():
         "pitches": [10, 12, 6, 7], "velo_avg": [90.0, 91.0, 82.0, 83.0],
         "velo_max": [92.0, 93.0, 84.0, 85.0], "spin_avg": [2200.0, 2250.0, 2400.0, 2450.0],
         "eff_avg": [95.0, 96.0, 40.0, 42.0], "ivb_avg": [15.0, 16.0, 2.0, 1.0],
-        "hb_avg": [8.0, 9.0, -5.0, -6.0], "loc_spread": [0.9, 0.7, 1.2, 1.0]})
+        "hb_avg": [8.0, 9.0, -5.0, -6.0], "loc_spread": [0.9, 0.7, 1.2, 1.0],
+        "strike_pct": [65.0, 70.0, 55.0, 60.0]})
 
 
 def test_session_charts_render():
@@ -186,6 +187,25 @@ def test_trend_small_multiples_grid():
     axes = [k for k in fig.layout if k.startswith("xaxis")]
     assert len(axes) >= 2
     assert charts.trend_small_multiples(df, "movement") is not None
+
+
+def test_trends_metric_list_swaps_command_for_strikepct():
+    from app.dashboards.bullpen.tabs import trends
+    values = [val for val, _ in trends._METRICS]
+    labels = [lbl for _, lbl in trends._METRICS]
+    assert "Strike %" in labels and "Command" not in labels
+    assert "strikepct" in values and "command" not in values
+
+
+def test_trend_small_multiples_strikepct_plots_strike_pct_series():
+    from app.dashboards.bullpen import charts
+    df = _trend_df()
+    fig = charts.trend_small_multiples(df, "strikepct")
+    assert fig is not None
+    names = {t.name for t in fig.data}
+    assert names == {"Strike %"}
+    ys = [y for t in fig.data for y in t.y]
+    assert set(ys) <= set(df["strike_pct"])
 
 
 def test_trend_spin_is_dual_axis_with_word_labels():

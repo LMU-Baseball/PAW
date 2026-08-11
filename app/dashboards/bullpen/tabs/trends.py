@@ -8,7 +8,7 @@ from app.dashboards.bullpen import charts
 
 _MUTED = {"padding": "12px", "color": "#555"}
 _METRICS = [("velocity", "Velocity"), ("spin", "Spin"),
-            ("movement", "Movement"), ("command", "Command")]
+            ("movement", "Movement"), ("strikepct", "Strike %")]
 
 
 def body(df, metric):
