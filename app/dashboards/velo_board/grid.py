@@ -2,13 +2,17 @@
 
 `coach_grid` builds the FIRST `editable=True` DataTable in the repo: one row
 per rostered pitcher (`velo_board.grid_rows`), with `velo_goal`/`assessment`
-as the primary coach inputs and every auto-computed numeric column left
-editable too, per the spec's "coaches can override any auto cell" -- only
-`pitcher_name` (and the hidden `pitcher_id` key) stay locked. A Season
-dropdown and a Week date-picker sit above the grid; a Save button + status
-line below it. No callbacks are wired here -- Task 6 owns the Dash callback
-that reads `dcc.Dropdown`/`DatePickerSingle`/DataTable state, snaps the picked
-date to its Monday via `velo_board.week_start_for`, and calls `save_rows`.
+as the primary coach inputs and velo_avg/velo_max/max_pr left editable too,
+per the spec's "coaches can override any auto cell" -- `grid_rows` makes a
+saved override to any of those stick (stored snapshot wins over recomputed
+Trackman on the next render). `pitcher_name` stays locked, and so do
+change_avg/change_max: those are always COMPUTED (this week's shown
+velo_avg/velo_max minus the pitcher's previous stored week), never stored,
+so editing them would be silently discarded on re-render. A Season dropdown
+and a Week date-picker sit above the grid; a Save button + status line below
+it. No callbacks are wired here -- Task 6 owns the Dash callback that reads
+`dcc.Dropdown`/`DatePickerSingle`/DataTable state, snaps the picked date to
+its Monday via `velo_board.week_start_for`, and calls `save_rows`.
 """
 from __future__ import annotations
 
@@ -30,8 +34,8 @@ _COLUMNS = [
     {"name": "Velo Goal", "id": "velo_goal", "editable": True, "type": "numeric"},
     {"name": "Assessment", "id": "assessment", "editable": True, "type": "numeric"},
     {"name": "Max PR", "id": "max_pr", "editable": True, "type": "numeric"},
-    {"name": "Chg Avg", "id": "change_avg", "editable": True, "type": "numeric"},
-    {"name": "Chg Max", "id": "change_max", "editable": True, "type": "numeric"},
+    {"name": "Chg Avg", "id": "change_avg", "editable": False, "type": "numeric"},
+    {"name": "Chg Max", "id": "change_max", "editable": False, "type": "numeric"},
 ]
 
 _STYLE_DATA_CONDITIONAL = [

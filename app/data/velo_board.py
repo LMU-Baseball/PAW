@@ -144,14 +144,20 @@ def _week_end(week_start) -> str:
 def _velo_rows(pitcher_id, start=None, end=None) -> pd.DataFrame:
     """Fastball/Sinker (rel_speed, dt) rows from GAMES + BULLPEN for one raw
     trackman pitcher_id, optionally bounded by [start, end] (either open-
-    ended). A direct PitcherId match (no sibling-id union) -- simplest
-    correct version per the task brief. Keeps `dt` alongside each value
-    (unlike `_velo_series`) so callers can locate e.g. the date a max
-    occurred."""
-    pid = int(pitcher_id)
-    g_clause = f"PitcherId = :p AND TaggedPitchType IN ({_VELO_PITCH_TYPES})"
+    ended). Unions Trackman sibling ids (`pitching_caps._sibling_pitcher_ids`)
+    the same way `_pitcher_velo_appearances`/`velo_trend` do -- Trackman
+    splits one pitcher across ids, so a direct `PitcherId = :p` match would
+    under-count season totals relative to last_velo/trend in the same
+    leaderboard row. GAMES and BULLPEN share the same raw trackman id space,
+    so the GAMES-derived sibling set applies to both halves. Keeps `dt`
+    alongside each value (unlike `_velo_series`) so callers can locate e.g.
+    the date a max occurred."""
+    from app.data import pitching_caps  # lazy: avoid import cost when unused
+
+    ph, idp = pitching_caps._in_clause(pitching_caps._sibling_pitcher_ids(int(pitcher_id)))
+    g_clause = f"PitcherId IN ({ph}) AND TaggedPitchType IN ({_VELO_PITCH_TYPES})"
     b_clause = g_clause
-    params = {"p": pid}
+    params = dict(idp)
     if start is not None:
         g_clause += " AND Date >= :s"
         b_clause += " AND DATE(Date) >= :s"
@@ -220,15 +226,25 @@ def _previous_stored_velo(stored: pd.DataFrame, pitcher_id: int, week_start: str
 
 
 def grid_rows(season_label, week_start) -> pd.DataFrame:
-    """One row per rostered pitcher for the coach grid: auto-computed
-    velo_avg/velo_max/max_pr, stored velo_goal/assessment (if a row already
-    exists for this pitcher+week), and change_avg/change_max vs. the
-    pitcher's previous STORED week.
+    """One row per rostered pitcher for the coach grid: velo_avg/velo_max/
+    max_pr/velo_goal/assessment, and change_avg/change_max vs. the pitcher's
+    previous STORED week.
+
+    Weekly rows are stored SNAPSHOTS a coach can override: when a stored
+    (pitcher_id, season_label, week_start) row already exists, its stored
+    velo_avg/velo_max/max_pr/velo_goal/assessment win outright -- even if a
+    column within that row is NULL -- so a saved override sticks instead of
+    being silently overwritten by a recomputed Trackman value on re-render.
+    Only when NO stored row exists yet does velo_avg/velo_max/max_pr prefill
+    live from Trackman (`weekly_velo`/`running_max_pr`), same as before.
+    change_avg/change_max are always COMPUTED off whichever velo_avg/
+    velo_max is being shown (stored or prefilled) vs. the pitcher's previous
+    STORED week -- there's no stored snapshot of them to defer to.
 
     Deliberately NOT @cached: unlike weekly_velo/running_max_pr (pure
     Trackman reads), this merges live coach-edited `read_entries` data --
-    caching it would serve stale velo_goal/assessment/change_* right after a
-    coach saves the grid (Task 5's save-then-redraw flow)."""
+    caching it would serve stale values right after a coach saves the grid
+    (Task 5's save-then-redraw flow)."""
     from app.data import pitching_caps  # lazy: avoid import cost when unused
 
     cols = ["pitcher_id", "pitcher_name", "velo_avg", "velo_max", "velo_goal",
@@ -241,20 +257,30 @@ def grid_rows(season_label, week_start) -> pd.DataFrame:
     rows = []
     for _, r in roster.iterrows():
         pid = int(r["PitcherId"])
-        wv = weekly_velo(pid, week_start)
+        this_week_stored = not stored.empty and not stored[
+            (stored["pitcher_id"] == pid) & (stored["week_start"] == week_start)].empty
+        if this_week_stored:
+            velo_avg = _stored_value(stored, pid, week_start, "velo_avg")
+            velo_max = _stored_value(stored, pid, week_start, "velo_max")
+            max_pr = _stored_value(stored, pid, week_start, "max_pr")
+        else:
+            wv = weekly_velo(pid, week_start)
+            velo_avg, velo_max = wv["velo_avg"], wv["velo_max"]
+            max_pr = running_max_pr(pid, week_start)
+
         prev = _previous_stored_velo(stored, pid, week_start)
-        change_avg = (wv["velo_avg"] - prev["velo_avg"]
-                      if wv["velo_avg"] is not None and prev["velo_avg"] is not None else None)
-        change_max = (wv["velo_max"] - prev["velo_max"]
-                       if wv["velo_max"] is not None and prev["velo_max"] is not None else None)
+        change_avg = (velo_avg - prev["velo_avg"]
+                      if velo_avg is not None and prev["velo_avg"] is not None else None)
+        change_max = (velo_max - prev["velo_max"]
+                       if velo_max is not None and prev["velo_max"] is not None else None)
         rows.append({
             "pitcher_id": pid,
             "pitcher_name": r["Pitcher"],
-            "velo_avg": wv["velo_avg"],
-            "velo_max": wv["velo_max"],
+            "velo_avg": velo_avg,
+            "velo_max": velo_max,
             "velo_goal": _stored_value(stored, pid, week_start, "velo_goal"),
             "assessment": _stored_value(stored, pid, week_start, "assessment"),
-            "max_pr": running_max_pr(pid, week_start),
+            "max_pr": max_pr,
             "change_avg": change_avg,
             "change_max": change_max,
         })
@@ -305,9 +331,12 @@ def leaderboard(season_label) -> pd.DataFrame:
     If the pitcher has no game this season, falls back to their most recent
     BULLPEN session (`_last_bullpen_velo`) with `versus` = None.
 
-    `trend`: the pitcher's most recent `pitching_caps.velo_trend` velo_change
-    (signed float, all-time most recent appearance -- not season-scoped);
-    None if unknown (e.g. a pitcher with only one career appearance).
+    `trend`: `pitching_caps.velo_trend` velo_change (signed float) from the
+    pitcher's most recent appearance WITHIN this season -- filtered to the
+    season's [s, e] Date bounds before taking the last row, so a past-season
+    leaderboard doesn't reach into a later season's most recent appearance.
+    None if unknown (e.g. no appearance in this season, or the season's first
+    appearance -- velo_trend's LAG has nothing to diff against).
     """
     from app.data import pitching_caps  # lazy: avoid import cost when unused
 
@@ -348,8 +377,15 @@ def leaderboard(season_label) -> pd.DataFrame:
             bp = _last_bullpen_velo(pid)
             last_velo, last_date, versus = bp["last_velo"], bp["last_date"], None
 
+        # Season-scope the trend to [s, e] before taking the last row --
+        # velo_trend is all-time/chronological, so on a PAST season's
+        # leaderboard the unfiltered `.iloc[-1]` would reach into a LATER
+        # season's most recent appearance instead of this season's.
         vt = pitching_caps.velo_trend(pid)
-        trend = None if vt.empty or pd.isna(vt.iloc[-1]["velo_change"]) else float(vt.iloc[-1]["velo_change"])
+        vt_season = vt[(vt["game_date"] >= s) & (vt["game_date"] <= e)] if not vt.empty else vt
+        trend = (float(vt_season.iloc[-1]["velo_change"])
+                 if not vt_season.empty and not pd.isna(vt_season.iloc[-1]["velo_change"]) else None)
+
 
         rows.append({
             "pitcher_name": r["Pitcher"],

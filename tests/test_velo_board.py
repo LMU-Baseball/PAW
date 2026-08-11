@@ -48,6 +48,37 @@ def test_grid_rows_prefills_auto_velo_for_roster():
     assert len(df) > 0   # roster present
 
 
+def test_grid_rows_honors_stored_override_over_trackman():
+    """Weekly rows are stored snapshots: once a coach saves a row for a
+    (pitcher, season, week), grid_rows must return the STORED velo_max, not
+    the value recomputed from Trackman (weekly_velo)."""
+    from app.data import pitching_caps, seasons
+    season = seasons.current_season()
+    roster = pitching_caps.lmu_pitchers(season)
+    assert not roster.empty
+    pid = int(roster.iloc[0]["PitcherId"])
+    name = str(roster.iloc[0]["Pitcher"])
+    wk = "2030-01-07"  # a Monday far outside any real Trackman data --
+                       # guarantees no pre-existing stored row to collide with
+                       # and a recomputed Trackman value of None for contrast.
+    row = {"pitcher_id": pid, "pitcher_name": name, "season_label": season,
+           "week_start": wk, "velo_avg": 88.8, "velo_max": 111.1,
+           "velo_goal": None, "assessment": None, "max_pr": 111.1}
+    try:
+        V.upsert_entries([row], updated_by=1)
+        df = V.grid_rows(season, wk)
+        r = df[df["pitcher_id"] == pid]
+        assert len(r) == 1
+        assert float(r.iloc[0]["velo_max"]) == 111.1
+        assert float(r.iloc[0]["velo_avg"]) == 88.8
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM velo_board_entries WHERE pitcher_id=:p AND week_start=:w"),
+                      {"p": pid, "w": wk})
+
+
 def test_leaderboard_sorted_and_has_opponent_for_games():
     from app.data import seasons
     lb = V.leaderboard(seasons.current_season())
