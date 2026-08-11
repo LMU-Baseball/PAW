@@ -52,3 +52,95 @@ def test_compute_player_day_standard_metrics():
     for stub in ("early_ahead", "pre2k_zone", "twok_kill", "count_work"):
         assert m.get(stub) is None   # not yet defined
     assert C.compute_player_day(pid, "1900-01-01") == {}   # no data
+
+
+def test_score_value_fixed_and_manual_not_clobbered():
+    row_gte = {"direction": "gte", "threshold": 55.0, "points_met": 20, "points_missed": -10, "min_sample": 0}
+    assert C.score_value("strike_pct", 58.0, row_gte) == 20
+    assert C.score_value("strike_pct", 50.0, row_gte) == -10
+    row_lte = {"direction": "lte", "threshold": 6.0, "points_met": 15, "points_missed": -15, "min_sample": 0}
+    assert C.score_value("bb_pct", 4.0, row_lte) == 15
+    assert C.score_value("bb_pct", 9.0, row_lte) == -15
+    assert C.score_value("x", None, row_gte) is None
+
+
+def test_score_day_never_clobbers_manual(monkeypatch):
+    import pandas as pd
+
+    pid = 999999003
+    play_date = "2026-03-03"
+    metric = "strike_pct"
+
+    C.ensure_tables()
+    C.seed_default_scoring()
+    try:
+        # Coach enters a manual override for this (player, day, metric).
+        C.upsert_daily([{"player_id": pid, "play_date": play_date, "metric": metric,
+                         "raw_value": 99.0, "points": 777, "source": "manual"}], updated_by=1)
+
+        # Force score_day's roster + compute to hand back exactly this
+        # (synthetic) pitcher with a fresh raw value for the same metric --
+        # if the manual guard didn't work, this would overwrite points=777.
+        monkeypatch.setattr(
+            C.pitching_caps, "lmu_pitchers",
+            lambda season=None, start=None, end=None: pd.DataFrame(
+                {"PitcherId": [pid], "Pitcher": ["Synthetic, Test"]}))
+        monkeypatch.setattr(C, "compute_player_day", lambda p, d: {metric: 10.0})
+
+        written = C.score_day(play_date, season="9999/0000")
+        assert written == 0
+
+        d = C.read_daily(play_date, pid)
+        row = d[d["metric"] == metric].iloc[0]
+        assert int(row["points"]) == 777
+        assert row["source"] == "manual"
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM cauldron_daily WHERE player_id=:p"), {"p": pid})
+
+
+def test_score_day_smoke():
+    from app.data import pitching_caps, seasons
+    season = seasons.current_season()
+    pid = int(pitching_caps.lmu_pitchers(season).iloc[0]["PitcherId"])
+    apps = pitching_caps._pitcher_velo_appearances(pid)
+    date = str(apps.sort_values("game_date")["game_date"].iloc[-1])
+
+    C.ensure_tables()
+    C.seed_default_scoring()
+    written = C.score_day(date, season=season)
+    assert isinstance(written, int) and written >= 0
+
+
+def test_player_and_team_totals(monkeypatch):
+    cycle_id = "9999-smoke"
+    p1, p2 = 999999004, 999999005
+    play_date = "2026-03-04"
+    try:
+        C.set_team(p1, cycle_id, "Team 1", updated_by=1)
+        C.set_team(p2, cycle_id, "Team 2", updated_by=1)
+        C.upsert_daily([
+            {"player_id": p1, "play_date": play_date, "metric": "strike_pct",
+             "raw_value": 58.0, "points": 20, "source": "auto"},
+            {"player_id": p1, "play_date": play_date, "metric": "bb_pct",
+             "raw_value": 4.0, "points": 15, "source": "auto"},
+            {"player_id": p2, "play_date": play_date, "metric": "strike_pct",
+             "raw_value": 40.0, "points": -10, "source": "auto"},
+        ], updated_by=1)
+
+        pt = C.player_totals(cycle_id)
+        assert int(pt.loc[pt["player_id"] == p1, "total"].iloc[0]) == 35
+        assert int(pt.loc[pt["player_id"] == p2, "total"].iloc[0]) == -10
+
+        tt = C.team_totals(cycle_id)
+        assert int(tt.loc[tt["team"] == "Team 1", "total"].iloc[0]) == 35
+        assert int(tt.loc[tt["team"] == "Team 2", "total"].iloc[0]) == -10
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            for t in ("cauldron_daily", "cauldron_teams"):
+                c.execute(text(f"DELETE FROM {t} WHERE player_id IN (:p1, :p2)"),
+                          {"p1": p1, "p2": p2})

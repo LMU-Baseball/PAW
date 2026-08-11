@@ -24,6 +24,7 @@ from sqlalchemy import text
 
 from app.data import pitching as P
 from app.data import pitching_caps
+from app.data import seasons
 from app.data.cache import cached
 from app.db import get_engine, query_df
 
@@ -310,3 +311,148 @@ def compute_player_day(pitcher_id, play_date) -> dict:
         metrics[metric] = None
 
     return metrics
+
+
+# ================================= SCORING ===================================
+
+def score_value(metric, raw_value, scoring_row) -> int | None:
+    """FIXED scoring: compare `raw_value` to `scoring_row`'s threshold per its
+    direction ('gte' -> met if raw >= threshold; 'lte' -> met if raw <=
+    threshold). Returns `int(points_met)` when met, else `int(points_missed)`.
+
+    `None` if `raw_value` is `None`/NaN -- a scoreless/data-starved metric must
+    never resolve to a score. `scoring_row` may be a dict or a `read_scoring()`
+    DataFrame row (both support `row["col"]`). `metric` is unused by the FIXED
+    formula itself (threshold/direction/points already fully describe it) --
+    it's accepted so callers can pass it straight through without unpacking,
+    and so a future non-FIXED scoring mode has a natural place to branch on it.
+    min_sample gating is the CALLER's job (`score_day` knows the day's
+    pitch/PA count; this function only ever sees the metric's already-computed
+    raw value), not this function's."""
+    if raw_value is None:
+        return None
+    try:
+        if pd.isna(raw_value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    met = (raw_value >= scoring_row["threshold"] if scoring_row["direction"] == "gte"
+           else raw_value <= scoring_row["threshold"])
+    return int(scoring_row["points_met"]) if met else int(scoring_row["points_missed"])
+
+
+def score_day(play_date, season=None) -> int:
+    """Auto-score one calendar day for every rostered pitcher
+    (`pitching_caps.lmu_pitchers(season or seasons.current_season())`):
+    compute each pitcher's raw AUTO metrics (`compute_player_day`), score them
+    against the coach's tuned config (`read_scoring()`), and upsert the
+    results as `source='auto'` rows via `upsert_daily`.
+
+    NEVER overwrites a coach's `source='manual'` row for the same (player,
+    play_date, metric) -- existing rows for the day are read up front
+    (`read_daily(play_date)`) and any (player_id, metric) already stored with
+    `source='manual'` is skipped outright, before scoring is even attempted.
+
+    Metrics configured `is_manual` (no threshold/direction to score against)
+    and metrics with a `None` raw value (denominator was 0 for the day, or the
+    pitcher threw no tracked pitches) are skipped -- no row is written for
+    either. min_sample gating beyond that is NOT implemented here: a coach
+    hasn't yet specified how sample size should be counted per metric (pitches
+    vs. PAs vs. balls in play differ per metric), so every day with a non-None
+    raw value scores, regardless of how few pitches/PAs it's built on.
+
+    Returns the number of rows written (upserted)."""
+    scoring = read_scoring()
+    if scoring.empty:
+        return 0
+    scoring_by_metric = {row["metric"]: row for _, row in scoring.iterrows()}
+
+    roster = pitching_caps.lmu_pitchers(season or seasons.current_season())
+    if roster.empty:
+        return 0
+
+    existing = read_daily(play_date)
+    manual_keys = set()
+    if not existing.empty:
+        manual = existing[existing["source"] == "manual"]
+        manual_keys = set(zip(manual["player_id"].astype(int), manual["metric"]))
+
+    rows = []
+    for _, r in roster.iterrows():
+        pid = int(r["PitcherId"])
+        metrics = compute_player_day(pid, play_date)
+        for metric, raw_value in metrics.items():
+            scoring_row = scoring_by_metric.get(metric)
+            if scoring_row is None or bool(scoring_row.get("is_manual")):
+                continue  # no FIXED config to score against (manual metric)
+            if (pid, metric) in manual_keys:
+                continue  # a coach's manual entry always wins
+            points = score_value(metric, raw_value, scoring_row)
+            if points is None:
+                continue  # raw_value was None -- nothing to score
+            rows.append({
+                "player_id": pid,
+                "play_date": play_date,
+                "metric": metric,
+                "raw_value": raw_value,
+                "points": points,
+                "source": "auto",
+            })
+
+    upsert_daily(rows)
+    return len(rows)
+
+
+# ============================== AGGREGATION ==================================
+
+def player_totals(cycle_id, start=None, end=None) -> pd.DataFrame:
+    """Points summed per player from `cauldron_daily`, for players rostered
+    onto a team in `cycle_id` (`read_teams`), optionally bounded to
+    `play_date` in `[start, end]` (either end open, both inclusive). A
+    rostered player with no scored days yet still appears, with `total` = 0.
+
+    Cols: `player_id, total`."""
+    cols = ["player_id", "total"]
+    teams = read_teams(cycle_id)
+    if teams.empty:
+        return pd.DataFrame(columns=cols)
+
+    clauses, params = [], {}
+    if start is not None:
+        clauses.append("play_date >= :start")
+        params["start"] = str(start)
+    if end is not None:
+        clauses.append("play_date <= :end")
+        params["end"] = str(end)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    daily = query_df(f"SELECT player_id, points FROM {DAILY_TABLE}{where}", params)
+
+    player_ids = teams["player_id"].astype(int)
+    result = pd.DataFrame({"player_id": player_ids})
+    if daily.empty:
+        result["total"] = 0
+        return result.reset_index(drop=True)
+
+    totals = daily.groupby("player_id")["points"].sum()
+    result["total"] = result["player_id"].map(totals).fillna(0).astype(int)
+    return result.reset_index(drop=True)
+
+
+def team_totals(cycle_id) -> pd.DataFrame:
+    """Points summed per TEAM for one competition cycle: `cauldron_daily`
+    joined to `cauldron_teams` (cycle_id-scoped) on player_id. A team with
+    rostered players but zero points scored yet still appears, with `total` =
+    0.
+
+    Cols: `team, total`."""
+    cols = ["team", "total"]
+    teams = read_teams(cycle_id)
+    if teams.empty:
+        return pd.DataFrame(columns=cols)
+
+    daily = query_df(f"SELECT player_id, points FROM {DAILY_TABLE}")
+    merged = teams[["player_id", "team"]].merge(daily, on="player_id", how="left")
+    result = merged.groupby("team", as_index=False)["points"].sum()
+    result = result.rename(columns={"points": "total"})
+    result["total"] = result["total"].fillna(0).astype(int)
+    return result[cols]
