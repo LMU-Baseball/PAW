@@ -17,17 +17,17 @@ def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
 
 def pitcher_options(*, is_coach: bool, own_trackman_id, start=None, end=None) -> list[dict]:
     """Pitcher dropdown options, scoped to [start, end] when both are given
-    (no args = every LMU pitcher who's ever had a bullpen)."""
-    df = B.lmu_bullpen_pitchers(start=start, end=end)
+    (no args = every LMU pitcher who's ever had a bullpen). Date-scoping is
+    coach only -- a player's own option is never filtered by date, so
+    narrowing the range can't hide a player from their own dashboard."""
     if is_coach:
+        df = B.lmu_bullpen_pitchers(start=start, end=end)
         return [{"label": str(r.pitcher), "value": int(r.pitcher_id)}
                 for r in df.itertuples()]
     pid = resolve_pitcher(None, is_coach=False, own_trackman_id=own_trackman_id)
     if pid is None:
         return []
-    row = df[df["pitcher_id"] == pid]
-    label = str(row.iloc[0]["pitcher"]) if not row.empty else str(pid)
-    return [{"label": label, "value": pid}] if not row.empty else []
+    return [{"label": B.pitcher_name(pid) or str(pid), "value": pid}]
 
 
 def session_dropdown_options(sessions_df) -> list[dict]:

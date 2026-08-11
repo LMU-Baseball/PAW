@@ -41,6 +41,18 @@ def test_pitcher_options_scoped_by_date_range():
     assert GEIS in {o["value"] for o in opts_window}
 
 
+def test_pitcher_options_player_role_never_date_scoped():
+    """Final-review fix: unlike the coach branch, a player-role user's own
+    option must survive any date range -- including one with zero bullpen
+    pitches in it -- matching the other five dashboards' selectors."""
+    from app.dashboards.bullpen import selectors
+    opts_no_range = selectors.pitcher_options(is_coach=False, own_trackman_id=GEIS)
+    assert opts_no_range == [{"label": selectors.B.pitcher_name(GEIS), "value": GEIS}]
+    opts_empty_range = selectors.pitcher_options(
+        is_coach=False, own_trackman_id=GEIS, start="1900-01-01", end="1900-01-02")
+    assert opts_empty_range == opts_no_range
+
+
 def test_bullpen_pitcher_dd_options_callback_registered(server):
     from dash import Dash
     from app.dashboards.bullpen import layout, callbacks
@@ -316,12 +328,13 @@ def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
     assert expected <= unscoped
 
 
-def test_layout_initial_paint_player_role_empty_options_value_consistent(server):
-    """Task 4 fix round 1: when a player-role user's own bullpen falls outside
-    the season-default range, first-paint options is [] -- the dropdown value
-    must not be bound to their own id (which isn't among the options); it must
-    be the fallback used by _on_daterange_pitchers (first option's value, or
-    None), matching the runtime callback's own behavior exactly."""
+def test_layout_initial_paint_player_role_keeps_own_option_outside_range(server):
+    """Final-review fix: a player-role user's own option must stay visible
+    regardless of the selected date range, matching the other five dashboards
+    (hitting/pitching/catching selectors + hittrax resolve_player/player_options).
+    Even when the player's own bullpen falls entirely outside the
+    season-default range, first-paint options must be non-empty and the
+    dropdown value must be their own id -- never an empty, disabled dropdown."""
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
@@ -338,9 +351,9 @@ def test_layout_initial_paint_player_role_empty_options_value_consistent(server)
     store = out.children[0]
     pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
     assert pitcher_dd.id == "bp-pitcher-dd"
-    assert pitcher_dd.options == []
-    assert pitcher_dd.value is None
-    assert store.data["pitcher_id"] is None
+    assert pitcher_dd.options != []
+    assert pitcher_dd.value == -999
+    assert store.data["pitcher_id"] == -999
 
 
 def test_bullpen_layout_uses_preset_dropdown(server):

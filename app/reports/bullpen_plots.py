@@ -47,7 +47,14 @@ def movement_uri(df) -> str:
         _add_ellipse(ax, xs, ys, color)
         ax.scatter(xs, ys, s=55, color=color, alpha=0.8, edgecolor="white",
                    linewidth=0.5, zorder=3)
-    ax.set_aspect("equal")
+    # Equal data aspect (a circle of movement reads the same in both axes)
+    # inside a square box that fills the panel. Plain set_aspect("equal")
+    # (adjustable="box", the default) shrinks the axes box to fit the data,
+    # letterboxing the panel with whitespace next to Release in the report's
+    # bottom row; adjustable="datalim" + set_box_aspect(1) instead expands the
+    # data limits to fill the fixed square box.
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_box_aspect(1)
     ax.set_xlabel("HB (in)", fontsize=8)
     ax.set_ylabel("IVB (in)", fontsize=8)
     ax.set_title("Movement", fontsize=11, color="#9A0021", fontweight="bold")

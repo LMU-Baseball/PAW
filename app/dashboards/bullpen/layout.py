@@ -76,10 +76,10 @@ def serve_layout() -> html.Div:
                                          start=start_d, end=end_d)
     # Fallback mirrors _on_daterange_pitchers exactly (callbacks.py): if the
     # unscoped default isn't in the range-scoped options, fall back to the
-    # first available option's value (or None) -- NOT resolve_pitcher(), which
-    # would force a player-role user back to their own id even when it's not
-    # among `pitchers` (own bullpen outside the season-default range), binding
-    # a stale value to empty options until the date range is touched.
+    # first available option's value (or None). In practice this only fires
+    # for coaches -- a player-role user's own option is always present in
+    # `pitchers` regardless of date range (selectors.pitcher_options never
+    # date-scopes a player's own id), so `default_pitcher` always matches.
     pitcher_values = {p["value"] for p in pitchers}
     if default_pitcher not in pitcher_values:
         default_pitcher = pitchers[0]["value"] if pitchers else None
