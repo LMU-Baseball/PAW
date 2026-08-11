@@ -88,3 +88,9 @@ def test_pitch_freq_bar_uri():
     uri = plots.pitch_freq_bar_uri([("Fastball", 6), ("Slider", 3), ("ChangeUp", 2)])
     assert uri.startswith("data:image/png")
     assert plots.pitch_freq_bar_uri([]).startswith("data:image/png")
+
+
+def test_pitch_freq_donut_uri():
+    uri = plots.pitch_freq_donut_uri(
+        [("Fastball", 5), ("Sinker", 5), ("Cutter", 4)])
+    assert uri.startswith("data:image/")

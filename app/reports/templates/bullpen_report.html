@@ -16,17 +16,7 @@
     <img class="hdr-lion" src="{{ assets.lion_png }}" alt="">
   </div>
 
-  <img class="freq-bar" src="{{ charts.pitch_freq }}" alt="Pitch Frequency"
-       style="width:100%; margin:6px 0;">
-
-  <div class="grid3">
-    <div class="panel plot"><img src="{{ charts.velo }}" alt="Velocity"></div>
-    <div class="panel plot"><img src="{{ charts.movement }}" alt="Movement"></div>
-    <div class="panel plot"><img src="{{ charts.location }}" alt="Location"></div>
-  </div>
-
   <div class="grid2">
-    <div class="panel plot"><img src="{{ charts.release }}" alt="Release"></div>
     <div class="panel">
       <div class="panel-t">Stats by pitch type</div>
       <table>
@@ -46,6 +36,17 @@
       <div class="fb-callout"><b>Fastball</b> — Avg Velo {{ fastball.avg_velo }} · Max {{ fastball.max_velo }} · Avg Spin {{ fastball.avg_spin if fastball.avg_spin is not none else '—' }}</div>
       {% endif %}
     </div>
+    <div class="panel plot"><img src="{{ charts.pitch_freq }}" alt="Pitch Frequency"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel plot"><img src="{{ charts.location }}" alt="Location"></div>
+    <div class="panel plot"><img src="{{ charts.velo }}" alt="Velocity"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel plot"><img src="{{ charts.movement }}" alt="Movement"></div>
+    <div class="panel plot"><img src="{{ charts.release }}" alt="Release"></div>
   </div>
 </div>
 

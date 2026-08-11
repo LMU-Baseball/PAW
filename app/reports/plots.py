@@ -249,6 +249,17 @@ def pitch_freq_bar_uri(counts) -> str:
     return _fig_to_uri(fig)
 
 
+def pitch_freq_donut_uri(counts) -> str:
+    """Pitch-type mix as a donut (replaces the old full-width bar); center = total."""
+    fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    total = sum(n for _, n in counts)
+    colors = [_color_for(pt) for pt, _ in counts]
+    values = [n for _, n in counts]
+    _donut(ax, values, colors, str(total))
+    ax.set_title("Pitch Frequency", fontsize=11, color="#9A0021", fontweight="bold")
+    return _fig_to_uri(fig)
+
+
 def pitch_usage_donuts_uri(df) -> str:
     """Overall / 2K / Splits(vLHH|vRHH) usage donuts as one PNG data URI."""
     from app.data.pitching import pitch_usage_table

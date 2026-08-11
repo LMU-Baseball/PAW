@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
 import matplotlib.pyplot as plt
 
-from app.reports.plots import _fig_to_uri, _color_for, _draw_zone
+from app.reports.plots import _fig_to_uri, _color_for, _draw_zone, _add_ellipse
 
 
 def _by_type(df):
@@ -38,8 +38,15 @@ def movement_uri(df) -> str:
     ax.axhline(0, color="#ccc", lw=0.8)
     ax.axvline(0, color="#ccc", lw=0.8)
     for pt, sub in _by_type(df):
-        ax.scatter(sub["horz_break"], sub["ind_vert_break"], s=55,
-                   color=_color_for(pt), alpha=0.8, edgecolor="white", linewidth=0.5)
+        color = _color_for(pt)
+        xs = sub["horz_break"].to_numpy()
+        ys = sub["ind_vert_break"].to_numpy()
+        # Faint per-pitch-type 1-sigma reference circle (movement trend/consistency),
+        # drawn under the scatter — same pattern as the interactive dashboard's
+        # movement_fig / _ellipse_xy (app/dashboards/bullpen/charts.py).
+        _add_ellipse(ax, xs, ys, color)
+        ax.scatter(xs, ys, s=55, color=color, alpha=0.8, edgecolor="white",
+                   linewidth=0.5, zorder=3)
     ax.set_aspect("equal")
     ax.set_xlabel("HB (in)", fontsize=8)
     ax.set_ylabel("IVB (in)", fontsize=8)

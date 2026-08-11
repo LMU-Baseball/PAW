@@ -34,10 +34,26 @@ def test_bullpen_report_html_has_new_elements():
     from app.reports import bullpen_report as BR
     pid, date = _session()
     html = BR._build_html(pid, date)
-    # SP5 additions now on the bullpen report: header metrics, freq bar, callout.
+    # SP5 additions now on the bullpen report: header metrics, freq donut, callout.
     assert "STRIKE%" in html and "MAX MPH" in html
-    assert "freq-bar" in html          # pitch-frequency stacked bar image
+    assert 'alt="Pitch Frequency"' in html  # pitch-frequency donut image
     assert "fb-callout" in html        # fastball callout (GEIS throws a fastball)
+
+
+def test_bullpen_report_layout_is_three_two_col_rows():
+    """Page 1 restructure: stats table + donut, location + velo, movement + release."""
+    from app.reports import bullpen_report as BR
+    pid, date = _session()
+    html = BR._build_html(pid, date)
+    assert html.count('class="grid2"') == 3
+    assert "freq-bar" not in html
+    assert 'class="grid3"' not in html
+    stats_idx = html.index("Stats by pitch type")
+    location_idx = html.index('alt="Location"')
+    velo_idx = html.index('alt="Velocity"')
+    movement_idx = html.index('alt="Movement"')
+    release_idx = html.index('alt="Release"')
+    assert stats_idx < location_idx < velo_idx < movement_idx < release_idx
 
 
 def test_bullpen_cache_key_includes_code_version():

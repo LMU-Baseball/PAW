@@ -42,7 +42,7 @@ def _build_html(pitcher_trackman_id: int, date) -> str:
     charts = {
         "velo": BP.velo_strip_uri(df), "movement": BP.movement_uri(df),
         "release": BP.release_uri(df), "location": BP.location_uri(df),
-        "pitch_freq": plots.pitch_freq_bar_uri(counts),
+        "pitch_freq": plots.pitch_freq_donut_uri(counts),
     }
     mv = df["rel_speed"].dropna()
     max_velo = round(float(mv.max()), 1) if not mv.empty else None
@@ -60,7 +60,7 @@ def _build_html(pitcher_trackman_id: int, date) -> str:
 
 # Bump when the bullpen report layout/content changes so cached PDFs (keyed by
 # DATA max-date) don't keep serving the old design. See MEMORY §3j.
-_CODE_VERSION = "2026-08-polish"
+_CODE_VERSION = "2026-08-layout-v2"
 
 
 def _cache_path(pid: int, date, maxd) -> Path:

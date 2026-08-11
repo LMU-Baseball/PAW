@@ -44,7 +44,6 @@ td.pt { font-weight: 700; }
 .plot { display: flex; align-items: center; justify-content: center; padding: 4px; }
 .plot img { width: 100%; height: auto; }
 .usage-donuts { width: 100%; height: auto; display: block; }
-.freq-bar { width: 100%; height: auto; display: block; }
 .pg-break { page-break-before: always; }
 table.detail { width: 100%; border-collapse: collapse; font-size: 10px; }
 table.detail th, table.detail td { padding: 2px 4px; text-align: center; border-bottom: 1px solid #eee; }
