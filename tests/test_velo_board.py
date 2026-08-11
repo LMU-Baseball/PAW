@@ -46,3 +46,33 @@ def test_grid_rows_prefills_auto_velo_for_roster():
     assert set(["pitcher_id", "pitcher_name", "velo_avg", "velo_max", "velo_goal",
                 "assessment", "max_pr", "change_avg", "change_max"]).issubset(df.columns)
     assert len(df) > 0   # roster present
+
+
+def test_leaderboard_sorted_and_has_opponent_for_games():
+    from app.data import seasons
+    lb = V.leaderboard(seasons.current_season())
+    assert list(lb.columns) == ["pitcher_name", "season_max", "season_max_date",
+                                 "season_avg", "last_velo", "last_date", "versus", "trend"]
+    assert len(lb) > 0   # roster present
+    # sorted desc by season_max (nulls last)
+    vals = lb["season_max"].dropna().tolist()
+    assert vals == sorted(vals, reverse=True)
+    is_null = lb["season_max"].isna().tolist()
+    if any(is_null):
+        first_null = is_null.index(True)
+        assert all(is_null[first_null:])   # once nulls start, no more real values follow
+
+
+def test_leaderboard_opponent_is_real_name_for_pitcher_with_a_game():
+    # Spot-check against an actual opponent (excludes intrasquad "Live ABs"
+    # scrimmages, where GAMES legitimately has home_team == away_team == "LMU"
+    # -- not a bug, just not useful for verifying opponent detection).
+    from app.data import seasons
+    lb = V.leaderboard(seasons.current_season())
+    has_game = lb[lb["last_date"].notna() & lb["versus"].notna()]
+    real_opponent = has_game[has_game["versus"] != "LMU"]
+    if real_opponent.empty:
+        return  # no in-season vs.-other-team game appearances in this fixture
+    versus = real_opponent.iloc[0]["versus"]
+    assert isinstance(versus, str) and versus.strip() != ""
+    assert "LMU" not in versus and "Loyola Marymount" not in versus

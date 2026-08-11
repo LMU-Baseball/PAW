@@ -16,6 +16,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from app.data.cache import cached
+from app.data.seasons import season_bounds
 from app.db import get_engine, query_df
 
 VELO_BOARD_TABLE = "velo_board_entries"
@@ -140,11 +141,13 @@ def _week_end(week_start) -> str:
     return (date.fromisoformat(str(week_start)[:10]) + timedelta(days=6)).isoformat()
 
 
-def _velo_series(pitcher_id, start=None, end=None) -> pd.Series:
-    """Fastball/Sinker RelSpeed values from GAMES + BULLPEN for one raw
+def _velo_rows(pitcher_id, start=None, end=None) -> pd.DataFrame:
+    """Fastball/Sinker (rel_speed, dt) rows from GAMES + BULLPEN for one raw
     trackman pitcher_id, optionally bounded by [start, end] (either open-
     ended). A direct PitcherId match (no sibling-id union) -- simplest
-    correct version per the task brief."""
+    correct version per the task brief. Keeps `dt` alongside each value
+    (unlike `_velo_series`) so callers can locate e.g. the date a max
+    occurred."""
     pid = int(pitcher_id)
     g_clause = f"PitcherId = :p AND TaggedPitchType IN ({_VELO_PITCH_TYPES})"
     b_clause = g_clause
@@ -157,9 +160,16 @@ def _velo_series(pitcher_id, start=None, end=None) -> pd.Series:
         g_clause += " AND Date <= :e"
         b_clause += " AND DATE(Date) <= :e"
         params["e"] = str(end)
-    games = query_df(f"SELECT RelSpeed AS rel_speed FROM GAMES WHERE {g_clause}", params)
-    bullpen = query_df(f"SELECT RelSpeed AS rel_speed FROM BULLPEN WHERE {b_clause}", params)
-    return pd.concat([games["rel_speed"], bullpen["rel_speed"]], ignore_index=True).dropna()
+    games = query_df(f"SELECT RelSpeed AS rel_speed, Date AS dt FROM GAMES WHERE {g_clause}", params)
+    bullpen = query_df(f"SELECT RelSpeed AS rel_speed, DATE(Date) AS dt FROM BULLPEN WHERE {b_clause}", params)
+    return pd.concat([games, bullpen], ignore_index=True).dropna(subset=["rel_speed"]).reset_index(drop=True)
+
+
+def _velo_series(pitcher_id, start=None, end=None) -> pd.Series:
+    """Fastball/Sinker RelSpeed values from GAMES + BULLPEN for one raw
+    trackman pitcher_id, optionally bounded by [start, end]. Thin wrapper
+    over `_velo_rows` that drops the date column."""
+    return _velo_rows(pitcher_id, start=start, end=end)["rel_speed"]
 
 
 @cached
@@ -249,3 +259,110 @@ def grid_rows(season_label, week_start) -> pd.DataFrame:
             "change_max": change_max,
         })
     return pd.DataFrame(rows, columns=cols)
+
+
+# =========================== PLAYER LEADERBOARD ==============================
+#
+# Player-facing view: one row per rostered pitcher, ranked by their season-best
+# velo. Unlike grid_rows, this has no coach-edited columns to go stale, so it's
+# safe to @cached like the other pure-Trackman reads above.
+
+def _last_bullpen_velo(pitcher_id) -> dict:
+    """{"last_velo", "last_date"}: the most recent BULLPEN session's avg
+    Fastball/Sinker RelSpeed + that session's date, for a pitcher who threw no
+    qualifying game this season. Both None if the pitcher has no bullpen
+    history. Fastball/Sinker (not bullpen.py's Fastball-only avg_fb_velo) to
+    stay consistent with this module's velo definition."""
+    df = query_df(
+        f"SELECT DATE(Date) AS dt, RelSpeed AS rel_speed FROM BULLPEN "
+        f"WHERE PitcherId = :p AND TaggedPitchType IN ({_VELO_PITCH_TYPES})",
+        {"p": int(pitcher_id)},
+    )
+    df = df.dropna(subset=["rel_speed", "dt"])
+    if df.empty:
+        return {"last_velo": None, "last_date": None}
+    last_date = df["dt"].max()
+    return {"last_velo": float(df.loc[df["dt"] == last_date, "rel_speed"].mean()),
+            "last_date": str(last_date)}
+
+
+@cached
+def leaderboard(season_label) -> pd.DataFrame:
+    """One row per rostered pitcher (`pitching_caps.lmu_pitchers`), sorted by
+    `season_max` descending (None/NaN last):
+
+        pitcher_name, season_max, season_max_date, season_avg,
+        last_velo, last_date, versus, trend
+
+    `season_max`/`season_avg`/`season_max_date`: max/mean/date-of-max of the
+    season's Fastball/Sinker RelSpeed (GAMES + BULLPEN, season-bounded).
+
+    `last_velo`/`last_date`/`versus`: the pitcher's most recent in-season GAME
+    appearance (`pitching_caps._pitcher_velo_appearances`) -- avg velo, date,
+    and opponent. Opponent is identified the same way `game_context` does (via
+    `HomeTeamForeignID == LMU_TEAM_ID`, NOT by name-matching a "LMU" string),
+    so it works regardless of how LMU's team name is spelled in a given row.
+    If the pitcher has no game this season, falls back to their most recent
+    BULLPEN session (`_last_bullpen_velo`) with `versus` = None.
+
+    `trend`: the pitcher's most recent `pitching_caps.velo_trend` velo_change
+    (signed float, all-time most recent appearance -- not season-scoped);
+    None if unknown (e.g. a pitcher with only one career appearance).
+    """
+    from app.data import pitching_caps  # lazy: avoid import cost when unused
+
+    cols = ["pitcher_name", "season_max", "season_max_date", "season_avg",
+            "last_velo", "last_date", "versus", "trend"]
+    roster = pitching_caps.lmu_pitchers(season_label)
+    if roster.empty:
+        return pd.DataFrame(columns=cols)
+
+    s, e = season_bounds(season_label)
+    rows = []
+    for _, r in roster.iterrows():
+        pid = int(r["PitcherId"])
+
+        season_rows = _velo_rows(pid, start=s, end=e)
+        if season_rows.empty:
+            season_max = season_avg = season_max_date = None
+        else:
+            season_max = float(season_rows["rel_speed"].max())
+            season_avg = float(season_rows["rel_speed"].mean())
+            season_max_date = str(season_rows.loc[season_rows["rel_speed"].idxmax(), "dt"])
+
+        # NOTE: filter by the season's [s, e] Date bounds, not by matching
+        # `apps["season_label"]` -- that column is pitching_caps's derived
+        # half-year label ("Spring 2026"/"Fall 2025"), a different format
+        # from the academic-year `season_label` this function receives
+        # ("2025/2026"), so a direct string match would never hit.
+        apps = pitching_caps._pitcher_velo_appearances(pid)
+        season_apps = apps[(apps["game_date"] >= s) & (apps["game_date"] <= e)] if not apps.empty else apps
+        if not season_apps.empty:
+            season_apps = season_apps.sort_values("game_date", ascending=False, kind="mergesort")
+            last_row = season_apps.iloc[0]
+            last_velo = float(last_row["appearance_avg_velo"])
+            last_date = str(last_row["game_date"])
+            ctx = pitching_caps.game_context(last_row["game_id"])
+            versus = ctx["away_team"] if ctx["lmu_is_home"] else ctx["home_team"]
+        else:
+            bp = _last_bullpen_velo(pid)
+            last_velo, last_date, versus = bp["last_velo"], bp["last_date"], None
+
+        vt = pitching_caps.velo_trend(pid)
+        trend = None if vt.empty or pd.isna(vt.iloc[-1]["velo_change"]) else float(vt.iloc[-1]["velo_change"])
+
+        rows.append({
+            "pitcher_name": r["Pitcher"],
+            "season_max": season_max,
+            "season_max_date": season_max_date,
+            "season_avg": season_avg,
+            "last_velo": last_velo,
+            "last_date": last_date,
+            "versus": versus,
+            "trend": trend,
+        })
+
+    df = pd.DataFrame(rows, columns=cols)
+    return df.sort_values(
+        "season_max", ascending=False, na_position="last", kind="mergesort"
+    ).reset_index(drop=True)
