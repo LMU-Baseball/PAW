@@ -19,6 +19,8 @@ def register_dashboards(server):
     build_hitting_practice_dash(server)
     from app.dashboards.bullpen.index import build_bullpen_dash
     build_bullpen_dash(server)
+    from app.dashboards.velo_board.index import build_velo_board_dash
+    build_velo_board_dash(server)
 
 
 def _protect_dash_routes(server):
