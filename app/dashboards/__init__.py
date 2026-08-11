@@ -21,6 +21,8 @@ def register_dashboards(server):
     build_bullpen_dash(server)
     from app.dashboards.velo_board.index import build_velo_board_dash
     build_velo_board_dash(server)
+    from app.dashboards.cauldron.index import build_cauldron_dash
+    build_cauldron_dash(server)
 
 
 def _protect_dash_routes(server):
