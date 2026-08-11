@@ -22,6 +22,9 @@ import math
 import pandas as pd
 from sqlalchemy import text
 
+from app.data import pitching as P
+from app.data import pitching_caps
+from app.data.cache import cached
 from app.db import get_engine, query_df
 
 SCORING_TABLE = "cauldron_scoring"
@@ -227,3 +230,83 @@ def set_team(player_id, cycle_id, team, updated_by=None) -> None:
 def read_teams(cycle_id) -> pd.DataFrame:
     """All cauldron_teams rows for one competition cycle."""
     return query_df(f"SELECT * FROM {TEAMS_TABLE} WHERE cycle_id = :c", {"c": cycle_id})
+
+
+# ================================= COMPUTE ===================================
+#
+# Off-speed pitch types for offspeed_zone -- everything that isn't a
+# fastball-family pitch (Fastball/Sinker/Cutter), matching pitching.py's
+# PITCH_COLORS vocabulary.
+_OFFSPEED_TYPES = {"ChangeUp", "Curveball", "Slider", "Sweeper", "Splitter"}
+
+# NON-STANDARD auto metrics whose scoring formula the coaching staff hasn't
+# defined yet. Each stays a hard None until a coach signs off on a definition
+# (see the seed placeholders in _SCORING_DEFAULTS).
+_NON_STANDARD_METRICS = ("early_ahead", "pre2k_zone", "twok_kill", "count_work")
+
+
+@cached
+def compute_player_day(pitcher_id, play_date) -> dict:
+    """One pitcher's raw AUTO-metric values for one calendar day, computed
+    straight from GAMES pitch data (no DB read/write here -- pure compute).
+
+    Reuses `app.data.pitching`'s existing pure transforms wherever they already
+    compute a metric (strike_pct, fps_pct, k_pct, bb_pct, barrel_pct_ev), scoped
+    to this one pitcher/day via `pitching_caps.range_pitches_for(pid, date, date)`
+    -- start==end==play_date already gets the sibling-id union and Date scoping
+    for free, exactly like the velo board's day-scoped reads.
+
+    Returns `{}` if the pitcher threw no tracked GAMES pitches that day. A
+    metric whose denominator is 0 for the day (no off-speed pitches, no balls
+    in play, etc.) resolves to `None` for that metric, never 0 or NaN -- a
+    scoreless/data-starved day must not read as "met the bar."
+    """
+    df = pitching_caps.range_pitches_for(pitcher_id, play_date, play_date)
+    if df.empty:
+        return {}
+
+    metrics: dict[str, float | None] = {}
+
+    # strike_pct: strikes / all pitches. df is non-empty (checked above), so
+    # the denominator can't be 0.
+    metrics["strike_pct"] = P.strike_pct(df)[0]
+
+    # first_pitch_strike: strike rate on each PA's first pitch. Reuses
+    # pitching.fps_pct, whose pitch_of_pa == 1 filter IS "balls == 0 and
+    # strikes == 0" (the count before any pitch has been thrown can only be
+    # 0-0 on the PA's first pitch).
+    first_pitches = df[df["pitch_of_pa"] == 1]
+    metrics["first_pitch_strike"] = P.fps_pct(df)[0] if len(first_pitches) else None
+
+    # k_pct / bb_pct: strikeouts / walks per plate appearance faced.
+    pa_count = P._pa_count(df)
+    metrics["k_pct"] = P.k_pct(df)[0] if pa_count else None
+    metrics["bb_pct"] = P.bb_pct(df)[0] if pa_count else None
+
+    # offspeed_zone: in-zone rate on off-speed pitch types only (reuses
+    # pitching.pitch_type's tagged/auto fallback + pitching's in-zone code set).
+    pt = P.pitch_type(df)
+    offspeed = df[pt.isin(_OFFSPEED_TYPES)]
+    if len(offspeed):
+        in_zone = offspeed["izt_zone"].isin(P._IN_ZONE_CODES)
+        metrics["offspeed_zone"] = round(100.0 * float(in_zone.mean()), 1)
+    else:
+        metrics["offspeed_zone"] = None
+
+    # barrel: barrels-allowed rate on balls in play (reuses pitching's
+    # coach-simplified barrel_pct_ev: exit_speed >= 95, no LineDrive/FlyBall
+    # qualifier). None (not 0) when there's no balls-in-play data to judge --
+    # either no InPlay pitches, or exit_speed wasn't captured for any of them.
+    if "exit_speed" not in df.columns:
+        metrics["barrel"] = None
+    else:
+        bip_with_ev = df.loc[df["pitch_call"] == "InPlay", "exit_speed"].dropna()
+        metrics["barrel"] = P.barrel_pct_ev(df)[0] if len(bip_with_ev) else None
+
+    # NON-STANDARD metrics: no coach-approved formula yet (placeholders only
+    # in the Task-1 scoring seed). Each stays None until defined.
+    for metric in _NON_STANDARD_METRICS:
+        # TODO(coach-def): formula pending coach sign-off for this metric.
+        metrics[metric] = None
+
+    return metrics

@@ -39,3 +39,16 @@ def test_daily_upsert_and_team_and_scoring_seed():
         with get_engine().begin() as c:
             for t in ("cauldron_daily", "cauldron_teams"):
                 c.execute(text(f"DELETE FROM {t} WHERE player_id=999999002"))
+
+
+def test_compute_player_day_standard_metrics():
+    from app.data import cauldron as C, pitching_caps, seasons
+    # pick a pitcher + a date they pitched (derive from _pitcher_velo_appearances)
+    pid = int(pitching_caps.lmu_pitchers(seasons.current_season()).iloc[0]["PitcherId"])
+    apps = pitching_caps._pitcher_velo_appearances(pid)
+    date = str(apps.sort_values("game_date")["game_date"].iloc[-1])
+    m = C.compute_player_day(pid, date)
+    assert "strike_pct" in m and (m["strike_pct"] is None or 0 <= m["strike_pct"] <= 100)
+    for stub in ("early_ahead", "pre2k_zone", "twok_kill", "count_work"):
+        assert m.get(stub) is None   # not yet defined
+    assert C.compute_player_day(pid, "1900-01-01") == {}   # no data
