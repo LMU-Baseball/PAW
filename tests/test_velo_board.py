@@ -30,3 +30,19 @@ def test_upsert_inserts_then_updates():
         from sqlalchemy import text
         with get_engine().begin() as c:
             c.execute(text("DELETE FROM velo_board_entries WHERE pitcher_id=999999001"))
+
+
+def test_week_start_is_monday():
+    assert V.week_start_for("2026-03-04") == "2026-03-02"   # Wed -> Mon
+
+
+def test_grid_rows_prefills_auto_velo_for_roster():
+    from app.data import seasons
+    season = seasons.current_season()
+    # a week inside the season that has data; use the season end week
+    _, e = seasons.season_bounds(season)
+    wk = V.week_start_for(e)
+    df = V.grid_rows(season, wk)
+    assert set(["pitcher_id", "pitcher_name", "velo_avg", "velo_max", "velo_goal",
+                "assessment", "max_pr", "change_avg", "change_max"]).issubset(df.columns)
+    assert len(df) > 0   # roster present
