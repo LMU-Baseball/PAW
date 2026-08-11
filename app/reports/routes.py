@@ -126,8 +126,18 @@ def bullpen_landing():
 
     Coaches see all LMU pitchers; a player sees only their own (self-only,
     matching the PDF gate) — no roster/session enumeration for players.
+
+    A Season dropdown (default = current season) scopes the pitcher list to
+    pitchers with a bullpen in that academic year, and the session list to that
+    season's sessions.
     """
-    pitchers = BULL.lmu_bullpen_pitchers()
+    from app.data import seasons
+    season = request.args.get("season") or seasons.current_season()
+    if season not in seasons.available_seasons():
+        season = seasons.current_season()
+    s_b, e_b = seasons.season_bounds(season)
+
+    pitchers = BULL.lmu_bullpen_pitchers(start=s_b, end=e_b)
     if getattr(current_user, "role", None) != "coach":
         tm = current_user.trackman_id
         pitchers = (pitchers[pitchers["pitcher_id"].astype(str) == str(tm)]
@@ -139,9 +149,12 @@ def bullpen_landing():
         match = pitchers[pitchers["pitcher_id"] == pid]
         if not match.empty:
             selected = match.iloc[0].to_dict()
-        sessions = BULL.sessions_for(pid).to_dict("records")
+            # Only this season's sessions (sessions_for is all-time).
+            sessions = [r for r in BULL.sessions_for(pid).to_dict("records")
+                        if s_b <= str(r["date"]) <= e_b]
     return render_template(
         "reports/bullpen_landing.html",
+        seasons=seasons.available_seasons(), season=season,
         pitchers=pitchers.to_dict("records"), pitcher_id=pid,
         selected=selected, sessions=sessions,
         data_max_date=BULL.bullpen_data_max_date(),

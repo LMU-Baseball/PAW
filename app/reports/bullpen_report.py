@@ -60,7 +60,7 @@ def _build_html(pitcher_trackman_id: int, date) -> str:
 
 # Bump when the bullpen report layout/content changes so cached PDFs (keyed by
 # DATA max-date) don't keep serving the old design. See MEMORY §3j.
-_CODE_VERSION = "2026-08-layout-v2"
+_CODE_VERSION = "2026-08-layout-v3-onepage"
 
 
 def _cache_path(pid: int, date, maxd) -> Path:

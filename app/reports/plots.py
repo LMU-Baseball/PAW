@@ -251,7 +251,7 @@ def pitch_freq_bar_uri(counts) -> str:
 
 def pitch_freq_donut_uri(counts) -> str:
     """Pitch-type mix as a donut (replaces the old full-width bar); center = total."""
-    fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    fig, ax = plt.subplots(figsize=(3.4, 2.5))
     total = sum(n for _, n in counts)
     colors = [_color_for(pt) for pt, _ in counts]
     values = [n for _, n in counts]

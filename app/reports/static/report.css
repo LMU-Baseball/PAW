@@ -17,7 +17,7 @@ body { font-family: 'Teko', Arial, sans-serif; color: #111; margin: 0; }
 .hdr-line b { font-size: 22px; }
 .hdr-line i { font-size: 10px; font-style: normal; opacity: .85; letter-spacing: .5px; }
 
-.grid2 { display: flex; gap: 12px; margin-top: 12px; }
+.grid2 { display: flex; gap: 10px; margin-top: 8px; }
 .grid2 > .panel { flex: 1; }
 .grid3 { display: flex; gap: 12px; margin-top: 12px; }
 .grid3 > .panel { flex: 1; }
@@ -43,6 +43,11 @@ td.pt { font-weight: 700; }
 .fb-callout { padding: 5px 10px; color: #555; font-size: 12px; border-top: 1px solid #eee; }
 .plot { display: flex; align-items: center; justify-content: center; padding: 4px; }
 .plot img { width: 100%; height: auto; }
+/* Bullpen report: cap chart height so all three visual rows fit on page 1
+   (the shared _fig_to_uri crops with bbox_inches="tight", so square charts
+   would otherwise render ~panel-width tall and overflow). Scoped to .bp-visuals
+   so the pitcher one-pager is unaffected. */
+.bp-visuals .plot img { width: auto; height: auto; max-width: 100%; max-height: 2.7in; margin: 0 auto; }
 .usage-donuts { width: 100%; height: auto; display: block; }
 .pg-break { page-break-before: always; }
 table.detail { width: 100%; border-collapse: collapse; font-size: 10px; }

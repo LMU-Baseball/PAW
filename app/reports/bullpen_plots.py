@@ -13,7 +13,7 @@ def _by_type(df):
 
 
 def velo_strip_uri(df) -> str:
-    fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    fig, ax = plt.subplots(figsize=(3.5, 2.5))
     types = list(df.groupby("tagged_pitch_type").groups)
     for i, (pt, sub) in enumerate(_by_type(df)):
         y = len(types) - i
@@ -32,7 +32,7 @@ def velo_strip_uri(df) -> str:
 
 
 def movement_uri(df) -> str:
-    fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    fig, ax = plt.subplots(figsize=(3.4, 2.5))
     ax.set_axisbelow(True)
     ax.grid(True, color="#eee", lw=0.6)
     ax.axhline(0, color="#ccc", lw=0.8)
@@ -62,7 +62,7 @@ def movement_uri(df) -> str:
 
 
 def release_uri(df) -> str:
-    fig, ax = plt.subplots(figsize=(3.4, 3.5))
+    fig, ax = plt.subplots(figsize=(3.5, 2.5))
     ax.set_axisbelow(True)
     ax.grid(True, color="#eee", lw=0.6)
     for pt, sub in _by_type(df):
@@ -75,7 +75,7 @@ def release_uri(df) -> str:
 
 
 def location_uri(df) -> str:
-    fig, ax = plt.subplots(figsize=(3.1, 3.5))
+    fig, ax = plt.subplots(figsize=(3.6, 2.6))
     _draw_zone(ax)
     for pt, sub in _by_type(df):
         ax.scatter(sub["plate_loc_side"], sub["plate_loc_height"], s=46,

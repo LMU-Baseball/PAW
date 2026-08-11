@@ -41,8 +41,9 @@ def test_anonymous_redirects(app_ctx):
 def test_bullpen_landing_ok_for_coach(app_ctx, monkeypatch):
     monkeypatch.setattr(
         "app.data.bullpen.lmu_bullpen_pitchers",
-        lambda: pd.DataFrame([{"pitcher_id": 824645, "pitcher": "Geis, Jake",
-                               "sessions": 13, "last_date": "2025-02-06"}]))
+        lambda start=None, end=None: pd.DataFrame(
+            [{"pitcher_id": 824645, "pitcher": "Geis, Jake",
+              "sessions": 13, "last_date": "2025-02-06"}]))
     monkeypatch.setattr("app.data.bullpen.bullpen_data_max_date",
                         lambda: "2025-04-14")
     client = app_ctx.test_client()
@@ -52,6 +53,7 @@ def test_bullpen_landing_ok_for_coach(app_ctx, monkeypatch):
     body = resp.get_data(as_text=True)
     assert "Bullpen" in body and "Geis, Jake" in body
     assert "2025-04-14" in body   # stale-data banner
+    assert 'name="season"' in body   # season selector rendered
 
 
 def test_bullpen_pdf_player_self_only(app_ctx):
@@ -66,7 +68,7 @@ def test_bullpen_landing_player_sees_only_self(app_ctx, monkeypatch):
     """A player's pitcher list is filtered to themselves — no enumeration leak."""
     monkeypatch.setattr(
         "app.data.bullpen.lmu_bullpen_pitchers",
-        lambda: pd.DataFrame([
+        lambda start=None, end=None: pd.DataFrame([
             {"pitcher_id": 824645, "pitcher": "Geis, Jake", "sessions": 13,
              "last_date": "2025-02-06"},
             {"pitcher_id": 111111, "pitcher": "Other, Guy", "sessions": 5,
@@ -77,3 +79,41 @@ def test_bullpen_landing_player_sees_only_self(app_ctx, monkeypatch):
     body = client.get("/reports/bullpen").get_data(as_text=True)
     assert "Geis, Jake" in body        # sees self
     assert "Other, Guy" not in body    # does NOT see other pitchers
+
+
+def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeypatch):
+    """The Season dropdown passes that season's date bounds to the pitcher query,
+    and defaults to the current season."""
+    from app.data import seasons
+    calls = []
+
+    def fake(start=None, end=None):
+        calls.append((start, end))
+        return pd.DataFrame([{"pitcher_id": 824645, "pitcher": "Geis, Jake",
+                              "sessions": 13, "last_date": "2025-02-06"}])
+
+    monkeypatch.setattr("app.data.bullpen.lmu_bullpen_pitchers", fake)
+    monkeypatch.setattr("app.data.bullpen.bullpen_data_max_date", lambda: "2025-04-14")
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    with app_ctx.app_context():
+        cur = seasons.current_season()
+        cur_bounds = seasons.season_bounds(cur)
+        others = [s for s in seasons.available_seasons() if s != cur]
+
+    # Default (no season param) -> current season's bounds.
+    resp = client.get("/reports/bullpen")
+    assert resp.status_code == 200
+    assert cur_bounds in calls
+    body = resp.get_data(as_text=True)
+    assert f'value="{cur}" selected' in body or (f'value="{cur}"' in body and "selected" in body)
+
+    # Explicit season param -> that season's bounds.
+    if others:
+        other = others[0]
+        with app_ctx.app_context():
+            other_bounds = seasons.season_bounds(other)
+        calls.clear()
+        r2 = client.get(f"/reports/bullpen?season={other}")
+        assert r2.status_code == 200
+        assert other_bounds in calls
