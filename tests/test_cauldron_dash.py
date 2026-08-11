@@ -78,6 +78,64 @@ def test_register_callbacks_adds_callbacks(server):
     assert len(app.callback_map) > before
 
 
+def _raw_callback(dash_app, *, input_id):
+    """Dig the undecorated function out of `dash_app.callback_map` for the
+    callback whose sole Input id is `input_id` -- Dash wraps the registered
+    function in a context-managing `add_context` closure (`@wraps(func)`),
+    so `.__wrapped__` is the original callable, invokable directly with plain
+    positional args and no Dash request-context machinery required."""
+    for spec in dash_app.callback_map.values():
+        ids = [i["id"] for i in spec["inputs"]]
+        if ids == [input_id]:
+            return spec["callback"].__wrapped__
+    raise AssertionError(f"no callback found with sole Input id {input_id!r}")
+
+
+def test_save_and_recompute_are_noop_for_non_coach(server, monkeypatch):
+    """CRITICAL (auth): a non-coach current_user hitting Save or Recompute
+    must be a complete no-op -- no grid write, no auto-score write. The
+    layout already omits the grid for a player (belt), but callbacks.py
+    re-checks `is_coach` itself (suspenders) since a client could still fire
+    these callback ids directly."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.dashboards.cauldron import layout, callbacks, grid
+    from app.data import cauldron
+
+    save_calls, recompute_calls = [], []
+    monkeypatch.setattr(grid, "save_grid", lambda *a, **k: save_calls.append((a, k)))
+    monkeypatch.setattr(cauldron, "score_day", lambda *a, **k: recompute_calls.append((a, k)))
+
+    with server.app_context():
+        player = User(email="cldnc@lmu.edu", name="Player", role="player", trackman_id=-998)
+        player.set_password("x")
+        db.session.add(player)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldauth/",
+                         suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_save = _raw_callback(dash_app, input_id="cauldron-save")
+        on_recompute = _raw_callback(dash_app, input_id="cauldron-recompute")
+
+        with server.test_request_context("/dash/cauldron/"):
+            login_user(player)
+
+            save_out = on_save(1, [{"player_id": 1, "player": "X", "team": "Team 1"}],
+                                "2026-03-02", "cycle-1")
+            recompute_out = on_recompute(1, "2026-03-02", "cycle-1")
+
+    from dash import no_update
+    assert all(v is no_update for v in save_out)
+    assert all(v is no_update for v in recompute_out)
+    assert save_calls == []
+    assert recompute_calls == []
+
+
 def test_pitching_hub_has_cauldron_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User

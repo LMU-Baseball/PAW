@@ -65,6 +65,8 @@ def test_coach_grid_prefills_team_and_scores_auto_metric_live(monkeypatch):
 
 def test_save_grid_routes_team_to_set_team(monkeypatch):
     captured = {}
+    monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
+    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
     monkeypatch.setattr(
         "app.data.cauldron.set_team",
         lambda pid, cycle_id, team, updated_by=None: captured.setdefault(
@@ -79,6 +81,10 @@ def test_save_grid_routes_team_to_set_team(monkeypatch):
 
 def test_save_grid_routes_filled_metric_cell_to_upsert_daily_as_manual(monkeypatch):
     captured = {}
+    monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
+    # No stored/live raw value for strike_pct -> no AUTO baseline to match,
+    # so a filled cell always falls back to 'manual'.
+    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
     monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
     def _fake_upsert_daily(rows, updated_by=None):
         captured["rows"] = rows
@@ -103,6 +109,8 @@ def test_save_grid_routes_filled_metric_cell_to_upsert_daily_as_manual(monkeypat
 
 
 def test_save_grid_coerces_blank_and_nan_metric_cells_to_skipped(monkeypatch):
+    monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
+    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
     monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr("app.data.cauldron.upsert_daily",
@@ -115,3 +123,43 @@ def test_save_grid_coerces_blank_and_nan_metric_cells_to_skipped(monkeypatch):
     # No team written (blank), no metric rows written (both blank/None) ->
     # upsert_daily never even called since daily_rows ends up empty.
     assert calls == []
+
+
+def test_save_grid_tags_source_auto_vs_manual_vs_override(monkeypatch):
+    """CRITICAL: an untouched AUTO cell must save as source='auto' (so
+    Recompute can keep refreshing it), NOT a blanket 'manual' -- that would
+    permanently defeat Recompute the first time a coach ever hits Save on a
+    day with Trackman data."""
+    monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
+    # strike_pct raw=60.0 -> score_value(60, threshold=55, gte) = points_met = 20.
+    # That 20 is exactly what coach_grid pre-filled the cell with.
+    monkeypatch.setattr("app.data.cauldron.compute_player_day",
+                         lambda pid, play_date: {"strike_pct": 60.0})
+    monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
+    captured = {}
+    monkeypatch.setattr("app.data.cauldron.upsert_daily",
+                         lambda rows, updated_by=None: captured.setdefault("rows", rows))
+
+    G.save_grid([
+        {"player_id": 823008, "player": "Behrens, Adam", "team": None,
+         "strike_pct": 20,     # unchanged AUTO prefill (baseline == 20)
+         "mod_command": 15},   # MANUAL metric, filled
+        {"player_id": 900001, "player": "Other, Pitcher", "team": None,
+         "strike_pct": -10,    # coach overrode the AUTO prefill (baseline == 20)
+         "mod_command": ""},   # blank -> skipped
+    ], "2026-03-02", "cycle-1")
+
+    rows = {(r["player_id"], r["metric"]): r for r in captured["rows"]}
+    assert len(captured["rows"]) == 3  # the blank mod_command cell was skipped
+
+    unchanged_auto = rows[(823008, "strike_pct")]
+    assert unchanged_auto["points"] == 20
+    assert unchanged_auto["source"] == "auto"
+
+    manual_metric = rows[(823008, "mod_command")]
+    assert manual_metric["points"] == 15
+    assert manual_metric["source"] == "manual"
+
+    overridden_auto = rows[(900001, "strike_pct")]
+    assert overridden_auto["points"] == -10
+    assert overridden_auto["source"] == "manual"

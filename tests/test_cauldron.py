@@ -9,6 +9,43 @@ def test_ensure_tables_idempotent():
     C.ensure_tables()  # second call is a no-op, not an error
 
 
+def test_read_scoring_seeded_content_after_fresh_ensure_tables():
+    """CRITICAL: a fresh deploy must not ship an inert board. read_scoring()
+    lazily calls ensure_tables() itself (matches precalc's lazy-DDL pattern,
+    so a missing table 500s never happen on first page load), and after
+    seed_default_scoring() the config rows it seeds must actually be there,
+    with a sane FIXED-vs-manual split."""
+    C.ensure_tables()
+    C.seed_default_scoring()
+
+    sc = C.read_scoring()
+    by_metric = {row["metric"]: row for _, row in sc.iterrows()}
+
+    assert "strike_pct" in by_metric
+    row = by_metric["strike_pct"]
+    assert row["direction"] == "gte" and float(row["threshold"]) == 55.0
+    assert not bool(row["is_manual"])
+
+    assert "mod_command" in by_metric
+    assert bool(by_metric["mod_command"]["is_manual"])
+
+    # sort_order is a dense 1..N sequence matching read_scoring's own ORDER BY.
+    orders = sorted(int(o) for o in sc["sort_order"])
+    assert orders == list(range(1, len(sc) + 1))
+
+
+def test_read_daily_and_read_teams_lazily_ensure_tables(monkeypatch):
+    """read_daily/read_teams must never bare-SELECT against a table that
+    might not exist yet on a fresh DB -- each calls ensure_tables() first."""
+    calls = []
+    monkeypatch.setattr(C, "ensure_tables", lambda engine=None: calls.append(engine))
+
+    C.read_daily("2026-03-02")
+    C.read_teams("cycle-1")
+
+    assert len(calls) == 2
+
+
 def test_daily_upsert_and_team_and_scoring_seed():
     C.ensure_tables()
     C.seed_default_scoring()
@@ -62,6 +99,17 @@ def test_score_value_fixed_and_manual_not_clobbered():
     assert C.score_value("bb_pct", 4.0, row_lte) == 15
     assert C.score_value("bb_pct", 9.0, row_lte) == -15
     assert C.score_value("x", None, row_gte) is None
+
+
+def test_score_value_guards_manual_or_none_direction_row():
+    """HARDEN: a manual-metric scoring row (direction=None, threshold=None)
+    must return None, not raise -- score_value should never be called this
+    way in practice (score_day/save_grid both skip is_manual rows before
+    scoring), but a defensive guard keeps a future caller from crashing."""
+    manual_row = {"direction": None, "threshold": None, "points_met": 20, "points_missed": -10}
+    assert C.score_value("mod_command", 58.0, manual_row) is None
+    bad_direction_row = {"direction": "eq", "threshold": 5.0, "points_met": 20, "points_missed": -10}
+    assert C.score_value("x", 5.0, bad_direction_row) is None
 
 
 def test_score_day_never_clobbers_manual(monkeypatch):

@@ -155,6 +155,7 @@ def seed_default_scoring() -> None:
 
 def read_scoring() -> pd.DataFrame:
     """All cauldron_scoring rows, ordered by sort_order."""
+    ensure_tables()
     return query_df(f"SELECT * FROM {SCORING_TABLE} ORDER BY sort_order")
 
 
@@ -196,6 +197,7 @@ def upsert_daily(rows: list[dict], updated_by=None) -> None:
 def read_daily(play_date=None, player_id=None) -> pd.DataFrame:
     """cauldron_daily rows, optionally narrowed to a play_date and/or
     player_id."""
+    ensure_tables()
     clauses, params = [], {}
     if play_date is not None:
         clauses.append("play_date = :d")
@@ -230,6 +232,7 @@ def set_team(player_id, cycle_id, team, updated_by=None) -> None:
 
 def read_teams(cycle_id) -> pd.DataFrame:
     """All cauldron_teams rows for one competition cycle."""
+    ensure_tables()
     return query_df(f"SELECT * FROM {TEAMS_TABLE} WHERE cycle_id = :c", {"c": cycle_id})
 
 
@@ -328,7 +331,12 @@ def score_value(metric, raw_value, scoring_row) -> int | None:
     and so a future non-FIXED scoring mode has a natural place to branch on it.
     min_sample gating is the CALLER's job (`score_day` knows the day's
     pitch/PA count; this function only ever sees the metric's already-computed
-    raw value), not this function's."""
+    raw value), not this function's.
+
+    `None` also if `scoring_row` isn't a scoreable FIXED row -- a `direction`
+    outside `('gte', 'lte')` (e.g. `None`, on a manual-metric row) or a `None`
+    `threshold` has nothing to compare `raw_value` against, so this returns
+    `None` instead of raising."""
     if raw_value is None:
         return None
     try:
@@ -336,6 +344,8 @@ def score_value(metric, raw_value, scoring_row) -> int | None:
             return None
     except (TypeError, ValueError):
         pass
+    if scoring_row["direction"] not in ("gte", "lte") or scoring_row["threshold"] is None:
+        return None
     met = (raw_value >= scoring_row["threshold"] if scoring_row["direction"] == "gte"
            else raw_value <= scoring_row["threshold"])
     return int(scoring_row["points_met"]) if met else int(scoring_row["points_missed"])

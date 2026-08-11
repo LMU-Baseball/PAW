@@ -33,11 +33,23 @@ callback that reads this state and invokes `save_grid` /
 `save_grid` maps the grid's edited rows back to RDS. Team: a non-blank `team`
 cell -> `cauldron.set_team`. Metrics: the grid always shows POINTS (not a raw
 stat), so whatever a coach types into a metric cell IS the points value to
-store -- `save_grid` stores it straight as `points` with `source='manual'`
-and `raw_value=None`, rather than re-running it through `score_value` (that
-would require guessing which raw scale the coach meant to type). Blank/NaN
-metric cells are skipped outright: no empty `cauldron_daily` row is written
-for a cell the coach left untouched.
+store -- `save_grid` stores it straight as `points` (`raw_value=None`), rather
+than re-running it through `score_value` (that would require guessing which
+raw scale the coach meant to type). Blank/NaN metric cells are skipped
+outright: no empty `cauldron_daily` row is written for a cell the coach left
+untouched.
+
+`source` tagging is NOT a blanket `'manual'` -- that would permanently defeat
+Recompute the first time a coach ever hits Save on a day with Trackman data
+(an untouched AUTO cell, once stored `'manual'`, is "manual-wins" forever
+after; `score_day` would never refresh it again). Instead, for a MANUAL
+metric (`is_manual` in `cauldron.read_scoring()`) any non-blank cell is
+`source='manual'` (there's no auto baseline to compare against). For an AUTO
+metric, the cell is compared against the SAME live baseline `coach_grid` used
+to pre-fill it (`_auto_points`, i.e. `compute_player_day` + `score_value`
+re-run fresh for this save): unchanged from that baseline -> `source='auto'`
+(so Recompute can still refresh it later), different -> `source='manual'`
+(a real coach override).
 """
 from __future__ import annotations
 
@@ -182,8 +194,19 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
     """Map the coach grid's edited rows -> `cauldron_teams`/`cauldron_daily`
     writes. A filled `team` cell upserts that pitcher's team for `cycle_id`.
     Every other non-blank cell is a metric id -> a `cauldron_daily` row
-    (`source='manual'`, `raw_value=None`, `points`=the cell's value) for
-    `play_date`; blank cells are skipped, not written as empty rows."""
+    (`raw_value=None`, `points`=the cell's value) for `play_date`; blank
+    cells are skipped, not written as empty rows.
+
+    `source` per cell: a MANUAL metric is always `'manual'` when filled. An
+    AUTO metric is `'auto'` when its value still matches the live
+    `_auto_points` baseline (an untouched prefill -- Recompute may keep
+    refreshing it), else `'manual'` (the coach typed over it). A metric id
+    the current scoring config no longer recognizes falls back to `'manual'`
+    (no baseline to compare against -- safest to treat as a deliberate
+    entry)."""
+    scoring = cauldron.read_scoring()
+    scoring_by_metric = {row["metric"]: row for _, row in scoring.iterrows()}
+
     daily_rows = []
     for r in grid_data:
         pid = r.get("player_id")
@@ -197,13 +220,21 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
             points = _coerce_numeric(value)
             if points is None:
                 continue
+
+            srow = scoring_by_metric.get(key)
+            if srow is not None and not bool(srow.get("is_manual")):
+                baseline = _auto_points(pid, key, srow, play_date)
+                source = "auto" if points == baseline else "manual"
+            else:
+                source = "manual"
+
             daily_rows.append({
                 "player_id": pid,
                 "play_date": play_date,
                 "metric": key,
                 "raw_value": None,
                 "points": points,
-                "source": "manual",
+                "source": source,
             })
 
     if daily_rows:
