@@ -115,8 +115,9 @@ def register_callbacks(dash_app) -> None:
         return opts, value
 
     # Catcher/season/date-range -> sidebar (tiles rescope to the selected range;
-    # when the range equals the season's bounds, framing_season_tiles reads the
-    # fast precalc rollup, so the default "This Season" view is unchanged).
+    # framing_season_tiles now computes all four sidebar tiles fresh from a
+    # single range_pitches_for pull every time, including the default "This
+    # Season" view -- there is no precalc fast-path).
     @dash_app.callback(
         Output("sidebar", "children"),
         Input("catcher-dd", "value"), Input("cat-season", "value"),

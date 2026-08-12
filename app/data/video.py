@@ -33,7 +33,8 @@ CATCHING_DISPLAY_COLS: list[str] = ["Pitch", "Inn", "Count", "Type", "Steal", "R
 # stable column shape; only the CATCHING tab chooses to display it. Mirrors the
 # steal-attempt outcomes in app.data.catching.CS_RESULTS.
 _STEAL_LABEL = {"StolenBase": "SB", "CaughtStealing": "CS"}
-assert set(_STEAL_LABEL) == CS_RESULTS
+if set(_STEAL_LABEL) != CS_RESULTS:
+    raise RuntimeError("_STEAL_LABEL must stay in sync with CS_RESULTS")
 
 _ALL_COLS = DISPLAY_COLS + ["Steal"] + list(URL_COL.values()) + ["batter_side", "pitch_uid"]
 
