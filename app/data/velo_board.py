@@ -199,6 +199,73 @@ def running_max_pr(pitcher_id, upto_week=None) -> float | None:
     return None if velo.empty else float(velo.max())
 
 
+def _batch_week_pr(pitcher_ids, week_start) -> dict:
+    """BATCHED weekly velo + running max-PR for many pitchers, in TWO queries
+    (one GAMES pull, one BULLPEN pull, both Date <= week_end) instead of the
+    per-pitcher `weekly_velo` + `running_max_pr` round-trips `grid_rows` used to
+    make (~4 per pitcher).
+
+    Returns `{pid: {"velo_avg","velo_max","max_pr"}}` for every id passed in,
+    identical to `weekly_velo(pid, week_start)` + `running_max_pr(pid,
+    week_start)`: weekly velo_avg/velo_max over Fastball/Sinker RelSpeed in
+    [week_start, week_end]; max_pr = max through week_end. `None` where the
+    pitcher has no qualifying pitches in the relevant range. Parity is by the
+    same filters/values (Date <= week_end pulled once, week-start sliced in
+    pandas), the same union of `_sibling_pitcher_ids`, and the same
+    GAMES-`Date` / BULLPEN-`DATE(Date)` comparisons `_velo_rows` uses."""
+    from app.data import pitching_caps as PC
+
+    ids = [int(p) for p in pitcher_ids]
+    result = {pid: {"velo_avg": None, "velo_max": None, "max_pr": None} for pid in ids}
+    if not ids:
+        return result
+    week_end = _week_end(week_start)
+
+    sib_to_canon: dict[int, int] = {}
+    for pid in ids:
+        for sid in PC._sibling_pitcher_ids(pid):
+            sib_to_canon[int(sid)] = pid
+    all_sibs = sorted(sib_to_canon)
+    if not all_sibs:
+        return result
+
+    ph, params = PC._in_clause(all_sibs)
+    params["e"] = str(week_end)
+    games = query_df(
+        f"SELECT PitcherId AS pid, RelSpeed AS rel_speed, Date AS dt FROM GAMES "
+        f"WHERE PitcherId IN ({ph}) AND TaggedPitchType IN ({_VELO_PITCH_TYPES}) "
+        f"AND Date <= :e", params)
+    bull = query_df(
+        f"SELECT PitcherId AS pid, RelSpeed AS rel_speed, DATE(Date) AS dt FROM BULLPEN "
+        f"WHERE PitcherId IN ({ph}) AND TaggedPitchType IN ({_VELO_PITCH_TYPES}) "
+        f"AND DATE(Date) <= :e", params)
+
+    frames = []
+    for f in (games, bull):
+        if f is not None and not f.empty:
+            f = f.copy()
+            f["canon"] = f["pid"].astype(int).map(sib_to_canon)
+            f["dt"] = f["dt"].astype(str)
+            frames.append(f[["canon", "rel_speed", "dt"]])
+    if not frames:
+        return result
+    allrows = pd.concat(frames, ignore_index=True).dropna(subset=["rel_speed"])
+    if allrows.empty:
+        return result
+
+    ws = str(week_start)
+    for canon, sub in allrows.groupby("canon"):
+        max_pr = float(sub["rel_speed"].max())
+        wk = sub[sub["dt"] >= ws]
+        if wk.empty:
+            velo_avg = velo_max = None
+        else:
+            velo_avg = float(wk["rel_speed"].mean())
+            velo_max = float(wk["rel_speed"].max())
+        result[int(canon)] = {"velo_avg": velo_avg, "velo_max": velo_max, "max_pr": max_pr}
+    return result
+
+
 def _stored_value(stored: pd.DataFrame, pitcher_id: int, week_start: str, col: str):
     """This pitcher's stored `col` for exactly `week_start`, or None."""
     if stored.empty:
@@ -254,6 +321,10 @@ def grid_rows(season_label, week_start) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
 
     stored = read_entries(season_label)
+    # Batched Trackman prefill for the whole roster (one GAMES + one BULLPEN
+    # query) instead of per-pitcher weekly_velo/running_max_pr round-trips.
+    # Only used for pitchers WITHOUT a stored row this week (stored wins).
+    auto = _batch_week_pr([int(r["PitcherId"]) for _, r in roster.iterrows()], week_start)
     rows = []
     for _, r in roster.iterrows():
         pid = int(r["PitcherId"])
@@ -264,9 +335,8 @@ def grid_rows(season_label, week_start) -> pd.DataFrame:
             velo_max = _stored_value(stored, pid, week_start, "velo_max")
             max_pr = _stored_value(stored, pid, week_start, "max_pr")
         else:
-            wv = weekly_velo(pid, week_start)
-            velo_avg, velo_max = wv["velo_avg"], wv["velo_max"]
-            max_pr = running_max_pr(pid, week_start)
+            wv = auto.get(pid, {"velo_avg": None, "velo_max": None, "max_pr": None})
+            velo_avg, velo_max, max_pr = wv["velo_avg"], wv["velo_max"], wv["max_pr"]
 
         prev = _previous_stored_velo(stored, pid, week_start)
         change_avg = (velo_avg - prev["velo_avg"]
