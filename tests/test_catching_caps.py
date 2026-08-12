@@ -141,49 +141,98 @@ def test_lmu_catchers_all_have_numeric_game_id_rows():
     assert ids <= current_ids
 
 
-def test_framing_season_tiles_uses_precalc_when_present(monkeypatch):
-    # The precalc row's `pitches`/`net_strikes` columns are repurposed (same
-    # schema, no rebuild) to hold the framing STRIKES-gained/STRIKES-LOST
-    # counts -- framing_season_tiles surfaces them under their new sidebar
-    # names. STEAL% is no longer read off the precalc row at all (its
-    # `steal_pct` column is dead going forward); it's always a fresh
-    # caught-stealing computation, so an empty pitches frame here yields "—".
-    from app.data import precalc
-    sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
-                "games": "12", "pitches": "800", "net_strikes": "15",
-                "steal_pct": "4.2%"}
-    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: sentinel)
-    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: pd.DataFrame())
-    assert catching_caps.framing_season_tiles(RAW_CID) == {
-        "games": "12", "strikes": "800", "strikes_lost": "15", "cs_pct": "—"}
+def _framing_fixture_df():
+    """A small mocked `range_pitches_for`-shaped frame with known framing +
+    caught-stealing counts, used to pin the fresh-per-pull tile math
+    (fix-round-1: framing_season_tiles no longer touches precalc at all).
+
+    Framing rows (add_framing_cols's CallType, matching the Framing tab's own
+    box test): 2 "Stolen Strike" (out-of-zone StrikeCalled, across 2 games),
+    1 "Lost Strike" (in-zone BallCalled), 1 "Correct Call" (in-zone
+    StrikeCalled -- not counted either way). Caught-stealing rows: 2 attempts
+    (1 caught) on play_result, with null loc (irrelevant to framing).
+    Distinct game_id count = 2.
+    """
+    return pd.DataFrame([
+        {"game_id": "1", "plate_loc_side": 2.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "2", "plate_loc_side": -2.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "BallCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": None, "plate_loc_height": None,
+         "tagged_pitch_type": "Fastball", "pitch_call": "InPlay",
+         "play_result": "CaughtStealing", "pop_time": 2.0},
+        {"game_id": "2", "plate_loc_side": None, "plate_loc_height": None,
+         "tagged_pitch_type": "Fastball", "pitch_call": "InPlay",
+         "play_result": "StolenBase", "pop_time": None},
+    ])
 
 
-def test_framing_season_tiles_falls_back_to_compute_when_missing(monkeypatch):
-    from app.data import precalc
-    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: None)
+def test_framing_season_tiles_computes_fresh_from_one_pull(monkeypatch):
+    """GAMES/STRIKES/STRIKES_LOST/STEAL% all come off ONE `range_pitches_for`
+    pull -- no precalc read at all (fix-round-1). Pin the exact tile values
+    against the fixture's known framing/caught-stealing counts."""
+    calls = []
+    def _fake_range_pitches_for(c, s, e):
+        calls.append((c, s, e))
+        return _framing_fixture_df()
+    monkeypatch.setattr(catching_caps, "range_pitches_for", _fake_range_pitches_for)
     out = catching_caps.framing_season_tiles(RAW_CID)
-    assert set(out) == {"games", "strikes", "strikes_lost", "cs_pct"}
+    assert out == {"games": "2", "strikes": "2", "strikes_lost": "1", "cs_pct": "50.0%"}
+    assert len(calls) == 1  # exactly one pull feeds all four tiles
+
+
+def test_framing_season_tiles_empty_pull_renders_no_data(monkeypatch):
+    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: pd.DataFrame())
+    out = catching_caps.framing_season_tiles(RAW_CID)
+    assert out == {"games": "—", "strikes": "—", "strikes_lost": "—", "cs_pct": "—"}
 
 
 def test_framing_season_tiles_steal_pct_is_caught_stealing_not_lost_rate(monkeypatch):
     # Coach feedback: STEAL% must be caught / attempts (caught_stealing_summary's
-    # cs_pct), NOT the legacy lost/valid_loc rate that used to live on the
-    # precalc row's `steal_pct` column. Pin a precalc row whose (now-repurposed
-    # and now-unused) steal_pct clearly disagrees with a deliberately different,
-    # mocked caught-stealing frame, and assert the tile shows the latter.
-    from app.data import precalc
-    sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
-                "games": "12", "pitches": "50", "net_strikes": "10",
-                "steal_pct": "20.0%"}
-    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: sentinel)
-    # 3 caught-stealing attempts, 1 caught -> cs_pct = 33.3%, != legacy 20.0%.
-    cs_df = pd.DataFrame({
-        "play_result": ["CaughtStealing", "StolenBase", "StolenBase"],
-        "pop_time": [2.0, None, None],
-    })
-    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: cs_df)
+    # cs_pct), NOT the legacy lost/valid_loc rate. Build a fixture where the two
+    # would clearly disagree: 1 framing "Lost Strike" pitch out of 4 total pitches
+    # with valid loc (legacy rate would be 25.0%), but the caught-stealing rows
+    # give cs_pct = 33.3% (1 caught / 3 attempts) -- assert the tile shows the
+    # caught-stealing number, not the legacy one.
+    df = pd.DataFrame([
+        {"game_id": "1", "plate_loc_side": 2.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "BallCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": 0.0, "plate_loc_height": 2.5,
+         "tagged_pitch_type": "Fastball", "pitch_call": "StrikeCalled",
+         "play_result": None, "pop_time": None},
+        {"game_id": "1", "plate_loc_side": None, "plate_loc_height": None,
+         "tagged_pitch_type": "Fastball", "pitch_call": "InPlay",
+         "play_result": "CaughtStealing", "pop_time": 2.0},
+        {"game_id": "1", "plate_loc_side": None, "plate_loc_height": None,
+         "tagged_pitch_type": "Fastball", "pitch_call": "InPlay",
+         "play_result": "StolenBase", "pop_time": None},
+        {"game_id": "1", "plate_loc_side": None, "plate_loc_height": None,
+         "tagged_pitch_type": "Fastball", "pitch_call": "InPlay",
+         "play_result": "StolenBase", "pop_time": None},
+    ])
+    # Sanity: the legacy (now-dead) lost/valid_loc formula would read 25.0%,
+    # confirming this fixture actually distinguishes the two metrics.
+    legacy = catching.framing_table(df)
+    assert legacy["steal_pct"] == 25.0
+    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: df)
     out = catching_caps.framing_season_tiles(RAW_CID)
-    assert out == {"games": "12", "strikes": "50", "strikes_lost": "10", "cs_pct": "33.3%"}
+    assert out["cs_pct"] == "33.3%"
+    assert out["cs_pct"] != f"{legacy['steal_pct']}%"
 
 
 def test_compute_season_rollup_uses_rollup_over():
@@ -220,21 +269,29 @@ def test_framing_tiles_subrange_is_scoped():
 
 
 def test_framing_tiles_subrange_matches_rollup_over():
-    """The range path's numbers agree exactly with _rollup_over over the same
-    window -- single source of truth for the framing-tile math."""
-    g = catching_caps.games_for_catcher(RAW_CID)
-    # A few legacy composite-GameID rows carry a blank Date (see games_for_catcher's
-    # docstring); drop them so min/max reflect real game dates, not "".
-    g = g[g["game_date"].astype(str) != ""]
-    start, end = str(g["game_date"].min()), str(g["game_date"].max())
+    """The fresh pandas-pull path's counts agree with the SQL box-test
+    aggregate (_rollup_over, unchanged/precalc-only now) over the same
+    window: GAMES matches exactly, and STRIKES - STRIKES_LOST (the net)
+    matches _rollup_over's net_strikes -- both derive the stolen/lost counts
+    from the identical strike-zone box rule, just in pandas vs SQL, so their
+    difference (the only thing _rollup_over still exposes) must agree.
+
+    Scoped to the CURRENT SEASON's own games (not the catcher's full,
+    cross-season history): the season is fully numeric-GameID-backfilled, so
+    `range_pitches_for`'s `_NUMERIC_GAME_ID_CLAUSE` guard (which `_rollup_over`
+    does NOT apply) can't exclude anything here, keeping the two paths'
+    universes identical -- exactly what the real date-range picker also
+    guarantees (it's bounded to the season)."""
     from app.data import seasons
     season = seasons.current_season()
     s_b, e_b = seasons.season_bounds(season)
+    g = catching_caps.games_for_catcher(RAW_CID, start=s_b, end=e_b)
+    g = g[g["game_date"].astype(str) != ""]
+    start, end = str(g["game_date"].min()), str(g["game_date"].max())
     if (start, end) == (s_b, e_b):
-        pytest.skip("fixture's full game span equals the season bounds; not a sub-range")
+        pytest.skip("fixture's in-season game span equals the season bounds; not a sub-range")
     out = catching_caps.framing_season_tiles(RAW_CID, season, start=start, end=end)
     r = catching_caps._rollup_over(RAW_CID, start, end)
-    cs = catching.caught_stealing_summary(catching_caps.range_pitches_for(RAW_CID, start, end))
-    expected_cs = "—" if cs["cs_pct"] is None else f"{cs['cs_pct']}%"
-    assert out == {"games": r["games"], "strikes": r["pitches"],
-                   "strikes_lost": r["net_strikes"], "cs_pct": expected_cs}
+    assert out["games"] != "—"
+    assert out["games"] == r["games"]
+    assert int(out["strikes"]) - int(out["strikes_lost"]) == int(r["net_strikes"])
