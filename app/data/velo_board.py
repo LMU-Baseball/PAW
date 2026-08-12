@@ -312,10 +312,12 @@ def _last_bullpen_velo(pitcher_id) -> dict:
             "last_date": str(last_date)}
 
 
-@cached
-def leaderboard(season_label) -> pd.DataFrame:
-    """One row per rostered pitcher (`pitching_caps.lmu_pitchers`), sorted by
-    `season_max` descending (None/NaN last):
+def _leaderboard_per_pitcher(season_label) -> pd.DataFrame:
+    """Reference (per-pitcher) leaderboard implementation, kept as the parity
+    oracle `_leaderboard_batched` is verified against (scratchpad/
+    parity_leaderboard.py). NOT the hot path -- `leaderboard` calls the batched
+    version. One row per rostered pitcher (`pitching_caps.lmu_pitchers`), sorted
+    by `season_max` descending (None/NaN last):
 
         pitcher_name, season_max, season_max_date, season_avg,
         last_velo, last_date, versus, trend
@@ -402,3 +404,140 @@ def leaderboard(season_label) -> pd.DataFrame:
     return df.sort_values(
         "season_max", ascending=False, na_position="last", kind="mergesort"
     ).reset_index(drop=True)
+
+
+_LEADERBOARD_COLS = ["pitcher_name", "season_max", "season_max_date", "season_avg",
+                     "last_velo", "last_date", "versus", "trend"]
+
+
+def _leaderboard_batched(season_label) -> pd.DataFrame:
+    """BATCHED equivalent of `leaderboard`: identical output, but reads all
+    rostered pitchers' Fastball/Sinker velo in TWO queries (one GAMES pull over
+    the season window, one all-history BULLPEN pull) instead of ~5 round-trips
+    per pitcher. All per-pitcher aggregation happens in pandas.
+
+    Parity note -- everything `leaderboard` needs is season-bounded, so a single
+    season-window GAMES pull suffices: season_max/avg/max_date are over the
+    season's pitches; the last in-season GAME appearance (avg velo, date,
+    opponent-from-HomeTeamForeignID) comes from those same rows; and the trend
+    diff is season-label-partitioned, and a given academic year's two derived
+    labels (Fall YYYY / Spring YYYY+1) both fall entirely inside the season
+    bounds -- so the diff computed over just the window equals the full-history
+    diff `velo_trend` would produce. BULLPEN is pulled unbounded because the
+    no-game fallback (`_last_bullpen_velo`) uses the most recent session ever;
+    it's date-filtered in pandas for the season pool."""
+    from app.data import pitching_caps as PC
+
+    roster = PC.lmu_pitchers(season_label)
+    if roster.empty:
+        return pd.DataFrame(columns=_LEADERBOARD_COLS)
+    s, e = season_bounds(season_label)
+    s_str, e_str = str(s), str(e)
+
+    # sibling_id -> canonical (rostered) pitcher_id, over every rostered pitcher.
+    sib_to_canon: dict[int, int] = {}
+    canon: list[tuple[int, str]] = []
+    for _, r in roster.iterrows():
+        pid = int(r["PitcherId"])
+        canon.append((pid, r["Pitcher"]))
+        for sid in PC._sibling_pitcher_ids(pid):
+            sib_to_canon[int(sid)] = pid
+    all_sibs = sorted(sib_to_canon)
+    if not all_sibs:
+        return pd.DataFrame(columns=_LEADERBOARD_COLS)
+
+    ph, base = PC._in_clause(all_sibs)
+    gp = dict(base, s=s_str, e=e_str)
+    games = query_df(
+        f"SELECT PitcherId AS pid, RelSpeed AS rel_speed, Date AS dt, GameID AS gid, "
+        f"HomeTeam AS home_team, AwayTeam AS away_team, HomeTeamForeignID AS home_fid "
+        f"FROM GAMES WHERE PitcherId IN ({ph}) "
+        f"AND TaggedPitchType IN ({_VELO_PITCH_TYPES}) AND Date BETWEEN :s AND :e", gp)
+    bull = query_df(
+        f"SELECT PitcherId AS pid, RelSpeed AS rel_speed, DATE(Date) AS dt "
+        f"FROM BULLPEN WHERE PitcherId IN ({ph}) "
+        f"AND TaggedPitchType IN ({_VELO_PITCH_TYPES})", base)
+
+    if not games.empty:
+        games = games.copy()
+        games["canon"] = games["pid"].astype(int).map(sib_to_canon)
+        games["dt"] = games["dt"].astype(str)
+    if not bull.empty:
+        bull = bull.copy()
+        bull["canon"] = bull["pid"].astype(int).map(sib_to_canon)
+        bull["dt"] = bull["dt"].astype(str)
+
+    empty_pool = pd.DataFrame(columns=["rel_speed", "dt"])
+    rows = []
+    for pid, name in canon:
+        g = games[games["canon"] == pid] if not games.empty else games
+        b_all = bull[bull["canon"] == pid] if not bull.empty else bull
+        b_season = (b_all[(b_all["dt"] >= s_str) & (b_all["dt"] <= e_str)]
+                    if not b_all.empty else b_all)
+
+        # Season velo pool: every Fastball/Sinker pitch (games + season bullpen),
+        # games first so idxmax ties break to a game exactly like `_velo_rows`.
+        pool = pd.concat([
+            g[["rel_speed", "dt"]] if not g.empty else empty_pool,
+            b_season[["rel_speed", "dt"]] if not b_season.empty else empty_pool,
+        ], ignore_index=True).dropna(subset=["rel_speed"]).reset_index(drop=True)
+        if pool.empty:
+            season_max = season_avg = season_max_date = None
+        else:
+            season_max = float(pool["rel_speed"].max())
+            season_avg = float(pool["rel_speed"].mean())
+            season_max_date = str(pool.loc[pool["rel_speed"].idxmax(), "dt"])
+
+        # Per-game (appearance) avg velo + opponent, from the same season games.
+        if not g.empty:
+            appr = g.groupby("gid").agg(
+                avg_velo=("rel_speed", "mean"), game_date=("dt", "first"),
+                home_team=("home_team", "first"), away_team=("away_team", "first"),
+                home_fid=("home_fid", "first")).reset_index()
+        else:
+            appr = pd.DataFrame(columns=["gid", "avg_velo", "game_date",
+                                         "home_team", "away_team", "home_fid"])
+
+        if not appr.empty:
+            appr = appr.sort_values("game_date", kind="mergesort").reset_index(drop=True)
+            last = appr.iloc[-1]
+            last_velo = float(last["avg_velo"])
+            last_date = str(last["game_date"])
+            fid = last["home_fid"]
+            lmu_home = bool(pd.notna(fid) and int(fid) == PC.LMU_TEAM_ID)
+            versus = last["away_team"] if lmu_home else last["home_team"]
+            appr["slabel"] = appr["game_date"].apply(PC._season_label)
+            vc = appr.groupby("slabel")["avg_velo"].diff().iloc[-1]
+            trend = float(vc) if pd.notna(vc) else None
+        else:
+            # No in-season game -> most recent bullpen session (any date).
+            bb = b_all.dropna(subset=["rel_speed", "dt"]) if not b_all.empty else b_all
+            if bb is None or bb.empty:
+                last_velo = last_date = None
+            else:
+                ld = bb["dt"].max()
+                last_velo = float(bb.loc[bb["dt"] == ld, "rel_speed"].mean())
+                last_date = str(ld)
+            versus = None
+            trend = None
+
+        rows.append({
+            "pitcher_name": name, "season_max": season_max,
+            "season_max_date": season_max_date, "season_avg": season_avg,
+            "last_velo": last_velo, "last_date": last_date,
+            "versus": versus, "trend": trend,
+        })
+
+    df = pd.DataFrame(rows, columns=_LEADERBOARD_COLS)
+    return df.sort_values(
+        "season_max", ascending=False, na_position="last", kind="mergesort"
+    ).reset_index(drop=True)
+
+
+@cached
+def leaderboard(season_label) -> pd.DataFrame:
+    """One row per rostered pitcher, ranked by season-best Fastball/Sinker velo
+    (see `_leaderboard_per_pitcher` for the full column contract). Reads via the
+    BATCHED path (`_leaderboard_batched`) -- two queries total instead of ~5 per
+    pitcher; verified byte-identical to the per-pitcher oracle."""
+    return _leaderboard_batched(season_label)
