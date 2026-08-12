@@ -18,14 +18,16 @@ def _btn_style(has: bool, on: bool) -> dict:
             "fontFamily": "Teko, sans-serif", "fontSize": "15px"}
 
 
-def render(df: pd.DataFrame, *, prefix: str, default_angle: str) -> html.Div:
+def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
+           columns: list[str] | None = None) -> html.Div:
     if df is None or df.empty:
         return html.Div("No video available for this selection.",
                         style={"padding": "16px", "color": "#555",
                                "fontFamily": "Teko, sans-serif", "fontSize": "18px"})
+    cols = columns if columns is not None else DISPLAY_COLS
     table = dash_table.DataTable(
         id=f"{prefix}-video-table",
-        columns=[{"name": c, "id": c} for c in DISPLAY_COLS],
+        columns=[{"name": c, "id": c} for c in cols],
         data=df.to_dict("records"),          # includes hidden url_* + batter_side + pitch_uid
         page_size=15, sort_action="native", filter_action="native",
         style_table={"overflowX": "auto"},

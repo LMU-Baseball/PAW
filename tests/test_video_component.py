@@ -111,3 +111,32 @@ def test_table_hides_url_columns_but_keeps_them_in_data():
     shown = [c["id"] for c in table.columns]
     assert shown == vdata.DISPLAY_COLS          # only display columns shown
     assert "url_homebehind" in table.data[0]    # url still present in row data
+
+
+def _df_with_steal():
+    row = {c: "x" for c in vdata.CATCHING_DISPLAY_COLS}
+    row.update({vdata.URL_COL[a]: (f"http://x/{a}.mp4" if a != "Broadcast" else None)
+                for a, _ in vdata.ANGLES})
+    row.update({"batter_side": "Right", "pitch_uid": "u1"})
+    return pd.DataFrame([row])
+
+
+def test_render_columns_override_shows_catching_cols_not_default():
+    # Catching passes columns=CATCHING_DISPLAY_COLS -> table shows Steal, not Velo.
+    out = vc.render(_df_with_steal(), prefix="cat", default_angle="HomeBehind",
+                     columns=vdata.CATCHING_DISPLAY_COLS)
+    table = next(n for n in _walk(out)
+                 if isinstance(n, dash_table.DataTable) and n.id == "cat-video-table")
+    shown = [c["id"] for c in table.columns]
+    assert shown == vdata.CATCHING_DISPLAY_COLS
+    assert "Steal" in shown and "Velo" not in shown
+
+
+def test_render_default_columns_omit_steal():
+    # No columns= passed -> falls back to default DISPLAY_COLS (Velo, no Steal).
+    out = vc.render(_df(), prefix="pit", default_angle="HomeBehind")
+    table = next(n for n in _walk(out)
+                 if isinstance(n, dash_table.DataTable) and n.id == "pit-video-table")
+    shown = [c["id"] for c in table.columns]
+    assert shown == vdata.DISPLAY_COLS
+    assert "Velo" in shown and "Steal" not in shown

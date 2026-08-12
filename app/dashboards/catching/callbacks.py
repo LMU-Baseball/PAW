@@ -183,7 +183,8 @@ def register_callbacks(dash_app) -> None:
             else:
                 gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, catcher_id=int(cid))
-            return videotab.render(vdf, prefix="cat", default_angle="HomeBehind")
+            return videotab.render(vdf, prefix="cat", default_angle="HomeBehind",
+                                    columns=videodata.CATCHING_DISPLAY_COLS)
         df = _read_game_df(data_json)
         if df.empty:
             return html.Div("No pitch data for this selection.",

@@ -39,6 +39,27 @@ def test_constants_shape():
     assert video.DISPLAY_COLS[0] == "Pitch"
 
 
+def test_default_display_cols_unchanged():
+    # Hitting/pitching keep Velo and gain no Steal column.
+    assert video.DISPLAY_COLS == ["Pitch", "Inn", "Count", "Type", "Velo", "Result", "Zone"]
+    assert "Velo" in video.DISPLAY_COLS
+    assert "Steal" not in video.DISPLAY_COLS
+
+
+def test_catching_display_cols_swaps_velo_for_steal():
+    assert video.CATCHING_DISPLAY_COLS == ["Pitch", "Inn", "Count", "Type", "Steal", "Result", "Zone"]
+    assert "Steal" in video.CATCHING_DISPLAY_COLS
+    assert "Velo" not in video.CATCHING_DISPLAY_COLS
+
+
+def test_steal_maps_play_result_to_sb_cs_or_blank():
+    assert video._steal("StolenBase") == "SB"
+    assert video._steal("CaughtStealing") == "CS"
+    assert video._steal("Single") == ""
+    assert video._steal(None) == ""
+    assert video._steal(float("nan")) == ""
+
+
 def test_pitcher_filter_one_row_per_pitch(sample):
     df = video.pitch_video_df(sample["game_id"], pitcher_id=sample["pitcher_tm_id"])
     assert not df.empty
@@ -50,6 +71,14 @@ def test_pitcher_filter_one_row_per_pitch(sample):
         assert a in df.columns
     # at least one angle url present somewhere
     assert df[list(video.URL_COL.values())].notna().any().any()
+
+
+def test_pitch_video_df_includes_steal_column(sample):
+    # Steal is built for every subject (not just catcher) so the df has a
+    # stable shape; only the CATCHING tab chooses to display it.
+    df = video.pitch_video_df(sample["game_id"], catcher_id=sample["catcher_tm_id"])
+    assert "Steal" in df.columns
+    assert set(df["Steal"].unique()).issubset({"SB", "CS", ""})
 
 
 def test_batter_and_catcher_filters(sample):

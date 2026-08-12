@@ -16,6 +16,7 @@ import pandas as pd
 
 from app.db import query_df
 from app.data.cache import cached
+from app.data.catching import CS_RESULTS
 
 ANGLES: list[tuple[str, str]] = [
     ("HomeBehind", "Behind"), ("HomeRight", "Home R"),
@@ -25,8 +26,16 @@ URL_COL: dict[str, str] = {a: f"url_{a.lower()}" for a, _ in ANGLES}
 # Date is intentionally omitted from the table display (Item 2); it is still
 # computed in pitch_video_df for sorting, then dropped by the _ALL_COLS projection.
 DISPLAY_COLS: list[str] = ["Pitch", "Inn", "Count", "Type", "Velo", "Result", "Zone"]
+# CATCHING tab only: swaps Velo for a Steal-attempt (SB/CS/blank) column.
+CATCHING_DISPLAY_COLS: list[str] = ["Pitch", "Inn", "Count", "Type", "Steal", "Result", "Zone"]
 
-_ALL_COLS = DISPLAY_COLS + list(URL_COL.values()) + ["batter_side", "pitch_uid"]
+# "Steal" is built for every subject (not just catcher) so pitch_video_df keeps a
+# stable column shape; only the CATCHING tab chooses to display it. Mirrors the
+# steal-attempt outcomes in app.data.catching.CS_RESULTS.
+_STEAL_LABEL = {"StolenBase": "SB", "CaughtStealing": "CS"}
+assert set(_STEAL_LABEL) == CS_RESULTS
+
+_ALL_COLS = DISPLAY_COLS + ["Steal"] + list(URL_COL.values()) + ["batter_side", "pitch_uid"]
 
 _RESULT_MAP = {
     "StrikeCalled": "Called Strike", "StrikeSwinging": "Swing & Miss",
@@ -39,6 +48,13 @@ _RESULT_MAP = {
 
 def _spaced(s: str) -> str:
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(s))
+
+
+def _steal(play_result) -> str:
+    """"SB" for a stolen base, "CS" for caught stealing, else blank. NaN/None-safe."""
+    if isinstance(play_result, float) and pd.isna(play_result):
+        return ""
+    return _STEAL_LABEL.get(play_result, "")
 
 
 def _result(pitch_call, play_result) -> str:
@@ -163,6 +179,7 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
         "Count": out["balls"].astype("Int64").astype(str) + "-" + out["strikes"].astype("Int64").astype(str),
         "Type": out["tagged_pitch_type"],
         "Velo": out["rel_speed"].round(1).map(lambda v: "—" if pd.isna(v) else f"{v:.1f}"),
+        "Steal": [_steal(pr) for pr in out["play_result"]],
         "Result": [_result(pc, pr) for pc, pr in zip(out["pitch_call"], out["play_result"])],
         "Zone": [("—" if z is None else str(z)) for z in zone],
         "Date": out["game_date"].astype(str),
