@@ -228,28 +228,34 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
 # ============================ SEASON TILES ===================================
 
 def _rollup_over(catcher_id, start, end) -> dict:
-    """The catching framing rollup (games, pitches, net strikes, steal%) for one
-    catcher over an arbitrary [start, end] date window, as a single SQL
-    aggregate over GAMES (sibling-id union). Single source of truth for the
-    framing-tile math: `_compute_season_rollup` calls this with a season's
-    bounds; `framing_season_tiles`'s range path calls it with the caller's
-    date-range bounds directly -- same function, different window."""
-    from app.data.catching import _pct
+    """The catching framing rollup for one catcher over an arbitrary
+    [start, end] date window, as a single SQL aggregate over GAMES
+    (sibling-id union). Single source of truth for the framing-tile math:
+    `_compute_season_rollup` calls this with a season's bounds;
+    `framing_season_tiles`'s range path calls it with the caller's date-range
+    bounds directly -- same function, different window.
+
+    Returned dict keys deliberately still match the precalc table's DDL
+    (`games`/`pitches`/`net_strikes`/`steal_pct`) so `_replace_rows`'s
+    column-list-from-dict-keys insert keeps working with NO schema change --
+    but `pitches`/`net_strikes` are REPURPOSED (2026-08-12 sidebar redesign)
+    to carry the framing STRIKES-gained ("stolen") / STRIKES-LOST ("lost")
+    counts rather than the old total-pitch-count / stolen-minus-lost net.
+    `steal_pct` is dead going forward (kept only for DDL/insert compat, always
+    "—") -- STEAL% is now computed fresh in `framing_season_tiles` via
+    `caught_stealing_summary`, not stored here."""
     cid = int(catcher_id)
     ph, idp = _in_clause(_sibling_catcher_ids(cid))
     idp["s"] = start; idp["e"] = end
     df = query_df(
         f"""
         SELECT COUNT(DISTINCT GameID) AS games,
-               COUNT(*) AS pitches,
                SUM(PitchCall='StrikeCalled'
                    AND NOT (ABS(PlateLocSide*12) <= 10
                             AND ABS(PlateLocHeight*12 - 30) <= 13)) AS stolen,
                SUM(PitchCall='BallCalled'
                    AND (ABS(PlateLocSide*12) <= 10
-                        AND ABS(PlateLocHeight*12 - 30) <= 13)) AS lost,
-               SUM(PlateLocSide IS NOT NULL
-                   AND PlateLocHeight IS NOT NULL) AS valid_loc
+                        AND ABS(PlateLocHeight*12 - 30) <= 13)) AS lost
           FROM GAMES
          WHERE CatcherId IN ({ph}) AND Date BETWEEN :s AND :e
         """,
@@ -258,15 +264,11 @@ def _rollup_over(catcher_id, start, end) -> dict:
     tiles = {"games": "—", "pitches": "—", "net_strikes": "—", "steal_pct": "—"}
     if not df.empty:
         r = df.iloc[0]
-        stolen = int(r["stolen"] or 0)
-        lost = int(r["lost"] or 0)
-        valid_loc = int(r["valid_loc"] or 0)
-        steal = _pct(lost, valid_loc)
         tiles = {
             "games": str(int(r["games"] or 0)),
-            "pitches": str(int(r["pitches"] or 0)),
-            "net_strikes": str(stolen - lost),
-            "steal_pct": "—" if steal is None else f"{steal}%",
+            "pitches": str(int(r["stolen"] or 0)),
+            "net_strikes": str(int(r["lost"] or 0)),
+            "steal_pct": "—",
         }
     return {"catcher_id": cid, "catcher_name": catcher_name(cid), **tiles}
 
@@ -290,22 +292,37 @@ def _compute_season_rollup(catcher_id, season=None) -> dict:
 
 
 def framing_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
-    """Season sidebar tiles, scoped to a date range.
+    """Season sidebar tiles, scoped to a date range: GAMES, STRIKES (framing
+    strikes gained), STRIKES LOST, STEAL% (caught-stealing %).
 
-    When `start`/`end` are omitted, or given but equal to `season`'s bounds
-    (the default "This Season" view), read the 1-row precalc catching rollup
-    with a compute fallback -- this fast path is unchanged (the precalc table
-    holds one row per (catcher, season), so ANY season is a ~0.2s single-row
-    read). A genuine sub-range (the coach narrowed the calendar/preset)
-    computes on the fly via `_rollup_over` so the sidebar tiles track the
-    selected date range. Return shape unchanged."""
+    GAMES/STRIKES/STRIKES_LOST keep the existing fast path: when `start`/`end`
+    are omitted, or given but equal to `season`'s bounds (the default "This
+    Season" view), read the 1-row precalc catching rollup with a compute
+    fallback -- unchanged mechanism (see `_rollup_over`'s docstring for how
+    the precalc row's `pitches`/`net_strikes` columns are repurposed, with no
+    schema change, to carry these two counts). A genuine sub-range (the coach
+    narrowed the calendar/preset) computes on the fly via `_rollup_over` so
+    the sidebar tiles track the selected date range.
+
+    STEAL% is always freshly computed here via `caught_stealing_summary`
+    over the same window (steal-attempt rows are rare -- cheap), independent
+    of the fast/compute split above. This replaces the old, mislabeled
+    steal_pct (lost / valid_loc)."""
     from app.data import seasons, precalc  # lazy: precalc imports catching_caps
+    from app.data.catching import caught_stealing_summary
     season = season or seasons.current_season()
-    if start and end:
-        s_b, e_b = seasons.season_bounds(season)
-        if str(start) != s_b or str(end) != e_b:
-            r = _rollup_over(catcher_id, start, end)
-            return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
-    row = precalc.read_catching_season(int(catcher_id), season)
-    r = row if row is not None else _compute_season_rollup(catcher_id, season)
-    return {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
+    s_b, e_b = seasons.season_bounds(season)
+    if start and end and (str(start) != s_b or str(end) != e_b):
+        r = _rollup_over(catcher_id, start, end)
+        window = (str(start), str(end))
+    else:
+        row = precalc.read_catching_season(int(catcher_id), season)
+        r = row if row is not None else _compute_season_rollup(catcher_id, season)
+        window = (s_b, e_b)
+    cs_pct = caught_stealing_summary(range_pitches_for(catcher_id, *window))["cs_pct"]
+    return {
+        "games": r["games"],
+        "strikes": r["pitches"],
+        "strikes_lost": r["net_strikes"],
+        "cs_pct": "—" if cs_pct is None else f"{cs_pct}%",
+    }

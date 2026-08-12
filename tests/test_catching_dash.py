@@ -539,8 +539,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda c: {"name": "Doe, John", "class_year": "",
                                    "position": "", "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.catching_caps.framing_season_tiles",
-                        lambda c, *a, **k: {"games": 0, "pitches": 0,
-                                            "net_strikes": 0, "steal_pct": "—"})
+                        lambda c, *a, **k: {"games": 0, "strikes": 0,
+                                            "strikes_lost": 0, "cs_pct": "—"})
     with server.app_context():
         coach = User(email="cat-season@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")

@@ -142,20 +142,48 @@ def test_lmu_catchers_all_have_numeric_game_id_rows():
 
 
 def test_framing_season_tiles_uses_precalc_when_present(monkeypatch):
+    # The precalc row's `pitches`/`net_strikes` columns are repurposed (same
+    # schema, no rebuild) to hold the framing STRIKES-gained/STRIKES-LOST
+    # counts -- framing_season_tiles surfaces them under their new sidebar
+    # names. STEAL% is no longer read off the precalc row at all (its
+    # `steal_pct` column is dead going forward); it's always a fresh
+    # caught-stealing computation, so an empty pitches frame here yields "—".
     from app.data import precalc
     sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
                 "games": "12", "pitches": "800", "net_strikes": "15",
                 "steal_pct": "4.2%"}
     monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: sentinel)
+    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: pd.DataFrame())
     assert catching_caps.framing_season_tiles(RAW_CID) == {
-        "games": "12", "pitches": "800", "net_strikes": "15", "steal_pct": "4.2%"}
+        "games": "12", "strikes": "800", "strikes_lost": "15", "cs_pct": "—"}
 
 
 def test_framing_season_tiles_falls_back_to_compute_when_missing(monkeypatch):
     from app.data import precalc
     monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: None)
     out = catching_caps.framing_season_tiles(RAW_CID)
-    assert set(out) == {"games", "pitches", "net_strikes", "steal_pct"}
+    assert set(out) == {"games", "strikes", "strikes_lost", "cs_pct"}
+
+
+def test_framing_season_tiles_steal_pct_is_caught_stealing_not_lost_rate(monkeypatch):
+    # Coach feedback: STEAL% must be caught / attempts (caught_stealing_summary's
+    # cs_pct), NOT the legacy lost/valid_loc rate that used to live on the
+    # precalc row's `steal_pct` column. Pin a precalc row whose (now-repurposed
+    # and now-unused) steal_pct clearly disagrees with a deliberately different,
+    # mocked caught-stealing frame, and assert the tile shows the latter.
+    from app.data import precalc
+    sentinel = {"catcher_id": RAW_CID, "catcher_name": "Lyall, Jake",
+                "games": "12", "pitches": "50", "net_strikes": "10",
+                "steal_pct": "20.0%"}
+    monkeypatch.setattr(precalc, "read_catching_season", lambda c, season=None: sentinel)
+    # 3 caught-stealing attempts, 1 caught -> cs_pct = 33.3%, != legacy 20.0%.
+    cs_df = pd.DataFrame({
+        "play_result": ["CaughtStealing", "StolenBase", "StolenBase"],
+        "pop_time": [2.0, None, None],
+    })
+    monkeypatch.setattr(catching_caps, "range_pitches_for", lambda c, s, e: cs_df)
+    out = catching_caps.framing_season_tiles(RAW_CID)
+    assert out == {"games": "12", "strikes": "50", "strikes_lost": "10", "cs_pct": "33.3%"}
 
 
 def test_compute_season_rollup_uses_rollup_over():
@@ -188,7 +216,7 @@ def test_framing_tiles_subrange_is_scoped():
     season = seasons.current_season()
     s, e = seasons.season_bounds(season)
     narrow = catching_caps.framing_season_tiles(RAW_CID, season, start=str(s), end=str(s))
-    assert set(narrow) == {"games", "pitches", "net_strikes", "steal_pct"}
+    assert set(narrow) == {"games", "strikes", "strikes_lost", "cs_pct"}
 
 
 def test_framing_tiles_subrange_matches_rollup_over():
@@ -206,4 +234,7 @@ def test_framing_tiles_subrange_matches_rollup_over():
         pytest.skip("fixture's full game span equals the season bounds; not a sub-range")
     out = catching_caps.framing_season_tiles(RAW_CID, season, start=start, end=end)
     r = catching_caps._rollup_over(RAW_CID, start, end)
-    assert out == {k: r[k] for k in ("games", "pitches", "net_strikes", "steal_pct")}
+    cs = catching.caught_stealing_summary(catching_caps.range_pitches_for(RAW_CID, start, end))
+    expected_cs = "—" if cs["cs_pct"] is None else f"{cs['cs_pct']}%"
+    assert out == {"games": r["games"], "strikes": r["pitches"],
+                   "strikes_lost": r["net_strikes"], "cs_pct": expected_cs}
