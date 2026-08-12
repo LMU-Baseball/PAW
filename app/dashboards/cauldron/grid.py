@@ -83,13 +83,12 @@ def _metric_columns(scoring: pd.DataFrame) -> list[dict]:
     ]
 
 
-def _auto_points(pid, metric, scoring_row, play_date) -> int | None:
-    """Live-score one AUTO metric for one pitcher/day via
-    `compute_player_day` + `score_value`, for pre-filling a cell that has no
-    stored `cauldron_daily` row yet. `None` when the pitcher has no tracked
-    pitches that day (or the metric's raw value is `None` for the day)."""
-    raw = cauldron.compute_player_day(pid, play_date).get(metric)
-    return cauldron.score_value(metric, raw, scoring_row)
+def _auto_points(metrics: dict, metric, scoring_row) -> int | None:
+    """Live-score one AUTO metric from an already-computed per-pitcher metrics
+    dict (a single value out of `cauldron.compute_players_day(...)`), via
+    `score_value`, for pre-filling / baselining a cell. `None` when the metric's
+    raw value is `None` for the day (or the pitcher has no tracked pitches)."""
+    return cauldron.score_value(metric, metrics.get(metric), scoring_row)
 
 
 def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
@@ -105,9 +104,15 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
         for _, r in daily.iterrows():
             stored[(int(r["player_id"]), r["metric"])] = r["points"]
 
+    # One batched compute for the whole roster's AUTO metrics (was one RDS
+    # round-trip per pitcher via compute_player_day).
+    pids = [int(r["PitcherId"]) for _, r in roster.iterrows()]
+    metrics_by_pid = cauldron.compute_players_day(pids, play_date)
+
     rows = []
     for _, r in roster.iterrows():
         pid = int(r["PitcherId"])
+        pmetrics = metrics_by_pid.get(pid, {})
         row = {"player_id": pid, "player": r["Pitcher"], "team": team_by_player.get(pid)}
         for _, srow in scoring.iterrows():
             metric = srow["metric"]
@@ -117,7 +122,7 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
             elif bool(srow.get("is_manual")):
                 row[metric] = None
             else:
-                row[metric] = _auto_points(pid, metric, srow, play_date)
+                row[metric] = _auto_points(pmetrics, metric, srow)
         rows.append(row)
     return rows
 
@@ -209,6 +214,11 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
     scoring = cauldron.read_scoring()
     scoring_by_metric = {row["metric"]: row for _, row in scoring.iterrows()}
 
+    # One batched compute for every edited pitcher's AUTO baselines (was one RDS
+    # round-trip per pitcher via compute_player_day).
+    edit_pids = [int(r["player_id"]) for r in grid_data if r.get("player_id") is not None]
+    metrics_by_pid = cauldron.compute_players_day(edit_pids, play_date)
+
     daily_rows = []
     for r in grid_data:
         pid = r.get("player_id")
@@ -216,6 +226,7 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
         if team not in (None, ""):
             cauldron.set_team(pid, cycle_id, team, updated_by)
 
+        pmetrics = metrics_by_pid.get(int(pid), {}) if pid is not None else {}
         for key, value in r.items():
             if key in _NON_METRIC_KEYS:
                 continue
@@ -225,7 +236,7 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
 
             srow = scoring_by_metric.get(key)
             if srow is not None and not bool(srow.get("is_manual")):
-                baseline = _auto_points(pid, key, srow, play_date)
+                baseline = _auto_points(pmetrics, key, srow)
                 source = "auto" if points == baseline else "manual"
             else:
                 source = "manual"

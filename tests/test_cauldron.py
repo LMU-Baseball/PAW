@@ -133,7 +133,8 @@ def test_score_day_never_clobbers_manual(monkeypatch):
             C.pitching_caps, "lmu_pitchers",
             lambda season=None, start=None, end=None: pd.DataFrame(
                 {"PitcherId": [pid], "Pitcher": ["Synthetic, Test"]}))
-        monkeypatch.setattr(C, "compute_player_day", lambda p, d: {metric: 10.0})
+        monkeypatch.setattr(C, "compute_players_day",
+                            lambda pids, d: {int(p): {metric: 10.0} for p in pids})
 
         written = C.score_day(play_date, season="9999/0000")
         assert written == 0

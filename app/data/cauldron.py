@@ -249,29 +249,22 @@ _OFFSPEED_TYPES = {"ChangeUp", "Curveball", "Slider", "Sweeper", "Splitter"}
 _NON_STANDARD_METRICS = ("early_ahead", "pre2k_zone", "twok_kill", "count_work")
 
 
-@cached
-def compute_player_day(pitcher_id, play_date) -> dict:
-    """One pitcher's raw AUTO-metric values for one calendar day, computed
-    straight from GAMES pitch data (no DB read/write here -- pure compute).
+def _metrics_from_df(df) -> dict:
+    """Raw AUTO-metric values for ONE pitcher-day, from an already-loaded pitch
+    frame (that pitcher's GAMES pitches for a single day). Pure compute -- the
+    single seam shared by `compute_player_day` (one pitcher) and
+    `compute_players_day` (batched), so both produce identical results by
+    construction. Caller guarantees `df` is non-empty and holds exactly one
+    pitcher's pitches.
 
-    Reuses `app.data.pitching`'s existing pure transforms wherever they already
-    compute a metric (strike_pct, fps_pct, k_pct, bb_pct, barrel_pct_ev), scoped
-    to this one pitcher/day via `pitching_caps.range_pitches_for(pid, date, date)`
-    -- start==end==play_date already gets the sibling-id union and Date scoping
-    for free, exactly like the velo board's day-scoped reads.
-
-    Returns `{}` if the pitcher threw no tracked GAMES pitches that day. A
-    metric whose denominator is 0 for the day (no off-speed pitches, no balls
-    in play, etc.) resolves to `None` for that metric, never 0 or NaN -- a
+    Reuses `app.data.pitching`'s pure transforms wherever they already compute a
+    metric. A metric whose denominator is 0 for the day (no off-speed pitches,
+    no balls in play, etc.) resolves to `None`, never 0 or NaN -- a
     scoreless/data-starved day must not read as "met the bar."
     """
-    df = pitching_caps.range_pitches_for(pitcher_id, play_date, play_date)
-    if df.empty:
-        return {}
-
     metrics: dict[str, float | None] = {}
 
-    # strike_pct: strikes / all pitches. df is non-empty (checked above), so
+    # strike_pct: strikes / all pitches. df is non-empty (caller guarantees), so
     # the denominator can't be 0.
     metrics["strike_pct"] = P.strike_pct(df)[0]
 
@@ -314,6 +307,60 @@ def compute_player_day(pitcher_id, play_date) -> dict:
         metrics[metric] = None
 
     return metrics
+
+
+@cached
+def compute_player_day(pitcher_id, play_date) -> dict:
+    """One pitcher's raw AUTO-metric values for one calendar day, computed
+    straight from GAMES (`pitching_caps.range_pitches_for(pid, date, date)` --
+    start==end gets the sibling-id union + Date scoping for free). Returns `{}`
+    if the pitcher threw no tracked GAMES pitches that day. Delegates the metric
+    math to `_metrics_from_df` (shared with the batched `compute_players_day`)."""
+    df = pitching_caps.range_pitches_for(pitcher_id, play_date, play_date)
+    return _metrics_from_df(df) if not df.empty else {}
+
+
+def compute_players_day(pitcher_ids, play_date) -> dict:
+    """BATCHED `compute_player_day`: one GAMES query for ALL `pitcher_ids` on
+    `play_date` (sibling-union) instead of one round-trip per pitcher, then each
+    pitcher's metrics computed in pandas via the SAME `_metrics_from_df`.
+
+    Returns `{pitcher_id: metrics_dict}` for every id passed in; a pitcher with
+    no tracked pitches that day maps to `{}` (exactly like `compute_player_day`).
+    Parity with the per-pitcher path is guaranteed by construction: each
+    pitcher's row slice (PitcherId in that pitcher's sibling set, Date ==
+    play_date) is the same frame `range_pitches_for` would load, and both feed
+    the identical `_metrics_from_df`. Sibling sets are name-based and disjoint
+    across pitchers, so slicing by canonical id can't cross-contaminate."""
+    ids = [int(p) for p in pitcher_ids]
+    result: dict[int, dict] = {pid: {} for pid in ids}
+    if not ids:
+        return result
+
+    sib_to_canon: dict[int, int] = {}
+    for pid in ids:
+        for sid in pitching_caps._sibling_pitcher_ids(pid):
+            sib_to_canon[int(sid)] = pid
+    all_sibs = sorted(sib_to_canon)
+    if not all_sibs:
+        return result
+
+    ph, params = pitching_caps._in_clause(all_sibs)
+    params["d"] = str(play_date)
+    df = query_df(
+        f"SELECT {pitching_caps._PITCH_SELECT} FROM GAMES "
+        f"WHERE PitcherId IN ({ph}) AND Date BETWEEN :d AND :d "
+        f"ORDER BY GameID, PitchNo", params)
+    if df.empty:
+        return result
+
+    df = df.copy()
+    df["_canon"] = df["pitcher_id"].astype(int).map(sib_to_canon)
+    for canon, sub in df.groupby("_canon"):
+        sub = sub.drop(columns=["_canon"])
+        if not sub.empty:
+            result[int(canon)] = _metrics_from_df(sub)
+    return result
 
 
 # ================================= SCORING ===================================
@@ -380,6 +427,8 @@ def score_day(play_date, season=None) -> int:
     roster = pitching_caps.lmu_pitchers(season or seasons.current_season())
     if roster.empty:
         return 0
+    pids = [int(r["PitcherId"]) for _, r in roster.iterrows()]
+    metrics_by_pid = compute_players_day(pids, play_date)  # one batched query
 
     existing = read_daily(play_date)
     manual_keys = set()
@@ -388,9 +437,8 @@ def score_day(play_date, season=None) -> int:
         manual_keys = set(zip(manual["player_id"].astype(int), manual["metric"]))
 
     rows = []
-    for _, r in roster.iterrows():
-        pid = int(r["PitcherId"])
-        metrics = compute_player_day(pid, play_date)
+    for pid in pids:
+        metrics = metrics_by_pid.get(pid, {})
         for metric, raw_value in metrics.items():
             scoring_row = scoring_by_metric.get(metric)
             if scoring_row is None or bool(scoring_row.get("is_manual")):

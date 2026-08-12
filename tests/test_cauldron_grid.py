@@ -29,8 +29,9 @@ def _patch_reads(monkeypatch, teams_df=None, daily_df=None, computed=None):
     monkeypatch.setattr("app.data.cauldron.read_daily",
                          lambda play_date=None, player_id=None: daily_df if daily_df is not None
                          else pd.DataFrame(columns=["player_id", "play_date", "metric", "points", "source"]))
-    monkeypatch.setattr("app.data.cauldron.compute_player_day",
-                         lambda pid, play_date: computed if computed is not None else {})
+    monkeypatch.setattr(
+        "app.data.cauldron.compute_players_day",
+        lambda pids, play_date: {int(p): (computed if computed is not None else {}) for p in pids})
 
 
 def test_coach_grid_is_editable_and_has_required_ids(monkeypatch):
@@ -67,7 +68,8 @@ def test_coach_grid_prefills_team_and_scores_auto_metric_live(monkeypatch):
 def test_save_grid_routes_team_to_set_team(monkeypatch):
     captured = {}
     monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
-    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
+    monkeypatch.setattr("app.data.cauldron.compute_players_day",
+                         lambda pids, play_date: {int(p): {} for p in pids})
     monkeypatch.setattr(
         "app.data.cauldron.set_team",
         lambda pid, cycle_id, team, updated_by=None: captured.setdefault(
@@ -85,7 +87,8 @@ def test_save_grid_routes_filled_metric_cell_to_upsert_daily_as_manual(monkeypat
     monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
     # No stored/live raw value for strike_pct -> no AUTO baseline to match,
     # so a filled cell always falls back to 'manual'.
-    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
+    monkeypatch.setattr("app.data.cauldron.compute_players_day",
+                         lambda pids, play_date: {int(p): {} for p in pids})
     monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
     def _fake_upsert_daily(rows, updated_by=None):
         captured["rows"] = rows
@@ -111,7 +114,8 @@ def test_save_grid_routes_filled_metric_cell_to_upsert_daily_as_manual(monkeypat
 
 def test_save_grid_coerces_blank_and_nan_metric_cells_to_skipped(monkeypatch):
     monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
-    monkeypatch.setattr("app.data.cauldron.compute_player_day", lambda pid, play_date: {})
+    monkeypatch.setattr("app.data.cauldron.compute_players_day",
+                         lambda pids, play_date: {int(p): {} for p in pids})
     monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
     calls = []
     monkeypatch.setattr("app.data.cauldron.upsert_daily",
@@ -134,8 +138,8 @@ def test_save_grid_tags_source_auto_vs_manual_vs_override(monkeypatch):
     monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
     # strike_pct raw=60.0 -> score_value(60, threshold=55, gte) = points_met = 20.
     # That 20 is exactly what coach_grid pre-filled the cell with.
-    monkeypatch.setattr("app.data.cauldron.compute_player_day",
-                         lambda pid, play_date: {"strike_pct": 60.0})
+    monkeypatch.setattr("app.data.cauldron.compute_players_day",
+                         lambda pids, play_date: {int(p): {"strike_pct": 60.0} for p in pids})
     monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
     captured = {}
     monkeypatch.setattr("app.data.cauldron.upsert_daily",
