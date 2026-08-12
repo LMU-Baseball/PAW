@@ -37,9 +37,22 @@ def register_callbacks(dash_app) -> None:
         return rows, lb
 
     @dash_app.callback(
+        Output("velo-grid", "editable", allow_duplicate=True),
+        Output("velo-save-status", "children", allow_duplicate=True),
+        Input("velo-edit", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _on_edit(n_clicks):
+        """Edit unlocks the grid for typing (re-checks coach server-side)."""
+        if not n_clicks or not bool(getattr(current_user, "is_coach", False)):
+            return no_update, no_update
+        return True, "Editing — type new numbers into any cell, then Save."
+
+    @dash_app.callback(
         Output("velo-grid", "data", allow_duplicate=True),
         Output("velo-save-status", "children"),
         Output("velo-leaderboard", "children", allow_duplicate=True),
+        Output("velo-grid", "editable"),
         Input("velo-save", "n_clicks"),
         State("velo-grid", "data"),
         State("velo-season", "value"),
@@ -48,11 +61,11 @@ def register_callbacks(dash_app) -> None:
     )
     def _on_save(n_clicks, grid_data, season, week_date):
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         if not bool(getattr(current_user, "is_coach", False)):
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         week = velo_board.week_start_for(week_date)
         grid.save_rows(grid_data, season, week, updated_by=getattr(current_user, "id", None))
         rows = velo_board.grid_rows(season, week).to_dict("records")
         lb = visual.leaderboard_view(velo_board.leaderboard(season))
-        return rows, "Saved.", lb
+        return rows, "Saved.", lb, False  # re-lock the grid after saving

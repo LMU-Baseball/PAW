@@ -64,6 +64,10 @@ from app.dashboards import shell
 
 _TEAM_OPTIONS = ["Team 1", "Team 2", "Team 3", "Team 4"]
 
+_LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
+                "textTransform": "uppercase", "letterSpacing": "1px",
+                "display": "block", "marginBottom": "4px", "textAlign": "center"}
+
 # Row keys that are never metric columns -- everything else in a grid row
 # dict is a metric id (see `_grid_rows`/`save_grid`).
 _NON_METRIC_KEYS = {"player_id", "player", "team"}
@@ -137,39 +141,30 @@ def coach_grid(play_date, cycle_id, season) -> html.Div:
 
     dropdown = {"team": {"options": [{"label": t, "value": t} for t in _TEAM_OPTIONS]}}
 
-    controls = html.Div([
+    # Centered, single-line filter row under the emblem.
+    filters = html.Div([
         html.Div([
-            html.Label("Date", style={"color": "white", "fontWeight": "bold"}),
+            html.Label("Date", style=_LABEL_STYLE),
             dcc.DatePickerSingle(id="cauldron-date", date=play_date),
         ]),
         html.Div([
-            html.Label("Cycle", style={"color": "white", "fontWeight": "bold"}),
+            html.Label("Cycle", style=_LABEL_STYLE),
             dcc.Dropdown(
                 id="cauldron-cycle",
                 options=[{"label": cycle_id, "value": cycle_id}],
                 value=cycle_id, clearable=False,
-                style={"minWidth": "130px"}),
+                style={"minWidth": "150px"}),
         ]),
-        html.Div([
-            html.Button("Save", id="cauldron-save", n_clicks=0, style={
-                "backgroundColor": shell.CRIMSON, "color": "white", "border": "none",
-                "borderRadius": "4px", "padding": "8px 16px", "fontWeight": "bold",
-                "cursor": "pointer", "marginRight": "8px"}),
-            html.Button("Recompute auto", id="cauldron-recompute", n_clicks=0, style={
-                "backgroundColor": "#2864A8", "color": "white", "border": "none",
-                "borderRadius": "4px", "padding": "8px 16px", "fontWeight": "bold",
-                "cursor": "pointer"}),
-            html.Div(id="cauldron-save-status", style={"color": "white", "fontSize": "13px",
-                                                         "marginTop": "4px"}),
-        ]),
-    ], style={"display": "flex", "gap": "20px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": shell.BANNER})
+    ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
+              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "16px 16px 8px"})
 
+    # Grid starts LOCKED (editable=False). "Edit" unlocks it; "Save" persists
+    # and re-locks -- see callbacks.py.
     grid = dash_table.DataTable(
         id="cauldron-grid",
         columns=columns,
         data=data,
-        editable=True,
+        editable=False,
         dropdown=dropdown,
         style_table={"overflowX": "auto"},
         style_cell={"fontFamily": "Teko, sans-serif", "fontSize": "15px",
@@ -177,7 +172,14 @@ def coach_grid(play_date, cycle_id, season) -> html.Div:
         style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold"},
     )
 
-    return html.Div([controls, grid])
+    recompute = html.Button("Recompute auto", id="cauldron-recompute", n_clicks=0,
+                            style=shell._btn_style("#0076A5"))
+    buttons = shell.edit_save_buttons("cauldron-edit", "cauldron-save",
+                                      "cauldron-save-status", extra=[recompute])
+
+    return html.Div([filters, html.Div(grid, style={"padding": "0 16px"}), buttons],
+                    style={"borderBottom": f"2px solid {shell.CRIMSON}",
+                           "backgroundColor": "rgba(255,255,255,0.55)"})
 
 
 def _coerce_numeric(value):

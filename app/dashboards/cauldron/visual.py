@@ -19,8 +19,6 @@ Two pieces, both pure functions of data (no callbacks, no state), mirroring
 """
 from __future__ import annotations
 
-import urllib.parse
-
 import pandas as pd
 from dash import html
 
@@ -44,73 +42,57 @@ _UNASSIGNED_TEAM = "Unassigned"
 
 
 # ============================ CAULDRON HEADER =================================
+#
+# A contained translucent-crimson box (mirroring the home page's `.home-hero`
+# and the velo board's header), holding a strip of LMU logos -- the white
+# transparent sun-lion flanked by two LMU arch marks -- above a spiced-up,
+# two-tone "COMPETITIVE CAULDRON" marquee in "Alfa Slab One" (the home hero's
+# font). The white lion (`lion-white.png`) has a transparent background so it
+# sits cleanly on the crimson box -- no white halo.
 
-def _flame_path(cx: float, cy: float, scale: float, color: str) -> str:
-    """A single stylized teardrop flame centered at (`cx`, `cy`), scaled by
-    `scale`."""
-    return (f'<path transform="translate({cx},{cy}) scale({scale})" '
-            f'd="M0,-40 C18,-18 22,4 10,18 C16,10 16,-2 8,-10 '
-            f'C10,2 4,10 -6,14 C-16,8 -14,-6 -4,-16 C-8,-8 -6,2 0,4 '
-            f'C-6,-10 -6,-28 0,-40 Z" fill="{color}"/>')
-
-
-def _cauldron_svg() -> str:
-    """The LMU cauldron wordmark as a standalone SVG document string: a bold
-    "COMPETITIVE CAULDRON" wordmark, a row of flanking flames, and a
-    crimson/blue pot silhouette beneath."""
-    width, height = 720, 220
-    cx = width / 2
-    flame_cy = 90
-    flames = "".join([
-        _flame_path(cx - 78, flame_cy, 1.3, BLUE),
-        _flame_path(cx - 32, flame_cy, 1.7, CRIMSON_DEEP),
-        _flame_path(cx + 32, flame_cy, 1.7, CRIMSON),
-        _flame_path(cx + 78, flame_cy, 1.3, BLUE),
-    ])
-    pot_y = 138
-    pot = (f'<path d="M{cx - 110},{pot_y} '
-           f'Q{cx - 110},{pot_y + 55} {cx},{pot_y + 55} '
-           f'Q{cx + 110},{pot_y + 55} {cx + 110},{pot_y} Z" '
-           f'fill="#161616" stroke="{BLUE}" stroke-width="4"/>')
-    legs = (f'<rect x="{cx - 95}" y="{pot_y + 50}" width="14" height="22" fill="{CRIMSON_DEEP}"/>'
-            f'<rect x="{cx + 81}" y="{pot_y + 50}" width="14" height="22" fill="{CRIMSON_DEEP}"/>')
-    handles = (f'<ellipse cx="{cx - 112}" cy="{pot_y + 10}" rx="10" ry="16" '
-               f'fill="none" stroke="{BLUE}" stroke-width="5"/>'
-               f'<ellipse cx="{cx + 112}" cy="{pot_y + 10}" rx="10" ry="16" '
-               f'fill="none" stroke="{BLUE}" stroke-width="5"/>')
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"
-     viewBox="0 0 {width} {height}">
-  {flames}
-  {pot}
-  {legs}
-  {handles}
-  <text x="{cx}" y="52" text-anchor="middle"
-        font-family="Arial Black, Arial, sans-serif" font-size="42"
-        font-weight="900" letter-spacing="4" fill="#ffffff"
-        stroke="{CRIMSON}" stroke-width="3" paint-order="stroke">COMPETITIVE CAULDRON</text>
-</svg>'''
+BANNER_BOX = "rgba(154, 0, 33, 0.82)"   # == base.html --banner (home-hero box)
+MARQUEE_FONT = "'Alfa Slab One', Georgia, serif"
+_WORD_BLUE = "#5B9BD5"                    # light blue that reads on the crimson box
+_LION_WHITE_SRC = "/static/reports/lion-white.png"
+_LMU_ARCH_SRC = "/static/reports/lmu.png"
 
 
 def cauldron_header() -> html.Div:
-    """The branded banner: LMU "COMPETITIVE CAULDRON" wordmark/flames/pot +
-    subtitle. Pure presentation -- no data dependency."""
-    svg = _cauldron_svg()
-    data_uri = "data:image/svg+xml;utf8," + urllib.parse.quote(svg)
-    img = html.Img(
-        src=data_uri,
-        alt="COMPETITIVE CAULDRON scoreboard wordmark",
-        style={"display": "block", "margin": "0 auto", "width": "100%",
-               "maxWidth": "720px"},
-    )
+    """The branded header: a contained crimson box with a strip of LMU logos
+    (white sun-lion flanked by LMU arch marks) above a two-tone "COMPETITIVE
+    CAULDRON" marquee + "DAILY TEAM COMPETITION" subtitle. Pure presentation
+    -- no data dependency."""
+    def _arch():
+        return html.Img(src=_LMU_ARCH_SRC, alt="LMU",
+                        style={"height": "44px", "width": "auto"})
+
+    logos = html.Div([
+        _arch(),
+        html.Img(src=_LION_WHITE_SRC, alt="LMU lion",
+                 style={"height": "84px", "width": "auto"}),
+        _arch(),
+    ], style={"display": "flex", "justifyContent": "center", "alignItems": "center",
+              "gap": "26px", "flexWrap": "wrap", "marginBottom": "6px"})
+
+    wordmark = html.Div([
+        html.Span("COMPETITIVE ", style={"color": "#ffffff"}),
+        html.Span("CAULDRON", style={"color": _WORD_BLUE}),
+    ], style={
+        "textAlign": "center", "fontFamily": MARQUEE_FONT, "fontSize": "46px",
+        "letterSpacing": "2px", "lineHeight": "1", "textTransform": "uppercase",
+    })
     subtitle = html.Div("DAILY TEAM COMPETITION", style={
-        "textAlign": "center", "color": BLUE, "fontFamily": "Teko, Arial, sans-serif",
-        "fontWeight": "700", "fontSize": "24px", "letterSpacing": "10px",
-        "marginTop": "-8px", "textTransform": "uppercase",
+        "textAlign": "center", "color": "rgba(255,255,255,0.9)",
+        "fontFamily": "Teko, Arial, sans-serif", "fontWeight": "700",
+        "fontSize": "24px", "letterSpacing": "10px", "marginTop": "6px",
+        "textTransform": "uppercase",
     })
-    return html.Div([img, subtitle], style={
-        "background": shell.BANNER, "padding": "22px 16px 18px",
-        "borderBottom": f"3px solid {BLUE}",
+    box = html.Div([logos, wordmark, subtitle], style={
+        "background": BANNER_BOX, "borderRadius": "10px",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "22px 30px 20px",
+        "maxWidth": "900px", "margin": "26px auto 10px",
     })
+    return html.Div(box, style={"padding": "0 20px"})
 
 
 # =============================== SCOREBOARD ====================================

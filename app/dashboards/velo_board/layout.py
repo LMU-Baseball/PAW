@@ -44,10 +44,11 @@ def serve_layout() -> html.Div:
     children = [
         dcc.Store(id="velo-selection", data={"season": season, "week": week}),
         shell.header(back_href="/pitching", back_label="← Pitching"),
+        visual.top_gun_header(),
     ]
+    # Filters + the editable grid live directly under the emblem, coach-only.
     if is_coach:
         children.append(html.Div(grid.coach_grid(season, week), id="velo-coach-section"))
-    children.append(visual.top_gun_header())
     children.append(html.Div(
         id="velo-leaderboard",
         children=visual.leaderboard_view(velo_board.leaderboard(season)),

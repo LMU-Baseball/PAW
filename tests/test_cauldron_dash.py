@@ -44,7 +44,7 @@ def test_serve_layout_renders_grid_for_coach(server):
     assert "Please log in" not in s
     assert "cauldron-grid" in s
     assert "cauldron-save" in s
-    assert "COMPETITIVE CAULDRON" in s
+    assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
 def test_serve_layout_hides_grid_for_player(server):
@@ -64,7 +64,7 @@ def test_serve_layout_hides_grid_for_player(server):
     assert "Please log in" not in s
     assert "cauldron-grid" not in s
     assert "cauldron-save" not in s
-    assert "COMPETITIVE CAULDRON" in s
+    assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
 def test_register_callbacks_adds_callbacks(server):

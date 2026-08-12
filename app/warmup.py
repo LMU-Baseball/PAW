@@ -71,6 +71,38 @@ def warm_caches() -> None:
             gid = str(g.iloc[0]["game_id"])
             _safe(lambda: C.game_pitches_for(gid, cid))
 
+    # Velo Board + Competitive Cauldron. These two boards were added after the
+    # original warm set and carry the SAME first-open cost the others do: a
+    # per-rostered-pitcher fan of Trackman round-trips (velo leaderboard) and a
+    # per-pitcher/day compute (cauldron grid), each ~0.5s to RDS. Warming them
+    # here is what makes them open instantly instead of cold-loading. The exact
+    # (season, week, cycle, play_date) keys mirror what serve_layout defaults to
+    # so the warmed @cached entries actually hit.
+    from datetime import date
+    from app.data import velo_board, cauldron
+
+    _safe(lambda: velo_board.leaderboard(season))     # player-facing heat board
+    # Default week = the layout's _default_week(season): today's week while the
+    # season is live, else its final week (offseason). Kept in sync with
+    # velo_board/layout.py::_default_week.
+    today = date.today().isoformat()
+    anchor = min(today, e_b)
+    if anchor < s_b:
+        anchor = s_b
+    week = _safe(lambda: velo_board.week_start_for(anchor))
+    if week:
+        _safe(lambda: velo_board.grid_rows(season, week))  # coach grid prefill
+
+    cycle = f"{season}-c1"
+    _safe(cauldron.read_scoring)
+    _safe(lambda: cauldron.read_teams(cycle))
+    _safe(cauldron.read_daily)
+    if pitchers is not None and not pitchers.empty:
+        from app.dashboards.cauldron import grid as cauldron_grid
+        _safe(lambda: cauldron_grid._grid_rows(
+            pitchers, cauldron.read_scoring(), cauldron.read_teams(cycle),
+            cauldron.read_daily(today), today))            # coach grid prefill
+
 
 def start_warm_thread() -> threading.Thread:
     """Run warm_caches() in a daemon thread so it never blocks startup."""

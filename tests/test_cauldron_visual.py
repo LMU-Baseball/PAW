@@ -64,7 +64,7 @@ def _fixture():
 
 def test_cauldron_header_has_wordmark():
     s = str(V.cauldron_header())
-    assert "Competitive Cauldron" in s or "COMPETITIVE CAULDRON" in s
+    assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
 def test_scoreboard_view_groups_by_team_with_totals():

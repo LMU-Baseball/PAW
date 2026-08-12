@@ -16,7 +16,8 @@ def test_leaderboard_view_renders_rows_and_header():
     ])
     view = V.leaderboard_view(lb)
     s = str(view)
-    assert "TOP GUN" in str(V.top_gun_header())
+    header = str(V.top_gun_header())
+    assert "LMU" in header and "COMPETE EVERYDAY" in header
     assert "A, B" in s and "Portland" in s
 
 

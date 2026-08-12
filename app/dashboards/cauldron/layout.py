@@ -47,10 +47,13 @@ def serve_layout() -> html.Div:
     cycle = _default_cycle(season)
     roster_names = _roster_names(season)
 
-    children = [shell.header(back_href="/pitching", back_label="← Pitching")]
+    children = [
+        shell.header(back_href="/pitching", back_label="← Pitching"),
+        visual.cauldron_header(),
+    ]
+    # Filters + the editable grid live directly under the emblem, coach-only.
     if is_coach:
         children.append(html.Div(grid.coach_grid(play_date, cycle, season), id="cauldron-coach-section"))
-    children.append(visual.cauldron_header())
     children.append(html.Div(
         id="cauldron-scoreboard",
         children=visual.scoreboard_view(

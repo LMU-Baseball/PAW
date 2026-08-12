@@ -34,6 +34,10 @@ _INDEX_STRING = """<!DOCTYPE html>
     font-family: "Teko"; font-weight: 700; font-display: swap;
     src: url("/static/reports/Teko-Bold.ttf") format("truetype");
   }
+  @font-face {
+    font-family: "Alfa Slab One"; font-weight: 400; font-display: swap;
+    src: url("/static/brand/AlfaSlabOne-Regular.ttf") format("truetype");
+  }
   body {
     margin: 0; min-height: 100vh;
     background-color: #f5f5f5;
@@ -90,3 +94,34 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
 
 def section(title: str) -> html.H3:
     return html.H3(title, style={"color": CRIMSON})
+
+
+BLUE = "#0076A5"  # site brand blue (base.html --blue)
+
+
+def _btn_style(bg: str) -> dict:
+    return {"backgroundColor": bg, "color": "#fff", "border": "none",
+            "borderRadius": "4px", "padding": "10px 26px", "fontWeight": "bold",
+            "fontSize": "15px", "cursor": "pointer", "textTransform": "uppercase",
+            "letterSpacing": "1px"}
+
+
+def edit_save_buttons(edit_id: str, save_id: str, status_id: str,
+                      extra: list | None = None) -> html.Div:
+    """A centered row of coach controls: an "Edit" button (unlocks the grid),
+    a "Save" button (persists + re-locks), any `extra` buttons, and a status
+    line beneath. Shared by the velo board and cauldron so both read the same.
+    The Edit/Save wiring (toggling the grid's `editable`) lives in each board's
+    callbacks."""
+    row = [
+        html.Button("Edit", id=edit_id, n_clicks=0, style=_btn_style(BLUE)),
+        html.Button("Save", id=save_id, n_clicks=0, style=_btn_style(CRIMSON)),
+    ]
+    if extra:
+        row.extend(extra)
+    return html.Div([
+        html.Div(row, style={"display": "flex", "justifyContent": "center",
+                             "gap": "12px", "flexWrap": "wrap"}),
+        html.Div(id=status_id, style={"color": CRIMSON, "fontSize": "14px",
+                                      "fontWeight": "bold", "marginTop": "8px"}),
+    ], style={"padding": "14px 16px 20px", "textAlign": "center"})

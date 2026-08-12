@@ -56,44 +56,45 @@ def _grid_columns(df: pd.DataFrame) -> list[dict]:
     return [c for c in _COLUMNS if c["id"] in df.columns]
 
 
+_LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
+                "textTransform": "uppercase", "letterSpacing": "1px",
+                "display": "block", "marginBottom": "4px", "textAlign": "center"}
+
+
 def coach_grid(season_label: str, week_start: str) -> html.Div:
-    """The coach-facing editable grid: Season dropdown, Week picker, the
-    editable DataTable itself (id `velo-grid`), and a Save button (id
-    `velo-save`) + status line (id `velo-save-status`)."""
+    """The coach-facing editable grid: a centered Season + Week filter row
+    (one line, directly under the emblem), then a clearly-labeled editable
+    DataTable (id `velo-grid`) whose numbers a coach can change, and a Save
+    button (id `velo-save`) that writes them to the database + a status line
+    (id `velo-save-status`)."""
     df = velo_board.grid_rows(season_label, week_start)
     data = df.to_dict("records")  # pitcher_id rides along, hidden from _COLUMNS
 
-    controls = html.Div([
+    # Centered, single-line filter row under the emblem.
+    filters = html.Div([
         html.Div([
-            html.Label("Season", style={"color": "white", "fontWeight": "bold"}),
+            html.Label("Season", style=_LABEL_STYLE),
             dcc.Dropdown(
                 id="velo-season",
                 options=[{"label": s, "value": s} for s in available_seasons()],
                 value=season_label, clearable=False,
-                style={"minWidth": "130px"}),
+                style={"minWidth": "150px"}),
         ]),
         html.Div([
-            html.Label("Week", style={"color": "white", "fontWeight": "bold"}),
+            html.Label("Week (starts Monday)", style=_LABEL_STYLE),
             dcc.DatePickerSingle(id="velo-week", date=week_start),
-            html.Div("week starting Monday", style={
-                "color": "white", "fontSize": "12px", "opacity": "0.8"}),
         ]),
-        html.Div([
-            html.Button("Save week", id="velo-save", n_clicks=0, style={
-                "backgroundColor": shell.CRIMSON, "color": "white", "border": "none",
-                "borderRadius": "4px", "padding": "8px 16px", "fontWeight": "bold",
-                "cursor": "pointer"}),
-            html.Div(id="velo-save-status", style={"color": "white", "fontSize": "13px",
-                                                     "marginTop": "4px"}),
-        ]),
-    ], style={"display": "flex", "gap": "20px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": shell.BANNER})
+    ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
+              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "16px 16px 8px"})
 
+    # Grid starts LOCKED (editable=False). "Edit" unlocks it; "Save" persists
+    # and re-locks -- see callbacks.py. This is what makes the Edit button do
+    # something visible (before, it was just a static label).
     grid = dash_table.DataTable(
         id="velo-grid",
         columns=_grid_columns(df),
         data=data,
-        editable=True,
+        editable=False,
         style_table={"overflowX": "auto"},
         style_cell={"fontFamily": "Teko, sans-serif", "fontSize": "15px",
                     "padding": "4px 8px", "textAlign": "center"},
@@ -101,7 +102,11 @@ def coach_grid(season_label: str, week_start: str) -> html.Div:
         style_data_conditional=_STYLE_DATA_CONDITIONAL,
     )
 
-    return html.Div([controls, grid])
+    buttons = shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status")
+
+    return html.Div([filters, html.Div(grid, style={"padding": "0 16px"}), buttons],
+                    style={"borderBottom": f"2px solid {shell.CRIMSON}",
+                           "backgroundColor": "rgba(255,255,255,0.55)"})
 
 
 def _coerce_numeric(value):

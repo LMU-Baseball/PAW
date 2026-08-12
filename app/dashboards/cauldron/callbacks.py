@@ -61,9 +61,22 @@ def register_callbacks(dash_app) -> None:
         return _refresh(play_date, cycle_id)
 
     @dash_app.callback(
+        Output("cauldron-grid", "editable", allow_duplicate=True),
+        Output("cauldron-save-status", "children", allow_duplicate=True),
+        Input("cauldron-edit", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _on_edit(n_clicks):
+        """Edit unlocks the grid for typing (re-checks coach server-side)."""
+        if not n_clicks or not _is_coach():
+            return no_update, no_update
+        return True, "Editing — assign teams / type points into any cell, then Save."
+
+    @dash_app.callback(
         Output("cauldron-grid", "data", allow_duplicate=True),
         Output("cauldron-scoreboard", "children", allow_duplicate=True),
         Output("cauldron-save-status", "children"),
+        Output("cauldron-grid", "editable"),
         Input("cauldron-save", "n_clicks"),
         State("cauldron-grid", "data"),
         State("cauldron-date", "date"),
@@ -72,12 +85,12 @@ def register_callbacks(dash_app) -> None:
     )
     def _on_save(n_clicks, grid_data, play_date, cycle_id):
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         if not _is_coach():
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
         grid.save_grid(grid_data, play_date, cycle_id, updated_by=getattr(current_user, "id", None))
         rows, scoreboard = _refresh(play_date, cycle_id)
-        return rows, scoreboard, "Saved."
+        return rows, scoreboard, "Saved.", False  # re-lock the grid after saving
 
     @dash_app.callback(
         Output("cauldron-grid", "data", allow_duplicate=True),

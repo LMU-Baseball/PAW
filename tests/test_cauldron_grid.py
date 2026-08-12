@@ -45,7 +45,8 @@ def test_coach_grid_is_editable_and_has_required_ids(monkeypatch):
     assert "cauldron-date" in s
     assert "cauldron-cycle" in s
     assert "cauldron-save-status" in s
-    assert "editable=True" in s
+    assert "cauldron-edit" in s        # Edit button unlocks the grid
+    assert "editable=False" in s       # grid starts LOCKED until Edit is pressed
 
 
 def test_coach_grid_prefills_team_and_scores_auto_metric_live(monkeypatch):

@@ -44,7 +44,7 @@ def test_serve_layout_renders_grid_for_coach(server):
     assert "Please log in" not in s
     assert "velo-grid" in s
     assert "velo-save" in s
-    assert "TOP GUN" in s
+    assert "LMU" in s
 
 
 def test_serve_layout_hides_grid_for_player(server):
@@ -64,7 +64,7 @@ def test_serve_layout_hides_grid_for_player(server):
     assert "Please log in" not in s
     assert "velo-grid" not in s
     assert "velo-save" not in s
-    assert "TOP GUN" in s
+    assert "LMU" in s
 
 
 def test_register_callbacks_adds_callbacks(server):

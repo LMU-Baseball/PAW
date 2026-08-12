@@ -36,7 +36,20 @@ _UP_COLOR = "#3ad16f"    # trend improved since last outing
 _DOWN_COLOR = "#ff5c5c"  # trend dropped since last outing
 
 
-# =============================== TOP GUN HEADER ==============================
+# =============================== LMU VELO HEADER =============================
+#
+# A contained translucent-crimson box (mirroring the home page's `.home-hero`:
+# rgba crimson, rounded corners, palms showing through), holding the real LMU
+# arch logo up top and an ORIGINAL aviation-style winged emblem beneath it
+# (swept white/blue feathers around a star -- built from SVG primitives, NOT a
+# reproduction of any commercial logo). The tagline uses "Alfa Slab One", the
+# same beefy marquee font the home hero's "THE PAW" uses.
+
+BANNER_BOX = "rgba(154, 0, 33, 0.82)"   # == base.html --banner (home-hero box)
+MARQUEE_FONT = "'Alfa Slab One', Georgia, serif"
+_EMBLEM_BLUE = "#5B9BD5"                 # light blue that reads on the crimson box
+_LMU_ARCH_SRC = "/static/reports/lmu.png"
+
 
 def _star_points(cx: float, cy: float, outer_r: float, inner_r: float) -> str:
     """Space-separated "x,y" pairs for a 5-point star centered at (cx, cy),
@@ -51,68 +64,68 @@ def _star_points(cx: float, cy: float, outer_r: float, inner_r: float) -> str:
     return " ".join(pts)
 
 
-def _wing_bars(cx: float, direction: int, n: int = 7) -> str:
-    """A fan of `n` tapering, alternating crimson/blue trapezoid "feathers"
-    sweeping outward (and slightly downward) from `cx`, mimicking the Top
-    Gun logo's wing motif. `direction` is +1 to sweep right, -1 to sweep
-    left (mirrors the same shape rather than duplicating the math)."""
-    bars = []
-    colors = [shell.CRIMSON, BLUE]
-    row_h, gap = 16, 3
+def _wing(inner_x: float, direction: int, n: int = 6) -> str:
+    """One swept wing: a fan of `n` thin, tapering feathers rooted along a
+    short vertical inner edge at `inner_x` and converging to a single tip
+    swept up-and-out. Alternating white/blue so it reads on the crimson box.
+    `direction` is +1 (sweep right) or -1 (sweep left)."""
+    colors = ["#ffffff", _EMBLEM_BLUE]
+    root_top, root_bot = 42, 96         # vertical span of the feather roots
+    tip_x = inner_x + direction * 210   # wing tip, swept outward...
+    tip_y = 24                           # ...and lifted above the roots
+    seg = (root_bot - root_top) / n
+    feathers = []
     for i in range(n):
-        y_top = 34 + i * row_h
-        y_bot = y_top + row_h - gap
-        length = 190 - i * 20      # longer bars near the wordmark, tapering out
-        slant = i * 7               # increasing sweep -> point tapers outward
-        x_inner = cx
-        x_outer = cx + direction * (length + slant)
-        points = (f"{x_inner},{y_top} {x_outer},{y_top + 4} "
-                  f"{x_outer},{y_bot - 4} {x_inner},{y_bot}")
-        bars.append(f'<polygon points="{points}" fill="{colors[i % 2]}"/>')
-    return "".join(bars)
+        y0 = root_top + i * seg
+        y1 = y0 + seg - 4                # 4px gap between feathers
+        pts = f"{inner_x:.1f},{y0:.1f} {inner_x:.1f},{y1:.1f} {tip_x:.1f},{tip_y:.1f}"
+        feathers.append(f'<polygon points="{pts}" fill="{colors[i % 2]}"/>')
+    return "".join(feathers)
 
 
-def _top_gun_svg() -> str:
-    """The LMU-recolored Top Gun logo as a standalone SVG document string:
-    crimson/blue wings flanking a white "TOP GUN" wordmark (crimson outline),
-    a blue star centered beneath."""
-    width, height = 720, 220
+def _wings_svg() -> str:
+    """Original winged mark: symmetric white/blue swept wings flanking a white
+    star, on a transparent canvas (sits on the crimson box). No wordmark --
+    the LMU arch logo carries the lettering above it."""
+    width, height = 680, 120
     cx = width / 2
-    left_wing = _wing_bars(cx - 90, -1)
-    right_wing = _wing_bars(cx + 90, 1)
-    star = _star_points(cx, height - 30, 16, 6.5)
+    left_wing = _wing(cx - 52, -1)
+    right_wing = _wing(cx + 52, 1)
+    star = _star_points(cx, 74, 18, 7.5)
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"
      viewBox="0 0 {width} {height}">
   {left_wing}
   {right_wing}
-  <text x="{cx}" y="118" text-anchor="middle"
-        font-family="Arial Black, Arial, sans-serif" font-size="70"
-        font-weight="900" letter-spacing="6" fill="#ffffff"
-        stroke="{shell.CRIMSON}" stroke-width="4" paint-order="stroke">TOP GUN</text>
-  <polygon points="{star}" fill="{BLUE}" stroke="{shell.CRIMSON}" stroke-width="2"/>
+  <polygon points="{star}" fill="#ffffff" stroke="{_EMBLEM_BLUE}" stroke-width="2"/>
 </svg>'''
 
 
 def top_gun_header() -> html.Div:
-    """The branded banner: LMU Top Gun wordmark/wings/star + "COMPETE
-    EVERYDAY" subtitle. Pure presentation -- no data dependency."""
-    svg = _top_gun_svg()
-    data_uri = "data:image/svg+xml;utf8," + urllib.parse.quote(svg)
-    img = html.Img(
-        src=data_uri,
-        alt="TOP GUN velo board wordmark",
+    """The velo board's branded header: a contained crimson box with the LMU
+    arch logo on top, an original winged/star emblem beneath, and a "COMPETE
+    EVERYDAY" marquee. Pure presentation -- no data dependency."""
+    lmu_logo = html.Img(
+        src=_LMU_ARCH_SRC, alt="LMU",
+        style={"display": "block", "margin": "0 auto 6px", "height": "72px",
+               "width": "auto"},
+    )
+    wings = html.Img(
+        src="data:image/svg+xml;utf8," + urllib.parse.quote(_wings_svg()),
+        alt="LMU velo wings emblem",
         style={"display": "block", "margin": "0 auto", "width": "100%",
-               "maxWidth": "720px"},
+               "maxWidth": "460px"},
     )
     subtitle = html.Div("COMPETE EVERYDAY", style={
-        "textAlign": "center", "color": BLUE, "fontFamily": "Teko, Arial, sans-serif",
-        "fontWeight": "700", "fontSize": "24px", "letterSpacing": "10px",
-        "marginTop": "-8px", "textTransform": "uppercase",
+        "textAlign": "center", "color": "#ffffff", "fontFamily": MARQUEE_FONT,
+        "fontSize": "30px", "letterSpacing": "8px", "marginTop": "2px",
+        "textTransform": "uppercase", "lineHeight": "1",
     })
-    return html.Div([img, subtitle], style={
-        "background": shell.BANNER, "padding": "22px 16px 18px",
-        "borderBottom": f"3px solid {BLUE}",
+    box = html.Div([lmu_logo, wings, subtitle], style={
+        "background": BANNER_BOX, "borderRadius": "10px",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "24px 30px 20px",
+        "maxWidth": "900px", "margin": "26px auto 10px",
     })
+    return html.Div(box, style={"padding": "0 20px"})
 
 
 # ============================== HEAT LEADERBOARD =============================
