@@ -385,7 +385,8 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
                                    "class_year": "Jr.", "position": "OF",
                                    "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
-                        lambda b, *a, **k: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410"})
+                        lambda b, *a, **k: {"qab": 0.42, "BA": ".321", "SLG": ".500", "OBP": ".410",
+                                            "hard_hit_pct": "38.5%", "popup_pct": "6.7%", "xba": ".295"})
     with server.app_context():
         coach = User(email="c2@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")
@@ -405,6 +406,31 @@ def test_serve_layout_renders_for_logged_in_coach(server, monkeypatch):
     assert "hit-season" in tree  # academic-year Season dropdown is rendered
     # computed slash line reached the sidebar tiles
     assert ".321" in tree
+    # the three new fresh-computed tiles render alongside the existing four
+    for label in ("HARD-HIT%", "POP-UP%", "xBA"):
+        assert label in tree
+    for val in ("38.5%", "6.7%", ".295"):
+        assert val in tree
+
+
+def test_sidebar_renders_seven_tiles(monkeypatch):
+    """Direct unit test of `layout.sidebar()`: all 7 tiles (the existing 4 +
+    HARD-HIT%/POP-UP%/xBA) render as labels + values in the component tree,
+    without going through the full serve_layout/DB-backed path."""
+    from app.dashboards.hitting import layout
+    monkeypatch.setattr(hitting_caps, "player_profile",
+                        lambda b: {"name": "Doe, John", "bats": "Right",
+                                   "class_year": "Jr.", "position": "OF",
+                                   "photo": "", "jersey": "7"})
+    monkeypatch.setattr(hitting_caps, "sidebar_stats",
+                        lambda b, *a, **k: {"qab": 0.42, "BA": ".321", "SLG": ".500",
+                                            "OBP": ".410", "hard_hit_pct": "45.0%",
+                                            "popup_pct": "5.0%", "xba": ".300"})
+    tree = str(layout.sidebar(1))
+    for label in ("QAB%", "BA", "SLG", "OBP", "HARD-HIT%", "POP-UP%", "xBA"):
+        assert label in tree
+    for val in (".321", ".500", ".410", "45.0%", "5.0%", ".300"):
+        assert val in tree
 
 
 def _find_component(node, comp_id):
@@ -440,7 +466,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
                         lambda b: {"name": "Doe, John", "bats": "", "class_year": "",
                                    "position": "", "photo": "", "jersey": ""})
     monkeypatch.setattr("app.data.hitting_caps.sidebar_stats",
-                        lambda b, *a, **k: {"qab": None, "BA": "—", "SLG": "—", "OBP": "—"})
+                        lambda b, *a, **k: {"qab": None, "BA": "—", "SLG": "—", "OBP": "—",
+                                            "hard_hit_pct": "—", "popup_pct": "—", "xba": "—"})
     with server.app_context():
         coach = User(email="c3@lmu.edu", name="Coach", role="coach")
         coach.set_password("x")

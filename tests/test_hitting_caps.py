@@ -124,15 +124,32 @@ def test_slash_line_no_data_is_dashes():
     assert hitting_caps.slash_line(-1) == {"BA": "—", "SLG": "—", "OBP": "—"}
 
 
+_SIDEBAR_KEYS = {"qab", "BA", "SLG", "OBP", "hard_hit_pct", "popup_pct", "xba"}
+
+
+def _assert_live_kpi_shapes(sidebar):
+    """HARD-HIT%/POP-UP% are percent strings ("—" or "NN.N%"); xBA is
+    formatted exactly like BA ("—" or a bare decimal, e.g. ".312")."""
+    for k in ("hard_hit_pct", "popup_pct"):
+        v = sidebar[k]
+        assert isinstance(v, str)
+        assert v == "—" or v.endswith("%")
+    xba = sidebar["xba"]
+    assert isinstance(xba, str)
+    if xba != "—":
+        float(xba)
+
+
 def test_sidebar_stats_matches_qab_and_slash():
     qab = hitting_caps.season_qab_rate(WADAS)
     slash = hitting_caps.slash_line(WADAS)
     sidebar = hitting_caps.sidebar_stats(WADAS)
-    assert set(sidebar) == {"qab", "BA", "SLG", "OBP"}
+    assert set(sidebar) == _SIDEBAR_KEYS
     assert sidebar["qab"] == qab
     assert sidebar["BA"] == slash["BA"]
     assert sidebar["SLG"] == slash["SLG"]
     assert sidebar["OBP"] == slash["OBP"]
+    _assert_live_kpi_shapes(sidebar)
 
 
 def test_lmu_hitters_shape_and_window():
@@ -311,17 +328,51 @@ def test_compute_season_rollup_matches_current_compute():
 
 def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
     """When a rollup row exists, sidebar_stats returns it as a pure 1-row read
-    (no season load) mapped to the {qab,BA,SLG,OBP} contract."""
+    (no season load) mapped to the {qab,BA,SLG,OBP} contract, plus the three
+    HARD-HIT%/POP-UP%/xBA tiles computed fresh (not part of the precalc row)."""
     from app.data import precalc
     sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
                 "qab_pct": 0.512, "ba": ".321", "obp": ".401", "slg": ".540",
                 "pa": 10, "ab": 9, "h": 3, "doubles": 1, "triples": 0,
                 "hr": 1, "bb": 1, "so": 2}
     monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: sentinel)
-    assert hitting_caps.sidebar_stats(WADAS) == {
+    sidebar = hitting_caps.sidebar_stats(WADAS)
+    assert {"qab": sidebar["qab"], "BA": sidebar["BA"], "SLG": sidebar["SLG"],
+            "OBP": sidebar["OBP"]} == {
         "qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401"}
+    assert set(sidebar) == _SIDEBAR_KEYS
+    _assert_live_kpi_shapes(sidebar)
     assert hitting_caps.season_qab_rate(WADAS) == 0.512
     assert hitting_caps.slash_line(WADAS) == {"BA": ".321", "SLG": ".540", "OBP": ".401"}
+
+
+def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
+    """HARD-HIT%/POP-UP%/xBA are computed from a live batted-ball pull with a
+    known frame, and xBA is derived from a MONKEYPATCHED `xba_hit_prob_sum`
+    seam (per the brief) so the numerator is deterministic and doesn't depend
+    on the real lookup/DB."""
+    from app.data import precalc, xba as xba_mod
+    sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
+                "qab_pct": 0.5, "ba": ".300", "obp": ".400", "slg": ".500",
+                "pa": 10, "ab": 4, "h": 3, "doubles": 0, "triples": 0,
+                "hr": 0, "bb": 1, "so": 2}
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: sentinel)
+    monkeypatch.setattr(hitting_caps, "games_for_batter",
+                        lambda b, s, e: pd.DataFrame({"game_id": ["g1"]}))
+    # 4 batted balls: EV [96, 94, 110, nan] -> hard-hit = 2/3 known-EV rows;
+    # hit_type [Popup, FlyBall, Popup, GroundBall] -> popup = 2/4.
+    bb = pd.DataFrame({
+        "exit_speed": [96.0, 94.0, 110.0, float("nan")],
+        "la": [10.0, 20.0, 30.0, 40.0],
+        "hit_type": ["Popup", "FlyBall", "Popup", "GroundBall"],
+    })
+    monkeypatch.setattr(hitting_caps, "bip_points", lambda b, gids: bb)
+    monkeypatch.setattr(xba_mod, "xba_hit_prob_sum", lambda df, lookup=None: 2.0)
+
+    out = hitting_caps.sidebar_stats(WADAS)
+    assert out["hard_hit_pct"] == "66.7%"
+    assert out["popup_pct"] == "50.0%"
+    assert out["xba"] == ".500"  # 2.0 / ab(4) == 0.5
 
 
 def test_sidebar_stats_range_equals_season_matches_rollup():
@@ -338,17 +389,20 @@ def test_sidebar_stats_range_equals_season_matches_rollup():
 
 def test_sidebar_stats_subrange_is_scoped():
     """A genuine sub-range (narrower than the season) computes on the fly and
-    still returns the same 4-key contract without error."""
+    still returns the same 7-key contract without error."""
     from app.data import seasons
     season = seasons.current_season()
     s, e = seasons.season_bounds(season)
     narrow = hitting_caps.sidebar_stats(WADAS, season, start=str(s), end=str(s))
-    assert set(narrow) == {"qab", "BA", "SLG", "OBP"}
+    assert set(narrow) == _SIDEBAR_KEYS
+    _assert_live_kpi_shapes(narrow)
 
 
 def test_sidebar_stats_subrange_matches_rollup_over():
-    """The range path's numbers agree exactly with _rollup_over over the same
-    window -- single source of truth for the slash/QAB math."""
+    """The range path's slash/QAB numbers agree exactly with _rollup_over over
+    the same window -- single source of truth for that math. The three live
+    KPIs agree with `_live_batted_ball_kpis` computed directly over the same
+    window and AB."""
     g = hitting_caps.games_for_batter(WADAS)
     start, end = str(g["game_date"].min()), str(g["game_date"].max())
     from app.data import seasons
@@ -359,7 +413,10 @@ def test_sidebar_stats_subrange_matches_rollup_over():
         pytest.skip("fixture's full game span equals the season bounds; not a sub-range")
     out = hitting_caps.sidebar_stats(WADAS, season, start=start, end=end)
     r = hitting_caps._rollup_over(WADAS, start, end)
-    assert out == {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
+    assert {k: out[k] for k in ("qab", "BA", "SLG", "OBP")} == {
+        "qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
+    live = hitting_caps._live_batted_ball_kpis(WADAS, start, end, r["ab"])
+    assert {k: out[k] for k in ("hard_hit_pct", "popup_pct", "xba")} == live
 
 
 def test_compute_season_rollup_uses_rollup_over():
@@ -379,9 +436,11 @@ def test_sidebar_stats_falls_back_to_compute_when_missing(monkeypatch):
     from app.data import precalc
     monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: None)
     out = hitting_caps.sidebar_stats(WADAS)
-    assert set(out) == {"qab", "BA", "SLG", "OBP"}
+    assert set(out) == _SIDEBAR_KEYS
     assert out["BA"] != "" and out["OBP"] != ""
+    _assert_live_kpi_shapes(out)
     # matches the compute path directly
     comp = hitting_caps._compute_season_rollup(WADAS)
-    assert out == {"qab": comp["qab_pct"], "BA": comp["ba"],
-                   "SLG": comp["slg"], "OBP": comp["obp"]}
+    assert {k: out[k] for k in ("qab", "BA", "SLG", "OBP")} == {
+        "qab": comp["qab_pct"], "BA": comp["ba"],
+        "SLG": comp["slg"], "OBP": comp["obp"]}

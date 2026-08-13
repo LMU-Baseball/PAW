@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from app.db import query_df
 from app.data.hitting import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers (moved from hitting_wh in Phase 3)
-from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
+from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts, _fmt_avg
 from app.data.roster_media import player_media
 from app.data.cache import cached
 
@@ -197,23 +197,74 @@ def _compute_season_rollup(batter_id, season=None) -> dict:
     return {**_rollup_over(batter_id, s, e), "season_label": season}
 
 
+def _fmt_pct(x) -> str:
+    """Percent display string matching the existing QAB% tile's own inline
+    formatting (`app.dashboards.hitting.layout.sidebar`'s
+    `f"{round(qab * 100, 1)}%"`), e.g. 0.452 -> "45.2%"; "-" when undefined."""
+    return f"{round(x * 100, 1)}%" if x is not None else "—"
+
+
+def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
+    """HARD-HIT%, POP-UP%, xBA computed FRESH (no precalc) over the batter's
+    InPlay batted balls in [start, end] -- the three new sidebar tiles (Task
+    2 of the hitting-KPIs work). `ab` is the AB the caller already computed
+    via its slash-count rollup (`_rollup_over`/`_season_rollup`, both of which
+    carry an "ab" key), passed in so this doesn't redo the PA/AB compute --
+    just one batted-ball pull (`bip_points`, via the range's game ids) plus
+    the Task-1 xBA lookup.
+
+    hard_hit_pct = count(ExitSpeed >= 95) / count(ExitSpeed notna) among the
+    range's InPlay batted balls (null-EV rows excluded from the denominator).
+    popup_pct = count(hit_type == 'Popup') / count(all InPlay batted balls).
+    xba = sum(p_hit over the batted balls) / AB, formatted exactly like the
+    BA tile (`_fmt_avg`) so it reads as directly comparable; AB == 0 renders
+    the same "-" placeholder BA uses.
+    """
+    from app.data import xba as xba_model
+    games = games_for_batter(batter_id, start, end)
+    gids = games["game_id"].tolist() if not games.empty else []
+    bb = bip_points(batter_id, gids) if gids else pd.DataFrame(columns=_BIP_COLS)
+
+    ev = bb["exit_speed"] if not bb.empty else pd.Series(dtype=float)
+    ev_known = ev.dropna()
+    hard_hit = (float((ev_known >= 95).sum()) / len(ev_known)) if len(ev_known) else None
+
+    n_bip = len(bb)
+    popup = (float((bb["hit_type"] == "Popup").sum()) / n_bip) if n_bip else None
+
+    prob_sum = xba_model.xba_hit_prob_sum(bb) if n_bip else 0.0
+    xba_val = (prob_sum / ab) if ab else None
+
+    return {"hard_hit_pct": _fmt_pct(hard_hit), "popup_pct": _fmt_pct(popup),
+            "xba": _fmt_avg(xba_val)}
+
+
 def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
-    """QAB% + slash line, scoped to a date range.
+    """QAB% + slash line + HARD-HIT%/POP-UP%/xBA, scoped to a date range.
 
     When `start`/`end` are omitted, or given but equal to `season`'s bounds
     (the default "This Season" view), read the precalc 1-row rollup as before
     (fixes the profiled 3.2s full-season double-load; compute fallback when the
-    rollup row is absent) -- this fast path is unchanged. A genuine sub-range
-    (the coach narrowed the calendar/preset) computes on the fly via
-    `_rollup_over` so the sidebar KPIs track the selected date range."""
+    rollup row is absent) -- this fast path is unchanged for qab/BA/SLG/OBP. A
+    genuine sub-range (the coach narrowed the calendar/preset) computes on the
+    fly via `_rollup_over` so the sidebar KPIs track the selected date range.
+
+    HARD-HIT%/POP-UP%/xBA are always computed fresh (mirrors the catcher
+    STEAL% approach) on BOTH paths -- they are not part of the precalc
+    schema, so the season-default view now does one extra live batted-ball
+    pull; the four existing tiles keep their precalc fast path untouched."""
     from app.data import seasons
     if start and end:
         s_b, e_b = seasons.season_bounds(season or seasons.current_season())
         if str(start) != s_b or str(end) != e_b:
             r = _rollup_over(batter_id, start, end)
-            return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
+            live = _live_batted_ball_kpis(batter_id, start, end, r["ab"])
+            return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
+                    **live}
     r = _season_rollup(batter_id, season)
-    return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"]}
+    s_b, e_b = seasons.season_bounds(season or seasons.current_season())
+    live = _live_batted_ball_kpis(batter_id, s_b, e_b, r["ab"])
+    return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"], **live}
 
 
 @cached
