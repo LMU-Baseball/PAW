@@ -115,6 +115,7 @@ def games_for_batter(batter_id, start=None, end=None):
     return df[["game_id", "game_date", "GameLabel"]]
 
 
+@cached
 def scoreboard(game_id):
     df = query_df(
         "SELECT Date, HomeTeam, AwayTeam, HomeTeamForeignID, GameType "

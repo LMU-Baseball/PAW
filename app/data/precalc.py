@@ -213,6 +213,7 @@ def rebuild_hitting(engine=None) -> int:
     return _replace_rows(engine, HITTING_SEASON_TABLE, rows)
 
 
+@cache.cached
 def read_hitting_season(batter_id, season=None) -> dict | None:
     row = _read_one(HITTING_SEASON_TABLE, "batter_id", batter_id, season)
     if row is not None:
@@ -232,6 +233,7 @@ def rebuild_pitching(engine=None) -> int:
     return _replace_rows(engine, PITCHING_SEASON_TABLE, rows)
 
 
+@cache.cached
 def read_pitching_season(pitcher_id, season=None) -> dict | None:
     return _read_one(PITCHING_SEASON_TABLE, "pitcher_id", pitcher_id, season)
 

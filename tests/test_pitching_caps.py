@@ -31,6 +31,48 @@ def test_game_context_derives_season_label_format():
     assert ctx["season_label"] == "Spring 2026"
 
 
+def test_game_context_single_query_and_memoized(monkeypatch):
+    """game_context now issues ONE round trip (dims + both run sums via
+    conditional SUM) and is @cached: a repeat call makes no further query."""
+    from app.data import cache
+    cache.clear_all()
+    calls = []
+
+    def fake_query(sql, params=None):
+        calls.append(sql)
+        return pd.DataFrame([{
+            "Date": "2026-03-01", "GameType": "Regular",
+            "HomeTeam": "LMU", "AwayTeam": "USD",
+            "HomeTeamForeignID": pitching_caps.LMU_TEAM_ID,
+            "away_runs": 3, "home_runs": 7,
+        }])
+
+    monkeypatch.setattr(pitching_caps, "query_df", fake_query)
+    ctx = pitching_caps.game_context("G-cached-1")
+    assert len(calls) == 1                       # merged into a single round trip
+    assert "SUM(CASE WHEN" in calls[0]           # conditional-sum, not a 2nd query
+    # LMU is home -> lmu_runs = home_runs, opp_runs = away_runs
+    assert ctx["lmu_is_home"] is True
+    assert ctx["lmu_runs"] == 7 and ctx["opp_runs"] == 3
+    pitching_caps.game_context("G-cached-1")
+    assert len(calls) == 1                        # memoized: no second query
+
+
+def test_game_context_away_runs_mapping(monkeypatch):
+    """When LMU is the away team, lmu_runs = away_runs (Top half)."""
+    from app.data import cache
+    cache.clear_all()
+    monkeypatch.setattr(pitching_caps, "query_df", lambda sql, params=None: pd.DataFrame([{
+        "Date": "2026-03-02", "GameType": "Regular",
+        "HomeTeam": "USD", "AwayTeam": "LMU",
+        "HomeTeamForeignID": "SOME_OTHER_ID",
+        "away_runs": 9, "home_runs": 4,
+    }]))
+    ctx = pitching_caps.game_context("G-away")
+    assert ctx["lmu_is_home"] is False
+    assert ctx["lmu_runs"] == 9 and ctx["opp_runs"] == 4
+
+
 # --------------------------- velo views -----------------------------------
 
 def test_recent_outings_team_names_from_games():

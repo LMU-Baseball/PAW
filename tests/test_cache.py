@@ -66,3 +66,27 @@ def test_maybe_invalidate_version_gate(monkeypatch):
 def test_maybe_invalidate_noop_without_reader():
     cache.configure(version_reader=None)
     cache.maybe_invalidate(now=0.0)          # must not raise / do anything
+
+
+def test_precalc_season_reads_are_memoized(monkeypatch):
+    """precalc.read_hitting_season / read_pitching_season are @cached: a repeat
+    (id, season) read serves from cache with no second DB round trip. These
+    were previously always-uncached single-row reads paid on every open."""
+    from app.data import precalc
+    cache.clear_all()
+    hcalls, pcalls = [], []
+
+    def fake_query(sql, params=None):
+        (hcalls if "batter_id" in sql else pcalls).append(1)
+        return pd.DataFrame([{
+            "batter_id": 1, "pitcher_id": 1, "season_label": "2025/2026",
+            "qab_pct": 0.42, "ba": ".300", "slg": ".500", "obp": ".400",
+        }])
+
+    monkeypatch.setattr(precalc, "query_df", fake_query)
+    precalc.read_hitting_season(1, "2025/2026")
+    precalc.read_hitting_season(1, "2025/2026")
+    assert len(hcalls) == 1                   # hitting read memoized
+    precalc.read_pitching_season(1, "2025/2026")
+    precalc.read_pitching_season(1, "2025/2026")
+    assert len(pcalls) == 1                   # pitching read memoized

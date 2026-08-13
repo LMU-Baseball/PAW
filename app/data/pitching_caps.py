@@ -159,24 +159,26 @@ def _season_label(date_str) -> str:
     return f"{'Spring' if d.month <= 6 else 'Fall'} {d.year}"
 
 
+@cached
 def game_context(game_id) -> dict:
-    dim = query_df(
-        "SELECT Date, GameType, HomeTeam, AwayTeam, HomeTeamForeignID "
-        "FROM GAMES WHERE GameID = :g LIMIT 1",
+    # ONE round trip: the game's dim columns (constant across its GAMES rows, so
+    # GROUP BY collapses them to a single row) alongside the final score summed
+    # by batting half via conditional SUM. Top => away bats, Bottom => home.
+    # (Was two sequential queries -- a dim LIMIT 1 + a runs-by-half GROUP BY.)
+    df = query_df(
+        "SELECT Date, GameType, HomeTeam, AwayTeam, HomeTeamForeignID, "
+        "COALESCE(SUM(CASE WHEN `Top.Bottom` = 'Top' THEN RunsScored END), 0) AS away_runs, "
+        "COALESCE(SUM(CASE WHEN `Top.Bottom` = 'Bottom' THEN RunsScored END), 0) AS home_runs "
+        "FROM GAMES WHERE GameID = :g "
+        "GROUP BY Date, GameType, HomeTeam, AwayTeam, HomeTeamForeignID "
+        "LIMIT 1",
         {"g": str(game_id)},
     )
-    if dim.empty:
+    if df.empty:
         raise KeyError(f"No GAMES row for game_id={game_id}")
-    row = dim.iloc[0]
-
-    # Final score: sum RunsScored by batting half. Top => away bats, Bottom => home.
-    runs = query_df(
-        "SELECT `Top.Bottom` AS top_bottom, COALESCE(SUM(RunsScored), 0) AS runs "
-        "FROM GAMES WHERE GameID = :g GROUP BY `Top.Bottom`",
-        {"g": str(game_id)},
-    ).set_index("top_bottom")["runs"].to_dict()
-    away_runs = int(runs.get("Top", 0))
-    home_runs = int(runs.get("Bottom", 0))
+    row = df.iloc[0]
+    away_runs = int(row["away_runs"])
+    home_runs = int(row["home_runs"])
 
     lmu_is_home = bool(row["HomeTeamForeignID"] == LMU_TEAM_ID)
     return {

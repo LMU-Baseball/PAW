@@ -2,10 +2,26 @@ import math
 
 import pandas as pd
 from app.db import query_df
-from app.data import hitting_caps
+from app.data import hitting_caps, cache
 from app.data.hitting import game_batting_line, swing_decisions_by_zone, plate_discipline
 
 WADAS = 806253
+
+
+def test_scoreboard_is_memoized(monkeypatch):
+    """scoreboard() is @cached: a repeat call for the same game makes no query."""
+    cache.clear_all()
+    calls = []
+    monkeypatch.setattr(hitting_caps, "query_df", lambda sql, params=None: (
+        calls.append(1),
+        pd.DataFrame([{"Date": "2026-03-01", "HomeTeam": "LMU", "AwayTeam": "USD",
+                       "HomeTeamForeignID": hitting_caps.LMU_TEAM_ID,
+                       "GameType": "Regular"}]))[1])
+    a = hitting_caps.scoreboard("G-sb-1")
+    b = hitting_caps.scoreboard("G-sb-1")
+    assert a == b
+    assert len(calls) == 1                 # second call served from cache
+    assert a["loc"] == "vs" and a["opp"] == "USD"
 
 # Returning veteran hitter with BOTH current/backfilled numeric GameIDs and
 # legacy pre-2025 composite-string GameIDs (e.g.
