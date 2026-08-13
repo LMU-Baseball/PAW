@@ -35,6 +35,7 @@ def sidebar(pitch_df, player) -> html.Div:
         d = P.trim_to_first_contact(d)
     summ = P.contact_summary(d)
     sds = P.swing_decision_score(d)
+    cq = P.contact_quality(d)
 
     def f(v, s=""):
         return "—" if v is None else f"{v}{s}"
@@ -53,6 +54,11 @@ def sidebar(pitch_df, player) -> html.Div:
         html.Div([_tile("In-Zone%", f(sds["in_zone_pct"], "%")),
                   _tile("Chase%", f(sds["chase_pct"], "%")),
                   _tile("SD Score", f(sds["score"]))],
+                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
+        html.Div("Contact Quality", style={"fontSize": "14px", "color": "#9A0021",
+                                           "fontWeight": "bold", "marginTop": "10px"}),
+        html.Div([_tile("HARD-HIT%", f(cq["hard_hit_pct"], "%")),
+                  _tile("POP-UP%", f(cq["popup_pct"], "%"))],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
     ], style={"padding": "8px"})
 

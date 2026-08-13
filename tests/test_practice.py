@@ -43,6 +43,30 @@ def test_contact_summary():
     assert s["contact_pct"] == 50.0
 
 
+def test_contact_quality():
+    df = pd.DataFrame([
+        # batted balls (hit_type 1/2/3)
+        {"hit_type": 1, "exit_velocity": 100.0, "launch_angle": 5.0},   # hard, not popup
+        {"hit_type": 2, "exit_velocity": 90.0, "launch_angle": 20.0},   # soft, not popup
+        {"hit_type": 3, "exit_velocity": 96.0, "launch_angle": 55.0},   # hard AND popup
+        {"hit_type": 3, "exit_velocity": None, "launch_angle": 60.0},   # EV-unknown, popup
+        # miss/foul (hit_type 0) -- excluded from both metrics entirely
+        {"hit_type": 0, "exit_velocity": 70.0, "launch_angle": 80.0},
+    ])
+    q = P.contact_quality(df)
+    # 4 batted balls; EV-known = 3 (the None excluded), of which EV>=95 = 2 -> 66.7
+    assert q["hard_hit_pct"] == 66.7
+    # popups (LA>=50) = 2 of 4 batted balls -> 50.0
+    assert q["popup_pct"] == 50.0
+
+
+def test_contact_quality_empty_or_no_batted_balls():
+    assert P.contact_quality(pd.DataFrame()) == {"hard_hit_pct": None, "popup_pct": None}
+    # only a miss/foul -> no batted balls -> both None
+    only_foul = pd.DataFrame([{"hit_type": 0, "exit_velocity": 95.0, "launch_angle": 55.0}])
+    assert P.contact_quality(only_foul) == {"hard_hit_pct": None, "popup_pct": None}
+
+
 def test_swing_decision_score():
     s = P.swing_decision_score(_pitches())
     assert s["in_zone_pct"] is not None

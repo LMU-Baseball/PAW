@@ -45,12 +45,13 @@ def sidebar(batter_id, season=None, start=None, end=None) -> html.Div:
         html.Div(f"{jersey}{prof['name'] or '—'}",
                  style={"fontSize": "26px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div(meta, style={"fontSize": "16px", "color": "#555"}),
+        # 2x3 grid (2-column, matching the other dashboards' sidebars).
+        # POP-UP% lives on the HitTrax batting-practice dashboard, not here.
         html.Div([_tile("QAB%", qab_txt), _tile("BA", slash["BA"]),
                   _tile("SLG", slash["SLG"]), _tile("OBP", slash["OBP"]),
                   _tile("HARD-HIT%", slash["hard_hit_pct"]),
-                  _tile("POP-UP%", slash["popup_pct"]),
                   _tile("xBA", slash["xba"])],
-                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr 1fr",
+                 style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Stats reflect the selected date range.",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),

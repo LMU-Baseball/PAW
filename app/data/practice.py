@@ -377,6 +377,41 @@ def contact_summary(df: pd.DataFrame) -> dict:
     }
 
 
+def contact_quality(df: pd.DataFrame, hard_hit_ev: float = 95.0,
+                    popup_la: float = 50.0) -> dict:
+    """HARD-HIT% and POP-UP% over batted balls (hit_type in {1, 2, 3}).
+
+    HARD-HIT% = share of EV-KNOWN batted balls with exit velocity >= 95 mph
+    (mirrors the game hitting dashboard's definition + the ingest
+    ``hard_hit_rate``). POP-UP% = share of ALL batted balls with launch angle
+    >= 50 deg -- HitTrax has no pop-up hit-type code (only GB/LD/FB), so
+    pop-ups are derived from launch angle rather than a tag.
+
+    Returns percentages in [0, 100] rounded to one decimal, or ``None`` for a
+    metric when the input lacks its column or there are no batted balls."""
+    if df is None or df.empty or "hit_type" not in df.columns:
+        return {"hard_hit_pct": None, "popup_pct": None}
+    bb = df[df["hit_type"].isin([1, 2, 3])]
+    n_bb = len(bb)
+    if n_bb == 0:
+        return {"hard_hit_pct": None, "popup_pct": None}
+
+    hard = None
+    if "exit_velocity" in bb.columns:
+        ev = pd.to_numeric(bb["exit_velocity"], errors="coerce").dropna()
+        if len(ev):
+            hard = round(100.0 * float((ev >= hard_hit_ev).sum()) / len(ev), 1)
+
+    popup = None
+    if "launch_angle" in bb.columns:
+        la = pd.to_numeric(bb["launch_angle"], errors="coerce")
+        # NaN launch angles compare False, so they stay in the batted-ball
+        # denominator without counting as pop-ups.
+        popup = round(100.0 * float((la >= popup_la).sum()) / n_bb, 1)
+
+    return {"hard_hit_pct": hard, "popup_pct": popup}
+
+
 def swing_decision_score(df: pd.DataFrame, in_zones=range(1, 10)) -> dict:
     """In-zone contact% minus chase contact%.
 

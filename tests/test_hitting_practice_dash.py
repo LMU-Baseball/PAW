@@ -238,10 +238,14 @@ def test_practice_sidebar_renders_player_and_all():
     import pandas as pd
     from app.dashboards.hitting_practice import layout
     df = pd.DataFrame([{"px": 0.0, "py": 2.5, "result": 1, "zone_section": 5,
-                        "exit_velocity": 90.0, "is_contact": True,
+                        "exit_velocity": 90.0, "is_contact": True, "hit_type": 2,
+                        "launch_angle": 15.0,
                         "player_name": "Andrew Mhoon", "play_date": "2026-04-01",
                         "session_id": 1, "play_timestamp": "2026-04-01 10:00:00"}])
-    assert layout.sidebar(df, "Andrew Mhoon") is not None
+    tree = str(layout.sidebar(df, "Andrew Mhoon"))
+    # the Contact Quality section (HARD-HIT% + POP-UP%) renders in the sidebar
+    assert "Contact Quality" in tree
+    assert "HARD-HIT%" in tree and "POP-UP%" in tree
     assert layout.sidebar(df, "All Players") is not None
     assert layout.sidebar(pd.DataFrame(), "All Players") is not None
 
