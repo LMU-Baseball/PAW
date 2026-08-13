@@ -8,9 +8,20 @@ Indexes match how the caps data layer actually filters GAMES:
   CatcherId -> catching reads + sibling lookup
   Date      -> recent-window / range queries / recent_games
   PitchUID  -> insert dedup (existing_keys)
+  Batter    -> sibling-id-by-NAME lookup (games_for_batter cold stage)
+  Pitcher   -> sibling-id-by-NAME lookup (games_for_pitcher cold stage)
+  Catcher   -> sibling-id-by-NAME lookup (games_for_catcher cold stage)
+  *Team     -> team-scoped filters (available_seasons, LMU roster/team scoping)
 
-TEXT columns (GameID, Date) take a prefix length; the double id columns and
-varchar PitchUID are indexed directly (PitchUID prefixed to a safe length).
+The name columns (Batter/Pitcher/Catcher) were the biggest remaining cold-open
+gap: filtering `WHERE Batter=:name` had NO usable index, so every first view of
+a player full-scanned ~104k rows (measured ~510ms) inside the sibling-id lookup.
+Names are highly selective (~1080 distinct) so a prefix index turns that scan
+into a ~100-row seek. The *Team columns are low-cardinality (LMU ~40% of rows)
+so their index is a smaller help (mainly available_seasons' BatterTeam filter).
+
+All these are TEXT columns, so each takes a prefix length (names 48, teams 16);
+the double id columns are indexed directly, GameID/Date/PitchUID prefixed.
 
 Usage:  python scripts/index_games.py --status | --create | --drop
 """
@@ -33,6 +44,12 @@ INDEXES = [
     ("ix_games_catcherid", "CatcherId"),
     ("ix_games_date", "Date(10)"),
     ("ix_games_pitchuid", "PitchUID(64)"),
+    ("ix_games_batter", "Batter(48)"),
+    ("ix_games_pitcher", "Pitcher(48)"),
+    ("ix_games_catcher", "Catcher(48)"),
+    ("ix_games_batterteam", "BatterTeam(16)"),
+    ("ix_games_pitcherteam", "PitcherTeam(16)"),
+    ("ix_games_catcherteam", "CatcherTeam(16)"),
 ]
 
 
