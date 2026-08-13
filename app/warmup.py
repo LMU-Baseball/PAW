@@ -30,7 +30,7 @@ def warm_caches() -> None:
     scoped reads serve_layout actually makes. Also warms the Season dropdown's
     own queries (available_seasons/current_season)."""
     from app.data import hitting_caps as H, pitching_caps as P
-    from app.data import catching_caps as C, video, seasons
+    from app.data import catching_caps as C, video, seasons, precalc
 
     _safe(seasons.available_seasons)          # Season dropdown options
     season = _safe(seasons.current_season)    # dropdown default
@@ -39,28 +39,38 @@ def warm_caches() -> None:
     s_b, e_b = seasons.season_bounds(season)
 
     hitters = _safe(lambda: H.lmu_hitters(season))
+    # The default open scopes the roster to the season-default DATE RANGE, so
+    # warm that range-scoped variant too (it's a distinct cache key that was
+    # otherwise paid on every open).
+    _safe(lambda: H.lmu_hitters(season, s_b, e_b))
     if hitters is not None and not hitters.empty:
         bid = int(hitters.iloc[0]["BatterId"])
         g = _safe(lambda: H.games_for_batter(bid, s_b, e_b))
         _safe(lambda: H.sidebar_stats(bid, season))
         _safe(lambda: H.player_profile(bid))
+        _safe(lambda: precalc.read_hitting_season(bid, season))  # always-uncached read
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, batter_id=bid))
             gid = str(g.iloc[0]["game_id"])  # default (most-recent) game; opaque id
             _safe(lambda: H.game_pitches(gid, bid))  # default tab's game-data
+            _safe(lambda: H.scoreboard(gid))         # hitting scoreboard (now cached)
 
     pitchers = _safe(lambda: P.lmu_pitchers(season))
+    _safe(lambda: P.lmu_pitchers(season, s_b, e_b))
     if pitchers is not None and not pitchers.empty:
         pid = int(pitchers.iloc[0]["PitcherId"])
         g = _safe(lambda: P.games_for_pitcher(pid, s_b, e_b))
         _safe(lambda: P.pitcher_profile(pid))
         _safe(lambda: P.range_summary(pid, s_b, e_b))  # season-bounds sidebar read
+        _safe(lambda: precalc.read_pitching_season(pid, season))  # always-uncached read
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, pitcher_id=pid))
             gid = str(g.iloc[0]["game_id"])
             _safe(lambda: P.game_pitches_for(gid, pid))
+            _safe(lambda: P.game_context(gid))       # pitching scoreboard context (now cached)
 
     catchers = _safe(lambda: C.lmu_catchers(season))
+    _safe(lambda: C.lmu_catchers(season, s_b, e_b))
     if catchers is not None and not catchers.empty:
         cid = int(catchers.iloc[0]["CatcherId"])
         g = _safe(lambda: C.games_for_catcher(cid, s_b, e_b))
@@ -70,6 +80,7 @@ def warm_caches() -> None:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
             gid = str(g.iloc[0]["game_id"])
             _safe(lambda: C.game_pitches_for(gid, cid))
+            _safe(lambda: P.game_context(gid))       # catching scoreboard shares game_context
 
     # Velo Board + Competitive Cauldron. These two boards were added after the
     # original warm set and carry the SAME first-open cost the others do: a
