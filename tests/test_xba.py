@@ -63,6 +63,38 @@ def lookup(synthetic_raw_df):
     return xba._build_lookup_from_df(synthetic_raw_df)
 
 
+@pytest.fixture
+def degenerate_edge_df():
+    """A large, well-mixed background band (so the global rate is a real,
+    interior mix, not 0/1) plus two single-ball EV bands at the high-EV
+    tail -- each ball is the ONLY occupant of its EV band, so that band's
+    raw (unsmoothed) marginal would be exactly 1.0 or 0.0. Exercises the
+    Fix-round-1 requirement that a sparse/one-sided EV band can't drag a
+    tiny cell to an exact 0.0/1.0 via level-1 shrinkage.
+    """
+    rows = []
+    for i in range(60):
+        rows.append(_bip_row(85 + (i % 10), i % 10, hit=(i % 3 == 0)))
+    # Sole occupant of EV bin [115,120): a hit. Raw band marginal = 1.0.
+    rows.append(_bip_row(118, 10, hit=True))
+    # Sole occupant of EV bin [120,125): an out. Raw band marginal = 0.0.
+    rows.append(_bip_row(123, 10, hit=False))
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def edge_boundary_df():
+    """Two adjacent EV bands with clearly different hit rates, straddling
+    the 100.0 mph bin edge, to check which bin an exact-edge value keys
+    into."""
+    rows = []
+    for i in range(30):  # [95,100): mostly outs
+        rows.append(_bip_row(95 + (i % 5), 10, hit=(i % 10 == 0)))
+    for i in range(30):  # [100,105): mostly hits
+        rows.append(_bip_row(100 + (i % 5), 10, hit=(i % 10 != 0)))
+    return pd.DataFrame(rows)
+
+
 # --------------------------- _build_lookup_from_df -------------------------
 
 def test_lookup_probabilities_all_in_unit_interval(lookup):
@@ -88,6 +120,38 @@ def test_large_sample_cell_rate_close_to_raw_rate(lookup):
     key = (xba._bin_start(95, xba.EV_BIN_SIZE), xba._bin_start(10, xba.LA_BIN_SIZE))
     assert key in lookup.cell_rates
     assert lookup.cell_rates[key] > 0.6
+
+
+def test_thin_ev_band_all_hit_cell_not_exactly_one(degenerate_edge_df):
+    """Fix round 1: a single-ball, all-hit EV band's raw marginal is 1.0,
+    but level-1 shrinkage must pull it (and the cell built from it) off the
+    exact boundary before level-2 sees it."""
+    lu = xba._build_lookup_from_df(degenerate_edge_df)
+    key = (xba._bin_start(118, xba.EV_BIN_SIZE), xba._bin_start(10, xba.LA_BIN_SIZE))
+    assert key in lu.cell_rates
+    assert lu.cell_rates[key] < 1.0
+
+
+def test_thin_ev_band_all_out_cell_not_exactly_zero(degenerate_edge_df):
+    """Fix round 1: the mirror case -- a single-ball, all-out EV band's raw
+    marginal is 0.0, must not propagate to an exact 0.0 cell rate."""
+    lu = xba._build_lookup_from_df(degenerate_edge_df)
+    key = (xba._bin_start(123, xba.EV_BIN_SIZE), xba._bin_start(10, xba.LA_BIN_SIZE))
+    assert key in lu.cell_rates
+    assert lu.cell_rates[key] > 0.0
+
+
+def test_exact_bin_edge_value_falls_in_upper_bin(edge_boundary_df):
+    """EV exactly 100.0 must key into [100,105), not [95,100)."""
+    lu = xba._build_lookup_from_df(edge_boundary_df)
+    lower_key = (95.0, xba._bin_start(10, xba.LA_BIN_SIZE))
+    upper_key = (100.0, xba._bin_start(10, xba.LA_BIN_SIZE))
+    assert lu.cell_rates[lower_key] < 0.5    # lower band mostly outs
+    assert lu.cell_rates[upper_key] > 0.5    # upper band mostly hits
+    assert xba._bin_start(100.0, xba.EV_BIN_SIZE) == 100.0
+    edge_p = xba.p_hit(100.0, 10, lookup=lu)
+    assert edge_p == pytest.approx(lu.cell_rates[upper_key])
+    assert edge_p != pytest.approx(lu.cell_rates[lower_key])
 
 
 # --------------------------- p_hit -----------------------------------------
@@ -117,6 +181,17 @@ def test_p_hit_out_of_lookup_range_falls_back_to_global_rate(lookup):
 
 def test_p_hit_clamped_to_unit_interval(lookup):
     assert 0.0 <= xba.p_hit(97, 12, lookup=lookup) <= 1.0
+
+
+def test_empty_source_frame_uses_default_fallback():
+    empty_df = pd.DataFrame({"ExitSpeed": [], "Angle": [], "PitchCall": [], "PlayResult": []})
+    empty_lookup = xba._build_lookup_from_df(empty_df)
+    assert empty_lookup.cell_rates == {}
+    assert empty_lookup.fallback == xba.DEFAULT_FALLBACK_HIT_RATE
+    assert xba.p_hit(100, 15, lookup=empty_lookup) == xba.DEFAULT_FALLBACK_HIT_RATE
+    # Any input -- even in-range-looking EV/LA -- falls back since there are
+    # no cells at all.
+    assert xba.p_hit(70, -20, lookup=empty_lookup) == xba.DEFAULT_FALLBACK_HIT_RATE
 
 
 # --------------------------- xba_hit_prob_sum -------------------------------

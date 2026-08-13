@@ -11,22 +11,43 @@ the empirical P(hit) among LMU InPlay batted balls that landed in that cell
 (`BatterTeam='LOY_LIO'`, `PitchCall='InPlay'`) with both `ExitSpeed` and
 `Angle` populated.
 
-Smoothing (empirical-Bayes shrinkage)
---------------------------------------
+Smoothing (two-level empirical-Bayes shrinkage)
+------------------------------------------------
 A cell with few batted balls is noisy — e.g. 1-for-1 must not surface as a
-"raw" 100%. Each cell's rate is shrunk toward a coarser marginal (that same
-exit-velo band's rate across all launch angles) weighted by the cell's sample
-count:
+"raw" 100%. The natural fix is to shrink a cell's rate toward a coarser
+marginal (that same exit-velo band's rate across all launch angles):
 
-    smoothed = (hits + k * marginal_ev_rate) / (n + k)
+    cell_rate = (cell_hits + k * ev_marginal) / (cell_n + k)
 
-with `k = MIN_SAMPLE` doing double duty as both "a cell needs at least this
-many balls to be trusted" and the shrinkage strength. This is a weighted
-average of two already-in-[0,1] rates, so `smoothed` is always in [0,1] with
-no extra clamping needed; as `n` grows past `k` the raw rate dominates, and
-as `n` shrinks toward 0 the cell converges to the marginal. If the exit-velo
-band itself is unobserved (shouldn't happen once the DB has any data in that
-band), the global InPlay hit rate is substituted for `marginal_ev_rate`.
+BUT the EV-band marginal itself can be a sparse, one-sided sample (real at
+the tails — 115+ mph, or launch angle near +-90 deg) and land exactly on
+0.0 or 1.0. Anchoring a cell on an unsmoothed 0/1 marginal would let that
+cell degenerate to exactly 0/1 too, even at n=1 — violating the requirement
+that a low-sample cell must NOT be a raw 0%/100%. So the marginal is itself
+smoothed FIRST, toward the global InPlay hit rate (which is strictly inside
+(0,1) for any real, non-degenerate dataset):
+
+    Level 1 (per EV band):
+        ev_marginal_smoothed = (band_hits + K2 * anchor_rate) / (band_n + K2)
+
+    Level 2 (per cell):
+        cell_rate = (cell_hits + k * ev_marginal_smoothed) / (cell_n + k)
+
+`k = MIN_SAMPLE` and `K2 = MARGINAL_SHRINK_K` (currently the same value,
+named separately since they play different roles — level-2 cell strength vs.
+level-1 band strength). `anchor_rate` is the global InPlay hit rate, guarded
+against the degenerate all-hit/all-out edge case (falls back to
+`DEFAULT_FALLBACK_HIT_RATE`, which is also strictly inside (0,1)) so the
+anchor itself is never exactly 0 or 1.
+
+Because `anchor_rate` is strictly in (0,1) and `K2 > 0`, `ev_marginal_smoothed`
+is a convex combination that can never reach exactly 0 or 1 either — even for
+an all-hit or all-out band. And because `ev_marginal_smoothed` is therefore
+strictly in (0,1) and `k > 0`, `cell_rate` (also a convex combination) can
+never reach exactly 0 or 1 for any finite `n`, including `n=1`. Both levels
+are weighted averages of numbers already in [0,1], so no extra clamping is
+needed for that guarantee (though `p_hit` still clamps defensively). As `n`
+grows past `k`/`K2`, each level converges toward its own raw rate.
 
 Public API
 ----------
@@ -54,11 +75,19 @@ EV_BIN_SIZE = 5.0   # mph, exit velo bin width
 LA_BIN_SIZE = 5.0   # degrees, launch angle bin width
 
 # A cell needs at least this many batted balls to be mostly-trusted; also
-# doubles as the empirical-Bayes shrinkage weight `k` (see module docstring).
+# doubles as the level-2 (cell -> EV-band-marginal) shrinkage weight `k`
+# (see module docstring: "two-level empirical-Bayes shrinkage").
 MIN_SAMPLE = 20
 
-# Used only if the DB ever returns zero qualifying batted balls (shouldn't
-# happen in practice) so the lookup is still total rather than raising.
+# Level-1 (EV-band-marginal -> global rate) shrinkage weight `K2`. Named
+# separately from MIN_SAMPLE since it plays a different role (smooths the
+# smoothing target, not the cell itself); currently the same value.
+MARGINAL_SHRINK_K = MIN_SAMPLE
+
+# Used whenever an anchor rate would otherwise be exactly 0.0/1.0: the DB
+# ever returning zero qualifying batted balls (shouldn't happen in
+# practice), or the degenerate all-hit/all-out source frame. Keeps the
+# lookup total and every shrinkage anchor strictly inside (0,1).
 DEFAULT_FALLBACK_HIT_RATE = 0.3
 
 
@@ -106,8 +135,9 @@ def _build_lookup_from_df(df: pd.DataFrame) -> _Lookup:
     """Pure lookup-table builder (no DB access) — the DB-free seam for tests.
 
     Bins `df` by exit velo x launch angle, computes each cell's empirical
-    hit rate, and shrinks it toward that EV band's marginal rate (see module
-    docstring for the smoothing formula).
+    hit rate, and shrinks it toward that EV band's own (itself-smoothed)
+    marginal rate — see the module docstring for the full two-level
+    smoothing formula and why the marginal must be smoothed first.
     """
     d = df.copy()
     d = d[d["ExitSpeed"].notna() & d["Angle"].notna()]
@@ -119,21 +149,38 @@ def _build_lookup_from_df(df: pd.DataFrame) -> _Lookup:
     d["_la_bin"] = d["Angle"].apply(lambda v: _bin_start(v, LA_BIN_SIZE))
 
     global_rate = float(d["_hit"].mean())
+    # Guard the degenerate "entire source frame is all-hits or all-outs"
+    # case: anchoring shrinkage on an exact 0.0/1.0 global rate would defeat
+    # the "never exactly 0/1" guarantee at both levels below. Won't happen
+    # with real, non-degenerate data.
+    anchor_rate = global_rate if 0.0 < global_rate < 1.0 else DEFAULT_FALLBACK_HIT_RATE
 
-    ev_marginal = (
-        d.groupby("_ev_bin")["_hit"].mean().to_dict()
-    )
+    # Level 1: smooth each EV band's own marginal rate toward anchor_rate,
+    # so a sparse/one-sided band (e.g. 115+ mph) can't itself be an exact
+    # 0.0/1.0 that a cell would inherit in level 2.
+    ev_group = d.groupby("_ev_bin")["_hit"].agg(["sum", "count"])
+    ev_marginal_smoothed = {
+        ev_bin: (row["sum"] + MARGINAL_SHRINK_K * anchor_rate) / (row["count"] + MARGINAL_SHRINK_K)
+        for ev_bin, row in ev_group.iterrows()
+    }
 
+    # Level 2: smooth each cell toward its (already-smoothed) EV-band
+    # marginal. Because that marginal is strictly in (0,1) and k > 0, no
+    # cell_rate can land on exactly 0.0/1.0, for any n (including n=1).
     cell_group = d.groupby(["_ev_bin", "_la_bin"])["_hit"].agg(["sum", "count"])
     cell_rates: dict = {}
     for (ev_bin, la_bin), row in cell_group.iterrows():
         n = float(row["count"])
         hits = float(row["sum"])
-        marginal = ev_marginal.get(ev_bin, global_rate)
+        marginal = ev_marginal_smoothed.get(ev_bin, anchor_rate)
         smoothed = (hits + MIN_SAMPLE * marginal) / (n + MIN_SAMPLE)
         cell_rates[(ev_bin, la_bin)] = float(min(1.0, max(0.0, smoothed)))
 
-    return _Lookup(cell_rates=cell_rates, fallback=global_rate)
+    # NOTE: this dict (and the _Lookup instance wrapping it) is returned
+    # from inside a cached singleton (`_get_lookup`, via `@cached`), which
+    # only deep-copies DataFrame *return values* on cache hits — not plain
+    # dicts. Treat `cell_rates` as read-only; do not mutate it in place.
+    return _Lookup(cell_rates=cell_rates, fallback=anchor_rate)
 
 
 @cached
