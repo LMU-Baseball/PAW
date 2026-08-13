@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import hitting_caps, seasons
+from app.data import hitting_caps, seasons, parallel
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.hitting import selectors
@@ -30,6 +30,12 @@ def _tile(label, value):
 def sidebar(batter_id, season=None, start=None, end=None) -> html.Div:
     if batter_id is None:
         return html.Div("Select a hitter.", style={"padding": "12px"})
+    # Warm the two independent sidebar reads concurrently (helps the cold
+    # player-selection callback path, not just first paint).
+    parallel.prefetch(
+        lambda: hitting_caps.player_profile(int(batter_id)),
+        lambda: hitting_caps.sidebar_stats(int(batter_id), season, start, end),
+    )
     prof = hitting_caps.player_profile(int(batter_id))
     slash = hitting_caps.sidebar_stats(int(batter_id), season, start, end)
     qab = slash["qab"]
@@ -80,6 +86,16 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     s_bound, e_bound = seasons.season_bounds(season)
+    # Layer-2 fan-out: the unscoped + range-scoped roster reads and the season
+    # list are mutually independent -- warm them concurrently so the sequential
+    # code below reads cache hits instead of paying 3 serial round trips.
+    parallel.prefetch(
+        lambda: selectors.hitter_options(is_coach=is_coach, own_trackman_id=own,
+                                         season=season),
+        lambda: selectors.hitter_options(is_coach=is_coach, own_trackman_id=own,
+                                         season=season, start=s_bound, end=e_bound),
+        seasons.available_seasons,
+    )
     hitters_all = selectors.hitter_options(is_coach=is_coach, own_trackman_id=own, season=season)
     default_batter = selectors.resolve_batter(
         hitters_all[0]["value"] if hitters_all else None,
@@ -100,6 +116,17 @@ def serve_layout() -> html.Div:
     hitter_values = {h["value"] for h in hitters}
     if default_batter not in hitter_values:
         default_batter = hitters[0]["value"] if hitters else None
+
+    # Layer-2 fan-out: once the default player is known, its games->video chain
+    # and its two sidebar reads are mutually independent -- warm them together.
+    if default_batter:
+        parallel.prefetch(
+            lambda: videodata.video_game_ids(
+                hitting_caps.games_for_batter(default_batter, s_bound, e_bound),
+                batter_id=default_batter),
+            lambda: hitting_caps.player_profile(int(default_batter)),
+            lambda: hitting_caps.sidebar_stats(int(default_batter), season, start_d, end_d),
+        )
 
     games_df = (hitting_caps.games_for_batter(default_batter, s_bound, e_bound)
                 if default_batter else None)

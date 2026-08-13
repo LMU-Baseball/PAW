@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import catching_caps, seasons
+from app.data import catching_caps, seasons, parallel
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -24,6 +24,12 @@ def _tile(label, value):
 def sidebar(catcher_id, season=None, start=None, end=None) -> html.Div:
     if catcher_id is None:
         return html.Div("Select a catcher.", style={"padding": "12px"})
+    # Warm the two independent sidebar reads concurrently (helps the cold
+    # player-selection callback path, not just first paint).
+    parallel.prefetch(
+        lambda: catching_caps.catcher_profile(int(catcher_id)),
+        lambda: catching_caps.framing_season_tiles(int(catcher_id), season, start, end),
+    )
     prof = catching_caps.catcher_profile(int(catcher_id))
     summ = catching_caps.framing_season_tiles(int(catcher_id), season, start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
@@ -72,6 +78,16 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     s_bound, e_bound = seasons.season_bounds(season)
+    # Layer-2 fan-out: the unscoped + range-scoped roster reads and the season
+    # list are mutually independent -- warm them concurrently so the sequential
+    # code below reads cache hits instead of paying 3 serial round trips.
+    parallel.prefetch(
+        lambda: selectors.catcher_options(is_coach=is_coach, own_trackman_id=own,
+                                          season=season),
+        lambda: selectors.catcher_options(is_coach=is_coach, own_trackman_id=own,
+                                          season=season, start=s_bound, end=e_bound),
+        seasons.available_seasons,
+    )
     catchers_all = selectors.catcher_options(is_coach=is_coach, own_trackman_id=own,
                                              season=season)
     default_catcher = selectors.resolve_catcher(
@@ -93,6 +109,18 @@ def serve_layout() -> html.Div:
     catcher_values = {c["value"] for c in catchers}
     if default_catcher not in catcher_values:
         default_catcher = catchers[0]["value"] if catchers else None
+
+    # Layer-2 fan-out: once the default player is known, its games->video chain
+    # and its two sidebar reads are mutually independent -- warm them together.
+    if default_catcher:
+        parallel.prefetch(
+            lambda: videodata.video_game_ids(
+                catching_caps.games_for_catcher(default_catcher, s_bound, e_bound),
+                catcher_id=default_catcher),
+            lambda: catching_caps.catcher_profile(int(default_catcher)),
+            lambda: catching_caps.framing_season_tiles(int(default_catcher), season,
+                                                       start_d, end_d),
+        )
 
     games_df = (catching_caps.games_for_catcher(default_catcher, s_bound, e_bound)
                 if default_catcher else None)

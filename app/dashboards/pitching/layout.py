@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import pitching_caps, seasons
+from app.data import pitching_caps, seasons, parallel
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -24,6 +24,12 @@ def _tile(label, value):
 def sidebar(pitcher_id, start=None, end=None) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style={"padding": "12px"})
+    # Warm the two independent sidebar reads concurrently (helps the cold
+    # player-selection callback path, not just first paint).
+    parallel.prefetch(
+        lambda: pitching_caps.pitcher_profile(int(pitcher_id)),
+        lambda: pitching_caps.range_summary(int(pitcher_id), start, end),
+    )
     prof = pitching_caps.pitcher_profile(int(pitcher_id))
     summ = pitching_caps.range_summary(int(pitcher_id), start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
@@ -73,6 +79,16 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     s_bound, e_bound = seasons.season_bounds(season)
+    # Layer-2 fan-out: the unscoped + range-scoped roster reads and the season
+    # list are mutually independent -- warm them concurrently so the sequential
+    # code below reads cache hits instead of paying 3 serial round trips.
+    parallel.prefetch(
+        lambda: selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                           season=season),
+        lambda: selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
+                                           season=season, start=s_bound, end=e_bound),
+        seasons.available_seasons,
+    )
     pitchers_all = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
     default_pitcher = selectors.resolve_pitcher(
         pitchers_all[0]["value"] if pitchers_all else None,
@@ -93,6 +109,17 @@ def serve_layout() -> html.Div:
     pitcher_values = {p["value"] for p in pitchers}
     if default_pitcher not in pitcher_values:
         default_pitcher = pitchers[0]["value"] if pitchers else None
+
+    # Layer-2 fan-out: once the default player is known, its games->video chain
+    # and its two sidebar reads are mutually independent -- warm them together.
+    if default_pitcher:
+        parallel.prefetch(
+            lambda: videodata.video_game_ids(
+                pitching_caps.games_for_pitcher(default_pitcher, s_bound, e_bound),
+                pitcher_id=default_pitcher),
+            lambda: pitching_caps.pitcher_profile(int(default_pitcher)),
+            lambda: pitching_caps.range_summary(int(default_pitcher), start_d, end_d),
+        )
 
     games_df = (pitching_caps.games_for_pitcher(default_pitcher, s_bound, e_bound)
                 if default_pitcher else None)

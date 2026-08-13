@@ -21,6 +21,12 @@ def get_engine() -> Engine:
             Config.ANALYTICS_DB_URL,
             pool_pre_ping=True,   # validate connections before use (RDS drops idle ones)
             pool_recycle=3600,
+            # Headroom for the Layer-2 prefetch fan-out (app.data.parallel):
+            # serve_layout warms ~3 independent reads concurrently, so a page
+            # can briefly hold several connections at once. 10 + 20 overflow
+            # (was the 5 + 10 default) keeps fan-out from starving the pool.
+            pool_size=10,
+            max_overflow=20,
         )
     return _engine
 
