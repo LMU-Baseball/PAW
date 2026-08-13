@@ -19,6 +19,9 @@ Two pieces, both pure functions of data (no callbacks, no state), mirroring
 """
 from __future__ import annotations
 
+import base64
+import os
+
 import pandas as pd
 from dash import html
 
@@ -43,54 +46,89 @@ _UNASSIGNED_TEAM = "Unassigned"
 
 # ============================ CAULDRON HEADER =================================
 #
-# A contained translucent-crimson box (mirroring the home page's `.home-hero`
-# and the velo board's header), holding a strip of LMU logos -- the white
-# transparent sun-lion flanked by two LMU arch marks -- above a spiced-up,
-# two-tone "COMPETITIVE CAULDRON" marquee in "Alfa Slab One" (the home hero's
-# font). The white lion (`lion-white.png`) has a transparent background so it
-# sits cleanly on the crimson box -- no white halo.
+# A contained box with a "wishy-washy" crimson->blue gradient wash (the coach's
+# throwback banner feel). Crest: the LMU arch logo top-center, then a big
+# "COMPETITIVE Cauldron" wordmark set on an UPWARD-bowing arc that nests into
+# the arch's underbelly, over a "COMPETE EVERYDAY" tagline. "COMPETITIVE" is
+# white in Alfa Slab One; "Cauldron" is blue in a skinny cursive script. The
+# curved wordmark is a single inline SVG embedded via a `data:` URI on an
+# `html.Img`; because an <img>-embedded SVG can't reach system or page fonts,
+# both fonts are base64-embedded INSIDE the SVG (read from `app/static/brand/`),
+# which keeps the mark self-contained and pixel-identical everywhere.
+# "COMPETITIVE CAULDRON" also lives in the img `alt` text so it's in the
+# component tree for accessibility + `str()` assertions.
 
-BANNER_BOX = "rgba(154, 0, 33, 0.82)"   # == base.html --banner (home-hero box)
-MARQUEE_FONT = "'Alfa Slab One', Georgia, serif"
-_WORD_BLUE = "#5B9BD5"                    # light blue that reads on the crimson box
-_LION_WHITE_SRC = "/static/reports/lion-white.png"
+# Wishy-washy blue->crimson gradient wash (palms show through the alpha):
+# blue on the LEFT, crimson on the RIGHT.
+BANNER_GRADIENT = ("linear-gradient(100deg, rgba(40,100,168,0.86) 0%, "
+                   "rgba(120,28,86,0.86) 54%, rgba(154,0,33,0.90) 100%)")
+_WORD_BLUE = "#5B9BD5"                    # light blue that reads on the wash
 _LMU_ARCH_SRC = "/static/reports/lmu.png"
+
+_BRAND_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "static", "brand")
+_ALFA_TTF = os.path.join(_BRAND_DIR, "AlfaSlabOne-Regular.ttf")
+_SCRIPT_TTF = os.path.join(_BRAND_DIR, "CauldronScript.ttf")  # swap w/ any script TTF
+
+
+def _font_face(family: str, ttf_path: str) -> str:
+    """An @font-face rule with the TTF base64-embedded as a data: URI, so the
+    font travels inside the SVG (an <img>-embedded SVG can't load external
+    font files or use system fonts)."""
+    with open(ttf_path, "rb") as fh:
+        b64 = base64.b64encode(fh.read()).decode("ascii")
+    return (f"@font-face{{font-family:'{family}';"
+            f"src:url(data:font/ttf;base64,{b64}) format('truetype');}}")
+
+
+def _wordmark_svg() -> str:
+    """"COMPETITIVE" (white, Alfa Slab One) + "Cauldron" (blue, skinny script)
+    set on an UPWARD-bowing arc (peak in the middle) so the wordmark nests into
+    the LMU arch's underbelly above it. The chord (~900px) is sized well wider
+    than the rendered text (~710px at these sizes) so no glyph runs off the path
+    ends and gets clipped -- SVG drops any character that falls past a textPath."""
+    w, h = 1040, 250
+    # Upward bow: endpoints low, control point high-center (peak in the middle).
+    # Deepened bow (peak raised from y=92 to y=60) for a more pronounced smile.
+    arc = "M 70,190 Q 520,60 970,190"
+    faces = _font_face("CauldronAlfa", _ALFA_TTF) + _font_face("CauldronScript", _SCRIPT_TTF)
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+  <defs>
+    <style>{faces}</style>
+    <path id="arc" d="{arc}" fill="none"/>
+  </defs>
+  <text text-anchor="middle">
+    <textPath href="#arc" startOffset="50%">
+      <tspan font-family="CauldronAlfa" font-size="60" letter-spacing="1" fill="#ffffff">COMPETITIVE </tspan><tspan font-family="CauldronScript" font-size="84" fill="{_WORD_BLUE}">Cauldron</tspan>
+    </textPath>
+  </text>
+</svg>'''
 
 
 def cauldron_header() -> html.Div:
-    """The branded header: a contained crimson box with a strip of LMU logos
-    (white sun-lion flanked by LMU arch marks) above a two-tone "COMPETITIVE
-    CAULDRON" marquee + "DAILY TEAM COMPETITION" subtitle. Pure presentation
-    -- no data dependency."""
-    def _arch():
-        return html.Img(src=_LMU_ARCH_SRC, alt="LMU",
-                        style={"height": "44px", "width": "auto"})
-
-    logos = html.Div([
-        _arch(),
-        html.Img(src=_LION_WHITE_SRC, alt="LMU lion",
-                 style={"height": "84px", "width": "auto"}),
-        _arch(),
-    ], style={"display": "flex", "justifyContent": "center", "alignItems": "center",
-              "gap": "26px", "flexWrap": "wrap", "marginBottom": "6px"})
-
-    wordmark = html.Div([
-        html.Span("COMPETITIVE ", style={"color": "#ffffff"}),
-        html.Span("CAULDRON", style={"color": _WORD_BLUE}),
-    ], style={
-        "textAlign": "center", "fontFamily": MARQUEE_FONT, "fontSize": "46px",
-        "letterSpacing": "2px", "lineHeight": "1", "textTransform": "uppercase",
+    """The branded header crest: LMU arch top-center, then a big "COMPETITIVE
+    Cauldron" wordmark on an upward-bowing arc nesting into the arch's
+    underbelly, over a "COMPETE EVERYDAY" tagline, all on a crimson->blue
+    gradient wash. Pure presentation -- no data dependency."""
+    arch = html.Img(src=_LMU_ARCH_SRC, alt="LMU", style={
+        "display": "block", "margin": "0 auto", "height": "104px", "width": "auto",
     })
-    subtitle = html.Div("DAILY TEAM COMPETITION", style={
-        "textAlign": "center", "color": "rgba(255,255,255,0.9)",
+    wordmark = html.Img(
+        src="data:image/svg+xml;base64," + base64.b64encode(
+            _wordmark_svg().encode("utf-8")).decode("ascii"),
+        alt="COMPETITIVE CAULDRON",
+        style={"display": "block", "margin": "-24px auto 0", "width": "100%",
+               "maxWidth": "760px", "height": "auto"},
+    )
+    subtitle = html.Div("COMPETE EVERYDAY", style={
+        "textAlign": "center", "color": "rgba(255,255,255,0.92)",
         "fontFamily": "Teko, Arial, sans-serif", "fontWeight": "700",
-        "fontSize": "24px", "letterSpacing": "10px", "marginTop": "6px",
+        "fontSize": "22px", "letterSpacing": "10px", "marginTop": "-14px",
         "textTransform": "uppercase",
     })
-    box = html.Div([logos, wordmark, subtitle], style={
-        "background": BANNER_BOX, "borderRadius": "10px",
-        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "22px 30px 20px",
-        "maxWidth": "900px", "margin": "26px auto 10px",
+    box = html.Div([arch, wordmark, subtitle], style={
+        "background": BANNER_GRADIENT, "borderRadius": "10px",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "20px 30px 18px",
+        "maxWidth": "820px", "margin": "26px auto 10px",
     })
     return html.Div(box, style={"padding": "0 20px"})
 
