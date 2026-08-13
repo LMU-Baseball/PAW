@@ -328,7 +328,8 @@ def _roster_lookup(name_last_first: str) -> tuple[str, str]:
 
 _BIP_COLS = ["hit_type", "exit_speed", "la", "bearing", "distance",
              "x", "y", "rx", "ry", "Count", "Result", "PitchType", "Pitcher",
-             "GameID", "Inning", "PAofInning"]
+             "GameID", "Inning", "PAofInning",
+             "PlayResult"]  # added for Task 2's xBA numerator population filter
 
 
 def qab_frame(df: pd.DataFrame) -> pd.DataFrame:

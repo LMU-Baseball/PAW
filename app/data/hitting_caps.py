@@ -7,7 +7,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from app.db import query_df
-from app.data.hitting import _finish, _in_clause, _roster_lookup, _BIP_COLS   # pure/param helpers (moved from hitting_wh in Phase 3)
+from app.data.hitting import (
+    _finish, _in_clause, _roster_lookup, _BIP_COLS,   # pure/param helpers (moved from hitting_wh in Phase 3)
+    _HITS, _AB_OUTS,   # AB-qualifying PlayResult sets -- mirrored for the xBA numerator filter
+)
 from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts, _fmt_avg
 from app.data.roster_media import player_media
 from app.data.cache import cached
@@ -204,6 +207,24 @@ def _fmt_pct(x) -> str:
     return f"{round(x * 100, 1)}%" if x is not None else "—"
 
 
+def _ab_qualifying_mask(play_result: pd.Series) -> pd.Series:
+    """Boolean mask selecting the AB-qualifying rows of a batted-ball
+    PlayResult column -- i.e. the same population `_slash_counts` counts
+    into AB, restricted to `PitchCall == 'InPlay'` rows (a batted ball is
+    never a Walk/HBP/Strikeout PA, so of `_slash_counts`'s branches only
+    "Sac* is excluded" and "unknown PlayResult is excluded" apply here):
+    a PlayResult starting with "Sac" (sac fly/bunt) is excluded -- it's an
+    InPlay ball but not an AB; a hit (`_HITS`) or a non-hit AB-out
+    (`_AB_OUTS`) counts; anything else (undefined/NaN PlayResult) is
+    excluded, mirroring `_slash_counts`'s "undefined/incomplete PA — not
+    counted" fallthrough. Used ONLY to align the xBA numerator's population
+    with the AB denominator -- hard_hit_pct/popup_pct correctly keep the
+    full InPlay batted-ball set as their own denominator.
+    """
+    is_sac = play_result.astype(str).str.startswith("Sac")
+    return ~is_sac & (play_result.isin(_HITS) | play_result.isin(_AB_OUTS))
+
+
 def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
     """HARD-HIT%, POP-UP%, xBA computed FRESH (no precalc) over the batter's
     InPlay batted balls in [start, end] -- the three new sidebar tiles (Task
@@ -216,9 +237,18 @@ def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
     hard_hit_pct = count(ExitSpeed >= 95) / count(ExitSpeed notna) among the
     range's InPlay batted balls (null-EV rows excluded from the denominator).
     popup_pct = count(hit_type == 'Popup') / count(all InPlay batted balls).
-    xba = sum(p_hit over the batted balls) / AB, formatted exactly like the
-    BA tile (`_fmt_avg`) so it reads as directly comparable; AB == 0 renders
-    the same "-" placeholder BA uses.
+    Both of these are batted-ball RATES, so their denominator is correctly
+    the full InPlay batted-ball set (sacrifices and undefined PlayResults
+    included) -- unlike xBA below, they are NOT AB rates.
+
+    xba = sum(p_hit over the AB-QUALIFYING batted balls) / AB, formatted
+    exactly like the BA tile (`_fmt_avg`) so it reads as directly
+    comparable; AB == 0 renders the same "-" placeholder BA uses. The
+    numerator is filtered to `_ab_qualifying_mask` (the same population
+    `_slash_counts` counts into AB) rather than summed over every InPlay
+    ball -- otherwise a sac fly/bunt (an InPlay ball, but never an AB)
+    would inflate the numerator without a matching AB, biasing xBA high
+    enough to exceed 1.000 in small samples.
     """
     from app.data import xba as xba_model
     games = games_for_batter(batter_id, start, end)
@@ -232,7 +262,8 @@ def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
     n_bip = len(bb)
     popup = (float((bb["hit_type"] == "Popup").sum()) / n_bip) if n_bip else None
 
-    prob_sum = xba_model.xba_hit_prob_sum(bb) if n_bip else 0.0
+    xba_bb = bb[_ab_qualifying_mask(bb["PlayResult"])] if n_bip else bb
+    prob_sum = xba_model.xba_hit_prob_sum(xba_bb) if len(xba_bb) else 0.0
     xba_val = (prob_sum / ab) if ab else None
 
     return {"hard_hit_pct": _fmt_pct(hard_hit), "popup_pct": _fmt_pct(popup),

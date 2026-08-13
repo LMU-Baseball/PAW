@@ -350,7 +350,12 @@ def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
     """HARD-HIT%/POP-UP%/xBA are computed from a live batted-ball pull with a
     known frame, and xBA is derived from a MONKEYPATCHED `xba_hit_prob_sum`
     seam (per the brief) so the numerator is deterministic and doesn't depend
-    on the real lookup/DB."""
+    on the real lookup/DB. One ball is a sacrifice fly (an InPlay ball, but
+    never an AB) -- it must still count toward hard-hit%/pop-up%'s
+    denominators (those are batted-ball rates) but must be EXCLUDED from the
+    xBA numerator population (an AB rate), per the final-review fix that
+    aligns xBA's numerator with the same population `_slash_counts` counts
+    into AB."""
     from app.data import precalc, xba as xba_mod
     sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
                 "qab_pct": 0.5, "ba": ".300", "obp": ".400", "slg": ".500",
@@ -360,19 +365,26 @@ def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
     monkeypatch.setattr(hitting_caps, "games_for_batter",
                         lambda b, s, e: pd.DataFrame({"game_id": ["g1"]}))
     # 4 batted balls: EV [96, 94, 110, nan] -> hard-hit = 2/3 known-EV rows;
-    # hit_type [Popup, FlyBall, Popup, GroundBall] -> popup = 2/4.
+    # hit_type [Popup, FlyBall, Popup, GroundBall] -> popup = 2/4 (the
+    # SacFly ball's Popup/EV=110 both still count in these two denominators).
+    # PlayResult [Out, Single, SacFly, FieldersChoice] -> AB-qualifying =
+    # Out/Single/FieldersChoice (3 rows); SacFly is excluded (starts "Sac").
     bb = pd.DataFrame({
         "exit_speed": [96.0, 94.0, 110.0, float("nan")],
         "la": [10.0, 20.0, 30.0, 40.0],
         "hit_type": ["Popup", "FlyBall", "Popup", "GroundBall"],
+        "PlayResult": ["Out", "Single", "SacFly", "FieldersChoice"],
     })
     monkeypatch.setattr(hitting_caps, "bip_points", lambda b, gids: bb)
-    monkeypatch.setattr(xba_mod, "xba_hit_prob_sum", lambda df, lookup=None: 2.0)
+    # Content-aware xBA-numerator mock (1.0 "probability" per row PASSED IN):
+    # proves the sac row was filtered out before reaching this seam, not
+    # merely that a constant flowed through untouched.
+    monkeypatch.setattr(xba_mod, "xba_hit_prob_sum", lambda df, lookup=None: float(len(df)))
 
     out = hitting_caps.sidebar_stats(WADAS)
-    assert out["hard_hit_pct"] == "66.7%"
-    assert out["popup_pct"] == "50.0%"
-    assert out["xba"] == ".500"  # 2.0 / ab(4) == 0.5
+    assert out["hard_hit_pct"] == "66.7%"     # the sac ball's EV=110 still counts
+    assert out["popup_pct"] == "50.0%"        # the sac ball's Popup still counts
+    assert out["xba"] == ".750"               # numerator = 3 AB-qualifying rows / ab(4)
 
 
 def test_sidebar_stats_range_equals_season_matches_rollup():
