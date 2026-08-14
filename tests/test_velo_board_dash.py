@@ -78,6 +78,40 @@ def test_register_callbacks_adds_callbacks(server):
     assert len(app.callback_map) > before
 
 
+def _raw_callback(dash_app, *, input_id):
+    for spec in dash_app.callback_map.values():
+        ids = [i["id"] for i in spec["inputs"]]
+        if ids == [input_id]:
+            return spec["callback"].__wrapped__
+    raise AssertionError(f"no callback found with sole Input id {input_id!r}")
+
+
+def test_edit_reveals_grid_wrap_for_coach(server):
+    """Edit must flip velo-grid-wrap to a visible style (the editable grid
+    appears above the read-only leaderboard) and unlock the table."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.dashboards.velo_board import layout, callbacks
+    with server.app_context():
+        coach = User(email="vbedit@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/vbedit/",
+                         suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+        on_edit = _raw_callback(dash_app, input_id="velo-edit")
+        with server.test_request_context("/dash/velo_board/"):
+            login_user(coach)
+            editable, style, status = on_edit(1)
+    assert editable is True
+    assert style.get("display") == "block"   # grid wrapper revealed
+    assert "Editing" in status
+
+
 def test_pitching_hub_has_velo_board_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User

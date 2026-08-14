@@ -18,6 +18,7 @@ given render):
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from dash import Input, Output, State, no_update
@@ -48,17 +49,30 @@ def _week_bounds(week_start):
     return ws, we
 
 
+def _scoreboard(week_start, season):
+    """Build ONLY the week-bounded scoreboard, fetching its four independent
+    reads concurrently (each ~one RDS round trip). Used on Save, where the grid
+    is being hidden so its rows don't need re-reading -- this is what makes Save
+    snap shut instead of paying the grid recompute + a serial read chain."""
+    cycle_id = f"{season}-c1"
+    w_start, w_end = _week_bounds(week_start)
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_daily = ex.submit(cauldron.read_daily, start=w_start, end=w_end)
+        f_teams = ex.submit(cauldron.read_teams, cycle_id)
+        f_scoring = ex.submit(cauldron.read_scoring)
+        f_roster = ex.submit(_roster_names, season)
+    return visual.scoreboard_view(f_daily.result(), f_teams.result(),
+                                  f_scoring.result(), f_roster.result())
+
+
 def _refresh(play_date, week_start, season):
+    """Refresh BOTH the grid rows and the scoreboard (for a date/week change)."""
     cycle_id = f"{season}-c1"
     rows = grid._grid_rows(
         pitching_caps.lmu_pitchers(season), cauldron.read_scoring(),
         cauldron.read_teams(cycle_id), cauldron.read_daily(play_date), play_date,
     )
-    w_start, w_end = _week_bounds(week_start)
-    scoreboard = visual.scoreboard_view(
-        cauldron.read_daily(start=w_start, end=w_end), cauldron.read_teams(cycle_id),
-        cauldron.read_scoring(), _roster_names(season))
-    return rows, scoreboard
+    return rows, _scoreboard(week_start, season)
 
 
 def register_callbacks(dash_app) -> None:
@@ -105,6 +119,8 @@ def register_callbacks(dash_app) -> None:
         season = seasons.current_season()
         cycle_id = f"{season}-c1"
         grid.save_grid(grid_data, play_date, cycle_id, updated_by=getattr(current_user, "id", None))
-        rows, scoreboard = _refresh(play_date, week_start, season)
-        # re-lock AND hide the grid after saving
-        return rows, scoreboard, "Saved.", False, _HIDDEN
+        # The grid is being hidden, so DON'T re-read its rows (that was the slow
+        # part of Save); only rebuild the scoreboard. Grid rows refresh next
+        # time the date/week changes.
+        scoreboard = _scoreboard(week_start, season)
+        return no_update, scoreboard, "Saved.", False, _HIDDEN  # re-lock + hide
