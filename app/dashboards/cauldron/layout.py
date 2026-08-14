@@ -10,13 +10,14 @@ half).
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from dash import html
 from flask_login import current_user
 
 from app.data import pitching_caps
 from app.data import seasons
+from app.data import velo_board
 from app.data.cauldron import read_daily, read_scoring, read_teams
 from app.dashboards import shell
 from app.dashboards.cauldron import grid, visual
@@ -28,6 +29,23 @@ def _default_play_date() -> str:
 
 def _default_cycle(season: str) -> str:
     return f"{season}-c1"
+
+
+def _default_week(season: str) -> str:
+    """The current week's Monday while the season is live, else its final week
+    (mirrors velo_board/layout.py::_default_week)."""
+    start, end = seasons.season_bounds(season)
+    today = date.today().isoformat()
+    anchor = min(today, end)
+    if anchor < start:
+        anchor = start
+    return velo_board.week_start_for(anchor)
+
+
+def _week_bounds(week_start: str) -> tuple[str, str]:
+    """Inclusive Mon..Sun window for a Monday `week_start`."""
+    end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+    return week_start, end
 
 
 def _roster_names(season: str) -> dict:
@@ -44,19 +62,24 @@ def serve_layout() -> html.Div:
 
     season = seasons.current_season()
     play_date = _default_play_date()
+    week = _default_week(season)
     cycle = _default_cycle(season)
     roster_names = _roster_names(season)
+    w_start, w_end = _week_bounds(week)
 
     children = [
         shell.header(back_href="/pitching", back_label="← Pitching"),
         visual.cauldron_header(),
     ]
-    # Filters + the editable grid live directly under the emblem, coach-only.
+    # Buttons + the (hidden-until-edit) grid live directly under the emblem,
+    # coach-only.
     if is_coach:
-        children.append(html.Div(grid.coach_grid(play_date, cycle, season), id="cauldron-coach-section"))
+        children.append(html.Div(grid.coach_grid(play_date, week, season), id="cauldron-coach-section"))
+    # Weekly scoreboard: only the selected week's daily points (reset each week).
     children.append(html.Div(
         id="cauldron-scoreboard",
         children=visual.scoreboard_view(
-            read_daily(), read_teams(cycle), read_scoring(), roster_names),
+            read_daily(start=w_start, end=w_end), read_teams(cycle),
+            read_scoring(), roster_names),
     ))
     return html.Div(children)
