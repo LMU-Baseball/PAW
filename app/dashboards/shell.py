@@ -18,6 +18,7 @@ _INDEX_STRING = """<!DOCTYPE html>
 <html>
 <head>
 {%metas%}
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{%title%}</title>
 <link rel="icon" type="image/png" href="/static/reports/lion.png">
 {%css%}
