@@ -46,8 +46,9 @@ _UNASSIGNED_TEAM = "Unassigned"
 
 # ============================ CAULDRON HEADER =================================
 #
-# A contained box with a "wishy-washy" crimson->blue gradient wash (the coach's
-# throwback banner feel). Crest: the LMU arch logo top-center, then a big
+# A contained box backed by an opaque crimson-with-blue-palms square
+# (cauldron-backdrop.png, the coach's throwback beach feel; replaced the old
+# crimson->blue gradient wash). Crest: the LMU arch logo top-center, then a big
 # "COMPETITIVE Cauldron" wordmark set on an UPWARD-bowing arc that nests into
 # the arch's underbelly, over a "COMPETE EVERYDAY" tagline. "COMPETITIVE" is
 # white in Alfa Slab One; "Cauldron" is blue in a skinny cursive script. The
@@ -58,16 +59,16 @@ _UNASSIGNED_TEAM = "Unassigned"
 # "COMPETITIVE CAULDRON" also lives in the img `alt` text so it's in the
 # component tree for accessibility + `str()` assertions.
 
-# Wishy-washy blue->crimson gradient wash (palms show through the alpha):
-# blue on the LEFT, crimson on the RIGHT.
-BANNER_GRADIENT = ("linear-gradient(100deg, rgba(40,100,168,0.86) 0%, "
-                   "rgba(120,28,86,0.86) 54%, rgba(154,0,33,0.90) 100%)")
-_WORD_BLUE = "#5B9BD5"                    # light blue that reads on the wash
+# Opaque crimson-with-blue-palms square behind the crest (replaced the old
+# blue->crimson gradient wash); `cover` fills the box, crimson fallback shows
+# only if the image 404s.
+_CAULDRON_BACKDROP = "/static/reports/cauldron-backdrop.png"
+_WORD_BLUE = "#5B9BD5"                    # light blue that reads on the backdrop
 _LMU_ARCH_SRC = "/static/reports/lmu.png"
 
 _BRAND_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "static", "brand")
 _ALFA_TTF = os.path.join(_BRAND_DIR, "AlfaSlabOne-Regular.ttf")
-_SCRIPT_TTF = os.path.join(_BRAND_DIR, "CauldronScript.ttf")  # swap w/ any script TTF
+_SCRIPT_TTF = os.path.join(_BRAND_DIR, "CauldronScript.ttf")  # Kaushan Script (OFL) -- embeddable/redistributable; swap w/ any script TTF
 
 
 def _font_face(family: str, ttf_path: str) -> str:
@@ -107,8 +108,8 @@ def _wordmark_svg() -> str:
 def cauldron_header() -> html.Div:
     """The branded header crest: LMU arch top-center, then a big "COMPETITIVE
     Cauldron" wordmark on an upward-bowing arc nesting into the arch's
-    underbelly, over a "COMPETE EVERYDAY" tagline, all on a crimson->blue
-    gradient wash. Pure presentation -- no data dependency."""
+    underbelly, all on an opaque crimson-with-blue-palms backdrop (anchored to
+    the bottom so the palms show). Pure presentation -- no data dependency."""
     arch = html.Img(src=_LMU_ARCH_SRC, alt="LMU", style={
         "display": "block", "margin": "0 auto", "height": "104px", "width": "auto",
     })
@@ -119,16 +120,15 @@ def cauldron_header() -> html.Div:
         style={"display": "block", "margin": "-24px auto 0", "width": "100%",
                "maxWidth": "760px", "height": "auto"},
     )
-    subtitle = html.Div("COMPETE EVERYDAY", style={
-        "textAlign": "center", "color": "rgba(255,255,255,0.92)",
-        "fontFamily": "Teko, Arial, sans-serif", "fontWeight": "700",
-        "fontSize": "22px", "letterSpacing": "10px", "marginTop": "-14px",
-        "textTransform": "uppercase",
-    })
-    box = html.Div([arch, wordmark, subtitle], style={
-        "background": BANNER_GRADIENT, "borderRadius": "10px",
-        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "20px 30px 18px",
-        "maxWidth": "820px", "margin": "26px auto 10px",
+    box = html.Div([arch, wordmark], style={
+        # `center bottom` anchors the crop to the bottom of the square backdrop
+        # so its palm trees stay in view in this wide, short box. Semi-transparent
+        # backdrop (alpha in the PNG) with NO opaque fill behind it, so the page's
+        # palm background shows through the panel.
+        "background": f"url({_CAULDRON_BACKDROP}) center bottom/cover no-repeat",
+        "borderRadius": "10px",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "18px 30px 22px",
+        "maxWidth": "880px", "margin": "26px auto 10px",
     })
     return html.Div(box, style={"padding": "0 20px"})
 

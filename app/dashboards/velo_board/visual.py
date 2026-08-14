@@ -33,18 +33,20 @@ BLUE = "#2864A8"
 
 # =============================== LMU VELO HEADER =============================
 #
-# A contained translucent-crimson box (mirroring the home page's `.home-hero`:
-# rgba crimson, rounded corners, palms showing through), holding the real LMU
-# arch logo up top, the Top Gun wings mark (transparent PNG, whitespace-trimmed
-# to its content bounds) centered beneath it, and a "VELO BOARD" marquee. The
-# logo sits directly on the crimson box (no white plate) per the coach's ask;
-# the tagline uses "Alfa Slab One", the same beefy marquee font the home hero
-# uses.
+# A contained box backed by an opaque spray-paint square (velo-backdrop.png,
+# replacing the old flat translucent-crimson box), holding the real LMU arch
+# logo up top, the keyed-transparent Top Gun LIONS mark (whitespace-trimmed to
+# its content bounds) centered beneath it, and a "VELO BOARD" marquee. The mark
+# sits directly on the backdrop (its own negative space shows the backdrop
+# through); the tagline uses "Alfa Slab One", the same beefy marquee font the
+# home hero uses.
 
-BANNER_BOX = "rgba(154, 0, 33, 0.82)"   # == base.html --banner (home-hero box)
 MARQUEE_FONT = "'Alfa Slab One', Georgia, serif"
 _LMU_ARCH_SRC = "/static/reports/lmu.png"
-_TOP_GUN_SRC = "/static/reports/top-gun-logo-trim.png"  # alpha-trimmed, no padding
+_TOP_GUN_SRC = "/static/reports/top-gun-lions.png"  # keyed-transparent LIONS mark
+# Opaque spray-paint square behind the crest (replaced the flat crimson box);
+# `cover` fills the box, crimson fallback shows only if the image 404s.
+_VELO_BACKDROP = "/static/reports/velo-backdrop.png"
 
 
 def top_gun_header() -> html.Div:
@@ -53,23 +55,30 @@ def top_gun_header() -> html.Div:
     a "VELO BOARD" marquee. Pure presentation -- no data dependency."""
     lmu_logo = html.Img(
         src=_LMU_ARCH_SRC, alt="LMU",
-        style={"display": "block", "margin": "0 auto 18px", "height": "72px",
+        # Identical to the cauldron header's LMU arch (same 104px size, cleanly
+        # centered via auto side-margins).
+        style={"display": "block", "margin": "0 auto", "height": "104px",
                "width": "auto"},
     )
     top_gun = html.Img(
-        src=_TOP_GUN_SRC, alt="TOP GUN",
-        style={"display": "block", "margin": "0 auto", "width": "100%",
-               "maxWidth": "480px", "height": "auto"},
+        src=_TOP_GUN_SRC, alt="LIONS",
+        # Negative top margin nests the LIONS mark up under LMU, overlapping the
+        # transparent padding beneath the LMU arch to close the gap between them.
+        style={"display": "block", "margin": "-48px auto 0", "width": "100%",
+               "maxWidth": "500px", "height": "auto"},
     )
     subtitle = html.Div("VELO BOARD", style={
         "textAlign": "center", "color": "#ffffff", "fontFamily": MARQUEE_FONT,
-        "fontSize": "34px", "letterSpacing": "10px", "marginTop": "18px",
+        "fontSize": "34px", "letterSpacing": "10px", "marginTop": "-14px",
         "textTransform": "uppercase", "lineHeight": "1",
     })
     box = html.Div([lmu_logo, top_gun, subtitle], style={
-        "background": BANNER_BOX, "borderRadius": "10px", "textAlign": "center",
-        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "24px 30px 22px",
-        "maxWidth": "900px", "margin": "26px auto 10px",
+        # Semi-transparent backdrop (alpha baked into the PNG) with NO opaque fill
+        # behind it, so the page's palm background shows through the panel.
+        "background": f"url({_VELO_BACKDROP}) center/cover no-repeat",
+        "borderRadius": "10px", "textAlign": "center",
+        "boxShadow": "0 2px 8px rgba(0,0,0,0.18)", "padding": "18px 30px 20px",
+        "maxWidth": "880px", "margin": "26px auto 10px",
     })
     return html.Div(box, style={"padding": "0 20px"})
 
