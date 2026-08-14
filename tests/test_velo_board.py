@@ -40,6 +40,36 @@ def test_board_rows_applies_override_and_reranks(monkeypatch):
     assert int(df.iloc[1]["pitcher_id"]) == 1
 
 
+def test_clip_velo_outliers_drops_far_above_median():
+    # a ~90 mph pitcher with a bullpen calibration glitch (~99-100)
+    df = pd.DataFrame({"rel_speed": [90, 91, 92, 89, 90, 91, 99.98, 99.8, 99.6]})
+    out = V._clip_velo_outliers(df)
+    assert out["rel_speed"].max() < 95      # the glitch cluster is dropped
+    assert len(out) == 6                      # the six ~90 readings kept
+
+
+def test_clip_velo_outliers_keeps_genuine_hard_thrower():
+    # median already high -> real velos stay under median + margin
+    df = pd.DataFrame({"rel_speed": [98, 99, 100, 99, 98, 97, 99, 100]})
+    assert len(V._clip_velo_outliers(df)) == 8
+
+
+def test_clip_velo_outliers_untouched_when_too_few_readings():
+    df = pd.DataFrame({"rel_speed": [99.9, 100.0]})   # < min sample
+    assert len(V._clip_velo_outliers(df)) == 2
+
+
+def test_leaderboard_clamps_bullpen_velo_outlier():
+    """Live: Behrens' 99.98 bullpen glitch (real max ~94) must be clamped out of
+    his Season Max on the board."""
+    from app.data import seasons, cache
+    cache.clear_all()
+    lb = V.leaderboard(seasons.current_season())
+    row = lb[lb["pitcher_name"].str.contains("Behrens", case=False, na=False)]
+    if not row.empty and row.iloc[0]["season_max"] is not None:
+        assert float(row.iloc[0]["season_max"]) < 97.0
+
+
 def test_set_override_roundtrip():
     V.ensure_tables()
     V.set_override(9990001, "TEST-OVR", season_max=93.5, season_avg=88.2, updated_by=1)

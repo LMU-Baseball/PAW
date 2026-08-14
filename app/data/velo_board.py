@@ -428,6 +428,27 @@ def _last_bullpen_velo(pitcher_id) -> dict:
             "last_date": str(last_date)}
 
 
+_VELO_OUTLIER_MARGIN = 8.0   # mph above a pitcher's own median = a bad reading
+_VELO_OUTLIER_MIN_N = 5      # need this many readings to trust the median
+
+
+def _clip_velo_outliers(df, col="rel_speed"):
+    """Drop implausible Fastball/Sinker readings for ONE pitcher: any RelSpeed
+    more than `_VELO_OUTLIER_MARGIN` mph above that pitcher's OWN median velo.
+    Catches sensor/calibration glitches (e.g. a bullpen 99.98 for a pitcher who
+    otherwise tops out ~93) without penalizing a genuinely hard thrower -- their
+    median is high too, so their real velos stay under the ceiling. Skipped when
+    there are too few readings to trust the median (a sparse sample might be all
+    legitimate)."""
+    if df is None or df.empty or col not in df.columns:
+        return df
+    vals = df[col].dropna()
+    if len(vals) < _VELO_OUTLIER_MIN_N:
+        return df
+    ceiling = float(vals.median()) + _VELO_OUTLIER_MARGIN
+    return df[df[col] <= ceiling]
+
+
 def _leaderboard_per_pitcher(season_label) -> pd.DataFrame:
     """Reference (per-pitcher) leaderboard implementation, kept as the parity
     oracle `_leaderboard_batched` is verified against (scratchpad/
@@ -469,7 +490,7 @@ def _leaderboard_per_pitcher(season_label) -> pd.DataFrame:
     for _, r in roster.iterrows():
         pid = int(r["PitcherId"])
 
-        season_rows = _velo_rows(pid, start=s, end=e)
+        season_rows = _clip_velo_outliers(_velo_rows(pid, start=s, end=e))
         if season_rows.empty:
             season_max = season_avg = season_max_date = None
         else:
@@ -597,6 +618,7 @@ def _leaderboard_batched(season_label) -> pd.DataFrame:
             g[["rel_speed", "dt"]] if not g.empty else empty_pool,
             b_season[["rel_speed", "dt"]] if not b_season.empty else empty_pool,
         ], ignore_index=True).dropna(subset=["rel_speed"]).reset_index(drop=True)
+        pool = _clip_velo_outliers(pool)   # drop calibration-glitch readings
         if pool.empty:
             season_max = season_avg = season_max_date = None
         else:
