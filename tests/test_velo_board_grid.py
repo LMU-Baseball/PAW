@@ -27,6 +27,15 @@ def test_coach_grid_is_editable_and_save_maps_rows(monkeypatch):
     assert captured["updated_by"] == 1
 
 
+def test_coach_grid_hides_grid_until_edit():
+    """The editable grid table sits in a wrapper hidden by default; Edit reveals
+    it (callbacks), Save hides it again."""
+    s = str(G.coach_grid("2025/2026", "2026-03-02"))
+    assert "velo-grid-wrap" in s
+    assert "'display': 'none'" in s          # wrapper hidden until Edit
+    assert "velo-edit" in s and "velo-save" in s
+
+
 def test_save_rows_coerces_blank_numeric_to_none(monkeypatch):
     captured = {}
     monkeypatch.setattr(

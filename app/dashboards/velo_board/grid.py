@@ -104,7 +104,13 @@ def coach_grid(season_label: str, week_start: str) -> html.Div:
 
     buttons = shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status")
 
-    return html.Div([filters, html.Div(grid, style={"padding": "0 16px"}), buttons],
+    # Buttons on top; the editable grid table lives in a wrapper hidden until
+    # Edit is pressed (Save hides it again). Season/Week filters stay visible --
+    # Season drives the read-only leaderboard below.
+    grid_wrap = html.Div(grid, id="velo-grid-wrap",
+                         style={"display": "none", "padding": "0 16px"})
+
+    return html.Div([buttons, filters, grid_wrap],
                     style={"borderBottom": f"2px solid {shell.CRIMSON}",
                            "backgroundColor": "rgba(255,255,255,0.55)"})
 
