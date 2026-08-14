@@ -30,9 +30,6 @@ from app.dashboards import shell
 # palette), so it's defined here rather than invented ad hoc per call site.
 BLUE = "#2864A8"
 
-_UP_COLOR = "#3ad16f"    # trend improved since last outing
-_DOWN_COLOR = "#ff5c5c"  # trend dropped since last outing
-
 
 # =============================== LMU VELO HEADER =============================
 #
@@ -77,21 +74,7 @@ def top_gun_header() -> html.Div:
     return html.Div(box, style={"padding": "0 20px"})
 
 
-# ============================== HEAT LEADERBOARD =============================
-
-_COLUMNS = ["Pitcher", "Season Max", "Max Date", "Season Avg",
-            "Last Outing", "Date", "Versus", "Trend"]
-
-_HEADER_CELL_STYLE = {
-    "padding": "10px 14px", "textAlign": "center", "backgroundColor": "#161616",
-    "color": "#fff", "textTransform": "uppercase", "letterSpacing": "1px",
-    "fontSize": "15px", "borderBottom": f"2px solid {BLUE}",
-}
-_CELL_STYLE = {
-    "padding": "8px 14px", "textAlign": "center",
-    "borderBottom": "1px solid rgba(255,255,255,0.15)",
-}
-_CELL_STYLE_LEFT = {**_CELL_STYLE, "textAlign": "left", "fontWeight": "700"}
+# ============================ FORMATTING HELPERS ============================
 
 
 def _is_missing(v) -> bool:
@@ -121,16 +104,6 @@ def _fmt_text(v) -> str:
     return "—" if _is_missing(v) else str(v)
 
 
-def _trend_cell(t) -> html.Span:
-    if _is_missing(t):
-        return html.Span("")
-    t = float(t)
-    up = t >= 0
-    arrow = "▲" if up else "▼"
-    color = _UP_COLOR if up else _DOWN_COLOR
-    return html.Span(f"{arrow} {abs(t):.1f}", style={"color": color, "fontWeight": "700"})
-
-
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     h = hex_color.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -145,45 +118,6 @@ def _row_color(rank: int, total: int) -> str:
     g = round(g1 + (g2 - g1) * t)
     b = round(b1 + (b2 - b1) * t)
     return f"rgb({r},{g},{b})"
-
-
-def leaderboard_view(lb_df: pd.DataFrame) -> html.Div:
-    """Ranked heat-gradient table matching `velo_board.leaderboard`'s
-    columns. Gracefully renders a placeholder message for an empty frame."""
-    if lb_df is None or lb_df.empty:
-        return html.Div("No pitchers on the board yet.", style={
-            "color": "#fff", "background": shell.BANNER, "padding": "18px",
-            "textAlign": "center", "fontFamily": "Teko, sans-serif", "fontSize": "20px",
-        })
-
-    df = lb_df.sort_values(
-        "season_max", ascending=False, na_position="last", kind="mergesort"
-    ).reset_index(drop=True)
-    total = len(df)
-
-    header_row = html.Tr([html.Th(col, style=_HEADER_CELL_STYLE) for col in _COLUMNS])
-
-    body_rows = []
-    for rank, row in df.iterrows():
-        cells = [
-            html.Td(_fmt_text(row["pitcher_name"]), style=_CELL_STYLE_LEFT),
-            html.Td(_fmt_velo(row["season_max"]), style=_CELL_STYLE),
-            html.Td(_fmt_date(row["season_max_date"]), style=_CELL_STYLE),
-            html.Td(_fmt_velo(row["season_avg"]), style=_CELL_STYLE),
-            html.Td(_fmt_velo(row["last_velo"]), style=_CELL_STYLE),
-            html.Td(_fmt_date(row["last_date"]), style=_CELL_STYLE),
-            html.Td(_fmt_text(row["versus"]), style=_CELL_STYLE),
-            html.Td(_trend_cell(row["trend"]), style=_CELL_STYLE),
-        ]
-        body_rows.append(html.Tr(cells, style={
-            "backgroundColor": _row_color(rank, total), "color": "#fff",
-        }))
-
-    table = html.Table([html.Thead(header_row), html.Tbody(body_rows)], style={
-        "width": "100%", "borderCollapse": "collapse",
-        "fontFamily": "Teko, Arial, sans-serif", "fontSize": "18px", "color": "#fff",
-    })
-    return html.Div(table, style={"padding": "12px", "overflowX": "auto"})
 
 
 # ===================== UNIFIED EDITABLE BOARD (DataTable) ====================
