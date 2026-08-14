@@ -53,12 +53,12 @@ def _sample_df():
     ])
 
 
-def test_resolve_catcher_player_is_self_only():
+def test_resolve_catcher_player_can_view_others():
     from app.dashboards.catching import selectors
-    # A player ignores the requested id and gets their own (RAW trackman id --
-    # GAMES.CatcherId IS the trackman id, so no surrogate mapping happens).
-    assert selectors.resolve_catcher(999, is_coach=False, own_trackman_id=None) is None
-    assert selectors.resolve_catcher(999, is_coach=False, own_trackman_id=555) == 555
+    # Team-transparent: a player may resolve ANY requested id; when nothing is
+    # requested it falls back to the viewer's own id.
+    assert selectors.resolve_catcher(999, is_coach=False, own_trackman_id=None) == 999
+    assert selectors.resolve_catcher(None, is_coach=False, own_trackman_id=555) == 555
 
 
 def test_resolve_catcher_coach_passes_through():
@@ -67,10 +67,10 @@ def test_resolve_catcher_coach_passes_through():
     assert selectors.resolve_catcher(None, is_coach=True, own_trackman_id=None) is None
 
 
-def test_resolve_catcher_player_discards_requested_id():
+def test_resolve_catcher_player_keeps_requested_id():
     from app.dashboards.catching import selectors
     got = selectors.resolve_catcher(999, is_coach=False, own_trackman_id=555)
-    assert got == 555  # own raw id, NOT the requested 999
+    assert got == 999  # team-transparent: the requested id is honored, not own
 
 
 def test_catcher_options_coach(monkeypatch):
@@ -98,15 +98,21 @@ def test_catcher_options_coach_scoped_by_date_range():
     assert {o["value"] for o in opts_window} == {o["value"] for o in opts_all}
 
 
-def test_catcher_options_player_ignores_date_range():
-    """Task 5: a player's own option must NEVER be filtered out by the date
-    range -- date-range filtering can't hide a player from their own
-    dashboard, even if their own appearances fall outside the selected
-    window."""
+def test_catcher_options_player_lists_all_date_scoped(monkeypatch):
+    """Team-transparent view: a player sees the full roster, date-scoped like a
+    coach (a view filter that now applies to every account)."""
     from app.dashboards.catching import selectors
+    seen = {}
+
+    def fake(season=None, start=None, end=None):
+        seen["start"], seen["end"] = start, end
+        return pd.DataFrame([{"Catcher": "Doe, John", "CatcherId": 1}])
+
+    monkeypatch.setattr("app.data.catching_caps.lmu_catchers", fake)
     opts = selectors.catcher_options(is_coach=False, own_trackman_id=555,
                                      start="1900-01-01", end="1900-01-02")
-    assert len(opts) == 1 and opts[0]["value"] == 555
+    assert [o["value"] for o in opts] == [1]
+    assert seen == {"start": "1900-01-01", "end": "1900-01-02"}
 
 
 def test_catcher_dd_options_callback_registered(server):

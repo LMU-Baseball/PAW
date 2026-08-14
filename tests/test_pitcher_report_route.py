@@ -86,54 +86,31 @@ def test_can_view_anonymous_is_false():
     assert can_view_pitcher_report(_StubUser(is_authenticated=False), 1) is False
 
 
-def test_can_view_coach_is_true_without_db(monkeypatch):
-    def _boom(pid):  # pragma: no cover - must never be called for a coach
-        raise AssertionError("coach path must not hit the warehouse")
+def test_can_view_coach_is_true(monkeypatch):
+    def _boom(pid):  # pragma: no cover - the report gate must not hit the warehouse
+        raise AssertionError("view gate must not query pitcher_tm_id_for")
     monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", _boom)
     assert can_view_pitcher_report(_StubUser(role="coach"), 1) is True
 
 
-def test_can_view_player_matching_id_is_true(monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 694990)
+def test_can_view_player_is_true_for_any_pitcher(monkeypatch):
+    # Team-transparent VIEW: a player may view ANY pitcher's report, and the
+    # gate no longer needs to resolve the pitcher's trackman id at all.
+    def _boom(pid):  # pragma: no cover - must not be consulted anymore
+        raise AssertionError("view gate must not query pitcher_tm_id_for")
+    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", _boom)
     assert can_view_pitcher_report(
         _StubUser(role="player", trackman_id=694990), 1) is True
-
-
-def test_can_view_player_matching_id_str_int_coerces(monkeypatch):
-    # trackman_id stored as int, tm_id looked up as str (or vice versa) -- the
-    # str()-cast comparison must still match.
-    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: "694990")
     assert can_view_pitcher_report(
-        _StubUser(role="player", trackman_id=694990), 1) is True
+        _StubUser(role="player", trackman_id=None), 1) is True
 
 
-def test_can_view_player_mismatched_id_is_false(monkeypatch):
+# --------------------------- route-level player access ---------------------
+
+def test_player_gets_pdf_for_any_pitcher(app_ctx, monkeypatch):
+    # Team-transparent: a player may download ANY pitcher's report (view = read;
+    # write access to boards/notes stays coach-only elsewhere).
     monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 111111)
-    assert can_view_pitcher_report(
-        _StubUser(role="player", trackman_id=694990), 1) is False
-
-
-def test_can_view_player_no_tm_id_is_false(monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: None)
-    assert can_view_pitcher_report(
-        _StubUser(role="player", trackman_id=694990), 1) is False
-
-
-# --------------------------- route-level player gating ---------------------
-
-def test_player_gets_403_for_other_pitcher(app_ctx, monkeypatch):
-    # Player's trackman_id is 694990; this pitcher maps to a different tm id.
-    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 111111)
-    client = app_ctx.test_client()
-    _login(client, "p@lmu.edu")
-    with patch("app.reports.routes.build_pitcher_postgame", return_value=b"%PDF-mock"):
-        resp = client.get("/reports/pitcher/166/1.pdf")
-    assert resp.status_code == 403
-
-
-def test_player_gets_pdf_for_own_pitcher(app_ctx, monkeypatch):
-    # This pitcher maps to the player's own trackman_id -> allowed.
-    monkeypatch.setattr("app.data.pitching_caps.pitcher_tm_id_for", lambda pid: 694990)
     client = app_ctx.test_client()
     _login(client, "p@lmu.edu")
     with patch("app.reports.routes.build_pitcher_postgame", return_value=b"%PDF-mock"):

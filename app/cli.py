@@ -15,14 +15,14 @@ def register_cli(server):
     @click.option("--role", type=click.Choice(ROLES), required=True)
     @click.option("--password", required=True, help="Initial password.")
     @click.option("--trackman-id", type=int, default=None,
-                  help="Required for players; links them to their Trackman data.")
+                  help="Optional: links a personal player account to their own "
+                       "Trackman data (used only as a convenience default now). "
+                       "A shared team player account can omit it.")
     def create_user(email, name, role, password, trackman_id):
         """Create a user account."""
         email = email.strip().lower()
         if User.query.filter_by(email=email).first():
             raise click.ClickException(f"User already exists: {email}")
-        if role == "player" and trackman_id is None:
-            raise click.ClickException("Players require --trackman-id.")
         user = User(email=email, name=name, role=role, trackman_id=trackman_id)
         user.set_password(password)
         db.session.add(user)

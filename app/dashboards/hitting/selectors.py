@@ -1,8 +1,10 @@
 """Role-aware selection helpers (pure functions of explicit role/id params).
 
-A player is locked to their own data server-side; these functions never trust a
-client-supplied hitter id for a player. `current_user` is read by layout/callbacks
-and passed in, keeping this module testable in isolation. Ids are batter_tm_id.
+Team-transparent VIEW: any authenticated account may view any hitter, so these
+return the full roster and trust the requested id regardless of role. The
+`is_coach`/`own_trackman_id` params are retained (callers pass them unchanged);
+`own_trackman_id` now only supplies a convenience default. WRITE access is gated
+separately (coach-only) in the dashboards. Ids are batter_tm_id.
 """
 from __future__ import annotations
 
@@ -10,30 +12,24 @@ from app.data import hitting_caps
 
 
 def resolve_batter(requested_id, *, is_coach: bool, own_trackman_id):
-    """The batter id a request is allowed to view. Players are self-only."""
-    if not is_coach:
-        return int(own_trackman_id) if own_trackman_id is not None else None
-    return int(requested_id) if requested_id not in (None, "") else None
+    """The batter id a request views: the requested id when given (any account),
+    else the viewer's own id as a default, else None (layout picks a default)."""
+    if requested_id not in (None, ""):
+        return int(requested_id)
+    return int(own_trackman_id) if own_trackman_id is not None else None
 
 
 def hitter_options(*, is_coach: bool, own_trackman_id, season=None,
                     start=None, end=None) -> list[dict]:
-    """Dropdown options for the hitter selector (value = batter_tm_id), scoped
-    to the given academic-year season (default = current_season()) and,
-    when both `start` and `end` are given, further scoped to that date range
-    (coach only -- a player's own option is never filtered by date, so
-    narrowing the range can't hide a player from their own dashboard)."""
-    if is_coach:
-        df = (hitting_caps.lmu_hitters(season, start=start, end=end)
-              if start is not None and end is not None
-              else hitting_caps.lmu_hitters(season))
-        return [{"label": str(r.Batter), "value": int(r.BatterId)}
-                for r in df.itertuples()]
-    if own_trackman_id is None:
-        return []
-    prof = hitting_caps.player_profile(int(own_trackman_id))
-    return [{"label": prof["name"] or str(own_trackman_id),
-             "value": int(own_trackman_id)}]
+    """Dropdown options for the hitter selector (value = batter_tm_id): the full
+    roster for the given academic-year season (default = current_season()),
+    further scoped to [start, end] when both are given. Every account sees the
+    whole roster (team-transparent view)."""
+    df = (hitting_caps.lmu_hitters(season, start=start, end=end)
+          if start is not None and end is not None
+          else hitting_caps.lmu_hitters(season))
+    return [{"label": str(r.Batter), "value": int(r.BatterId)}
+            for r in df.itertuples()]
 
 
 def game_options(batter_tm_id) -> list[dict]:

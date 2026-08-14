@@ -124,8 +124,9 @@ def pitching_all_zip(game_id: int):
 def bullpen_landing():
     """Pick an LMU pitcher, then download a bullpen session report.
 
-    Coaches see all LMU pitchers; a player sees only their own (self-only,
-    matching the PDF gate) — no roster/session enumeration for players.
+    Team-transparent VIEW: every account (coach or player) sees the full LMU
+    pitcher list and may download any bullpen report (the PDF gate is view-open
+    too). WRITE access to the boards/notes stays coach-only elsewhere.
 
     A Season dropdown (default = current season) scopes the pitcher list to
     pitchers with a bullpen in that academic year, and the session list to that
@@ -138,10 +139,6 @@ def bullpen_landing():
     s_b, e_b = seasons.season_bounds(season)
 
     pitchers = BULL.lmu_bullpen_pitchers(start=s_b, end=e_b)
-    if getattr(current_user, "role", None) != "coach":
-        tm = current_user.trackman_id
-        pitchers = (pitchers[pitchers["pitcher_id"].astype(str) == str(tm)]
-                    if tm is not None else pitchers.iloc[0:0])
     pid = request.args.get("pitcher_id", type=int)
     sessions = None
     selected = None

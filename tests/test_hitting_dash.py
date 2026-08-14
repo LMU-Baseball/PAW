@@ -55,10 +55,11 @@ def test_build_hitting_dash_mounts():
     assert "/static/reports/lion.png" in INDEX_STRING
 
 
-def test_resolve_batter_player_is_self_only():
+def test_resolve_batter_player_can_view_others():
     from app.dashboards.hitting import selectors
-    # a player cannot resolve someone else's id
-    assert selectors.resolve_batter(999, is_coach=False, own_trackman_id=806253) == 806253
+    # Team-transparent: a player may resolve ANY requested id (view-all); when
+    # nothing is requested it falls back to the viewer's own id.
+    assert selectors.resolve_batter(999, is_coach=False, own_trackman_id=806253) == 999
     assert selectors.resolve_batter(None, is_coach=False, own_trackman_id=806253) == 806253
 
 
@@ -78,30 +79,33 @@ def test_hitter_options_coach_lists_all(monkeypatch):
     assert {o["value"] for o in opts} == {1, 2}
 
 
-def test_hitter_options_player_is_single_self(monkeypatch):
+def test_hitter_options_player_lists_all(monkeypatch):
+    # Team-transparent: a player sees the WHOLE roster, same as a coach.
     from app.dashboards.hitting import selectors
-    monkeypatch.setattr("app.data.hitting_caps.player_profile",
-                        lambda b: {"name": "Wadas, Zach", "bats": "Right",
-                                   "class_year": "", "position": "", "photo": "",
-                                   "jersey": ""})
+    monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
+                        lambda season=None: pd.DataFrame(
+                            [{"Batter": "Doe, John", "BatterId": 1},
+                             {"Batter": "Roe, Jane", "BatterId": 2}]))
     opts = selectors.hitter_options(is_coach=False, own_trackman_id=806253)
-    assert len(opts) == 1
-    assert opts[0]["value"] == 806253
-    assert opts[0]["label"] == "Wadas, Zach"
+    assert [o["value"] for o in opts] == [1, 2]
 
 
-def test_hitter_options_player_ignores_date_range(monkeypatch):
-    """Task 5: a player's own option must NEVER be filtered out by the date
-    range -- date-range filtering can't hide a player from their own
-    dashboard, even if their own at-bats fall outside the selected window."""
+def test_hitter_options_player_date_scoped(monkeypatch):
+    """Team-transparent view: a player's options are the full roster, and the
+    date range scopes them the same as a coach's (a view filter that now applies
+    to every account)."""
     from app.dashboards.hitting import selectors
-    monkeypatch.setattr("app.data.hitting_caps.player_profile",
-                        lambda b: {"name": "Wadas, Zach", "bats": "Right",
-                                   "class_year": "", "position": "", "photo": "",
-                                   "jersey": ""})
+    seen = {}
+
+    def fake(season=None, start=None, end=None):
+        seen["start"], seen["end"] = start, end
+        return pd.DataFrame([{"Batter": "Doe, John", "BatterId": 1}])
+
+    monkeypatch.setattr("app.data.hitting_caps.lmu_hitters", fake)
     opts = selectors.hitter_options(is_coach=False, own_trackman_id=806253,
                                     start="1900-01-01", end="1900-01-02")
-    assert len(opts) == 1 and opts[0]["value"] == 806253
+    assert [o["value"] for o in opts] == [1]
+    assert seen == {"start": "1900-01-01", "end": "1900-01-02"}
 
 
 def test_hitter_options_coach_scoped_by_date_range():

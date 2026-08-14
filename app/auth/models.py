@@ -1,7 +1,11 @@
 """User accounts and roles.
 
-A `player` is scoped to their own Trackman data via `trackman_id`; a `coach`
-has no trackman_id and may view every player.
+Team-transparent VIEW model: every authenticated account (coach or player) may
+VIEW every player's data. Roles differ only in WRITE access -- a `coach` can
+edit the velo board / Cauldron / coach notes / dev plans; a `player` account is
+read-only (those edit paths re-check `is_coach` independently). `trackman_id`
+still links a personal player account to its own Trackman data (used only as a
+convenience default now, no longer a view restriction).
 """
 from __future__ import annotations
 
@@ -38,12 +42,9 @@ class User(UserMixin, db.Model):
         return self.role == "coach"
 
     def can_view_player(self, trackman_id) -> bool:
-        """Coaches see everyone; players see only their own Trackman id."""
-        if self.is_coach:
-            return True
-        if self.trackman_id is None or trackman_id is None:
-            return False
-        return int(self.trackman_id) == int(trackman_id)
+        """Team-transparent: any authenticated account may view any player.
+        Write access is gated separately (coach-only) in the dashboards."""
+        return True
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"

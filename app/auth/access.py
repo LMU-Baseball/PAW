@@ -27,21 +27,12 @@ def can_view_player(user, trackman_id) -> bool:
 
 
 def can_view_pitcher_report(user, pitcher_id) -> bool:
-    """Coaches see all; a player sees only their own pitcher report."""
-    if not getattr(user, "is_authenticated", False):
-        return False
-    if user.role == "coach":
-        return True
-    from app.data.pitching_caps import pitcher_tm_id_for
-    tm_id = pitcher_tm_id_for(pitcher_id)
-    return tm_id is not None and str(user.trackman_id) == str(tm_id)
+    """Team-transparent VIEW: any authenticated account may view any pitcher
+    report. (Generating/downloading a report is a read; write access to boards
+    and notes is gated separately, coach-only.)"""
+    return bool(getattr(user, "is_authenticated", False))
 
 
 def can_view_bullpen(user, pitcher_trackman_id) -> bool:
-    """Coaches see all bullpens; a player sees only their own (raw Trackman id)."""
-    if not getattr(user, "is_authenticated", False):
-        return False
-    if user.role == "coach":
-        return True
-    return (user.trackman_id is not None
-            and str(user.trackman_id) == str(pitcher_trackman_id))
+    """Team-transparent VIEW: any authenticated account may view any bullpen."""
+    return bool(getattr(user, "is_authenticated", False))

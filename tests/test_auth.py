@@ -72,13 +72,14 @@ def test_coach_can_view_anyone(app):
         assert coach.can_view_player(111111)
 
 
-def test_player_scoped_to_own_id(app):
+def test_player_can_view_everyone(app):
+    # Team-transparent model: a player VIEWS every player (edit stays coach-only).
     with app.app_context():
         player = User.query.filter_by(email="player@lmu.edu").first()
         assert not player.is_coach
         assert player.can_view_player(694990)          # own id
-        assert not player.can_view_player(111111)      # someone else
-        assert not player.can_view_player(None)
+        assert player.can_view_player(111111)          # someone else -- now allowed
+        assert player.can_view_player(None)
 
 
 def test_can_view_player_helper_anonymous():

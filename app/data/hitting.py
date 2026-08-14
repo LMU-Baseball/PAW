@@ -3,7 +3,8 @@
 Faithful port of the R "Hitter Postgame" app (src/app 1). Queries the legacy
 Trackman tables (GAMES / STANDINGS / VIDEO / PLAYERS / NOTES). Selection is
 role-agnostic here; the web layer decides whether a user may view a batter
-(player = self only, coach = anyone).
+(team-transparent: any authenticated account may view anyone -- write access is
+gated separately, coach-only).
 
 Two deliberate deviations from the R output, for the Dash/web layer:
   * Percentage columns are returned as NUMBERS (e.g. 33.3), not "33.3%" strings.

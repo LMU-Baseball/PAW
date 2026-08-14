@@ -92,21 +92,22 @@ def test_player_options_coach_no_all_players():
     assert set(vals) == {"Alpha", "Beta"}
 
 
-def test_resolve_player_coach_defaults_and_player_locks():
+def test_resolve_player_defaults_same_for_every_role():
     from app.dashboards.hitting_practice import selectors
     avail = ["Alpha", "Beta", "Cara"]
-    # coach, nothing requested -> the provided default (first-on-latest-date)
+    # nothing requested -> the provided default (first-on-latest-date)
     assert selectors.resolve_player(None, is_coach=True, own_name=None,
                                     available=avail, default="Beta") == "Beta"
-    # coach, valid request -> honored
+    # valid request -> honored
     assert selectors.resolve_player("Cara", is_coach=True, own_name=None,
                                     available=avail, default="Beta") == "Cara"
-    # coach, no default -> first available
+    # no default -> first available
     assert selectors.resolve_player(None, is_coach=True, own_name=None,
                                     available=avail) == "Alpha"
-    # player -> locked to their own matched name regardless of request
+    # Team-transparent: a player resolves the SAME as a coach -- the requested
+    # name is honored regardless of their own_name (view-all, no self-lock).
     assert selectors.resolve_player("Alpha", is_coach=False, own_name="Cara",
-                                    available=avail) == "Cara"
+                                    available=avail) == "Alpha"
     # no players at all -> None (dashboard shows an empty state)
     assert selectors.resolve_player(None, is_coach=True, own_name=None,
                                     available=[]) is None

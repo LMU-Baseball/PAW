@@ -17,10 +17,11 @@ def server(tmp_path):
     return create_app(T)
 
 
-def test_resolve_pitcher_player_is_self_only():
+def test_resolve_pitcher_player_can_view_others():
     from app.dashboards.bullpen import selectors
-    assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=None) is None
-    assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=555) == 555
+    # Team-transparent: any account resolves the requested id; None -> own default.
+    assert selectors.resolve_pitcher(999, is_coach=False, own_trackman_id=None) == 999
+    assert selectors.resolve_pitcher(None, is_coach=False, own_trackman_id=555) == 555
     assert selectors.resolve_pitcher(999, is_coach=True, own_trackman_id=None) == 999
 
 
@@ -41,16 +42,20 @@ def test_pitcher_options_scoped_by_date_range():
     assert GEIS in {o["value"] for o in opts_window}
 
 
-def test_pitcher_options_player_role_never_date_scoped():
-    """Final-review fix: unlike the coach branch, a player-role user's own
-    option must survive any date range -- including one with zero bullpen
-    pitches in it -- matching the other five dashboards' selectors."""
+def test_pitcher_options_player_lists_all():
+    """Team-transparent: a player's options are the FULL roster -- identical to
+    a coach's -- and date-scope the same way (a view filter for every account)."""
     from app.dashboards.bullpen import selectors
-    opts_no_range = selectors.pitcher_options(is_coach=False, own_trackman_id=GEIS)
-    assert opts_no_range == [{"label": selectors.B.pitcher_name(GEIS), "value": GEIS}]
-    opts_empty_range = selectors.pitcher_options(
+    coach_opts = selectors.pitcher_options(is_coach=True, own_trackman_id=None)
+    player_opts = selectors.pitcher_options(is_coach=False, own_trackman_id=GEIS)
+    assert player_opts == coach_opts
+    assert GEIS in {o["value"] for o in player_opts}
+    # An empty date range scopes a player exactly like a coach (both -> []).
+    player_empty = selectors.pitcher_options(
         is_coach=False, own_trackman_id=GEIS, start="1900-01-01", end="1900-01-02")
-    assert opts_empty_range == opts_no_range
+    coach_empty = selectors.pitcher_options(
+        is_coach=True, own_trackman_id=None, start="1900-01-01", end="1900-01-02")
+    assert player_empty == coach_empty == []
 
 
 def test_bullpen_pitcher_dd_options_callback_registered(server):
@@ -328,13 +333,11 @@ def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
     assert expected <= unscoped
 
 
-def test_layout_initial_paint_player_role_keeps_own_option_outside_range(server):
-    """Final-review fix: a player-role user's own option must stay visible
-    regardless of the selected date range, matching the other five dashboards
-    (hitting/pitching/catching selectors + hittrax resolve_player/player_options).
-    Even when the player's own bullpen falls entirely outside the
-    season-default range, first-paint options must be non-empty and the
-    dropdown value must be their own id -- never an empty, disabled dropdown."""
+def test_layout_initial_paint_player_role_gets_full_roster(server):
+    """Team-transparent: a player-role user paints the FULL roster (same as a
+    coach) with a valid default selection drawn from those options -- never an
+    empty, disabled dropdown -- even when their own trackman_id has no bullpen
+    data at all."""
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
@@ -352,8 +355,11 @@ def test_layout_initial_paint_player_role_keeps_own_option_outside_range(server)
     pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
     assert pitcher_dd.id == "bp-pitcher-dd"
     assert pitcher_dd.options != []
-    assert pitcher_dd.value == -999
-    assert store.data["pitcher_id"] == -999
+    # Defaults to a real roster pitcher present in the options (not the synthetic
+    # -999), and the store agrees with the dropdown.
+    option_values = {o["value"] for o in pitcher_dd.options}
+    assert pitcher_dd.value in option_values
+    assert store.data["pitcher_id"] == pitcher_dd.value
 
 
 def test_bullpen_layout_uses_preset_dropdown(server):

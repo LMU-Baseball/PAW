@@ -1,4 +1,4 @@
-"""Tests for the bullpen-report landing page + self-only PDF gate."""
+"""Tests for the bullpen-report landing page + team-transparent view gate."""
 import pandas as pd
 import pytest
 
@@ -56,16 +56,20 @@ def test_bullpen_landing_ok_for_coach(app_ctx, monkeypatch):
     assert 'name="season"' in body   # season selector rendered
 
 
-def test_bullpen_pdf_player_self_only(app_ctx):
-    """A player requesting another pitcher's bullpen is forbidden (gate before build)."""
+def test_bullpen_pdf_player_can_view_any(app_ctx):
+    """Team-transparent: a player may download ANY pitcher's bullpen report
+    (the view gate is open; write access to boards/notes stays coach-only)."""
+    from unittest.mock import patch
     client = app_ctx.test_client()
     _login(client, "p@lmu.edu")
-    resp = client.get("/reports/bullpen/999999/2025-02-06.pdf")
-    assert resp.status_code == 403
+    with patch("app.reports.routes.build_bullpen_report", return_value=b"%PDF-mock"):
+        resp = client.get("/reports/bullpen/999999/2025-02-06.pdf")
+    assert resp.status_code == 200
+    assert resp.data.startswith(b"%PDF-")
 
 
-def test_bullpen_landing_player_sees_only_self(app_ctx, monkeypatch):
-    """A player's pitcher list is filtered to themselves — no enumeration leak."""
+def test_bullpen_landing_player_sees_all(app_ctx, monkeypatch):
+    """Team-transparent: a player sees the FULL pitcher list (everyone)."""
     monkeypatch.setattr(
         "app.data.bullpen.lmu_bullpen_pitchers",
         lambda start=None, end=None: pd.DataFrame([
@@ -75,10 +79,10 @@ def test_bullpen_landing_player_sees_only_self(app_ctx, monkeypatch):
              "last_date": "2025-01-01"}]))
     monkeypatch.setattr("app.data.bullpen.bullpen_data_max_date", lambda: "2025-04-14")
     client = app_ctx.test_client()
-    _login(client, "p@lmu.edu")  # trackman_id 824645 == Geis
+    _login(client, "p@lmu.edu")
     body = client.get("/reports/bullpen").get_data(as_text=True)
     assert "Geis, Jake" in body        # sees self
-    assert "Other, Guy" not in body    # does NOT see other pitchers
+    assert "Other, Guy" in body        # AND every other pitcher
 
 
 def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeypatch):

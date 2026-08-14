@@ -76,10 +76,9 @@ def serve_layout() -> html.Div:
                                          start=start_d, end=end_d)
     # Fallback mirrors _on_daterange_pitchers exactly (callbacks.py): if the
     # unscoped default isn't in the range-scoped options, fall back to the
-    # first available option's value (or None). In practice this only fires
-    # for coaches -- a player-role user's own option is always present in
-    # `pitchers` regardless of date range (selectors.pitcher_options never
-    # date-scopes a player's own id), so `default_pitcher` always matches.
+    # first available option's value (or None). Team-transparent view: every
+    # account (coach or player) sees the full roster and defaults to the first
+    # roster pitcher, so this fallback fires uniformly regardless of role.
     pitcher_values = {p["value"] for p in pitchers}
     if default_pitcher not in pitcher_values:
         default_pitcher = pitchers[0]["value"] if pitchers else None

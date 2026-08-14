@@ -1,7 +1,10 @@
 """Role-aware selection helpers for the pitching dashboard (pure functions).
 
-A player is locked to their own data server-side. Ids are the RAW
-`GAMES.PitcherId` (== a player's Trackman id) -- no surrogate mapping needed.
+Team-transparent VIEW: any authenticated account may view any pitcher, so these
+return the full roster and trust the requested id regardless of role
+(`own_trackman_id` is only a convenience default now; WRITE access is gated
+separately, coach-only). Ids are the RAW `GAMES.PitcherId` (== a player's
+Trackman id) -- no surrogate mapping needed.
 """
 from __future__ import annotations
 
@@ -9,29 +12,24 @@ from app.data import pitching_caps
 
 
 def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
-    """The pitcher_id a request may view. Players are self-only."""
-    if not is_coach:
-        return int(own_trackman_id) if own_trackman_id is not None else None
-    return int(requested_id) if requested_id not in (None, "") else None
+    """The pitcher_id a request views: the requested id when given (any account),
+    else the viewer's own id as a default, else None (layout picks a default)."""
+    if requested_id not in (None, ""):
+        return int(requested_id)
+    return int(own_trackman_id) if own_trackman_id is not None else None
 
 
 def pitcher_options(*, is_coach: bool, own_trackman_id, season=None,
                      start=None, end=None) -> list[dict]:
-    """Dropdown options for the pitcher selector (value = PitcherId), scoped to
-    the given academic-year season (default = current_season()) and, when both
-    `start` and `end` are given, further scoped to that date range (coach only
-    -- a player's own option is never filtered by date, so narrowing the range
-    can't hide a player from their own dashboard)."""
-    if is_coach:
-        df = (pitching_caps.lmu_pitchers(season, start=start, end=end)
-              if start is not None and end is not None
-              else pitching_caps.lmu_pitchers(season))
-        return [{"label": str(r.Pitcher), "value": int(r.PitcherId)}
-                for r in df.itertuples()]
-    pid = resolve_pitcher(None, is_coach=False, own_trackman_id=own_trackman_id)
-    if pid is None:
-        return []
-    return [{"label": pitching_caps.pitcher_name(pid), "value": pid}]
+    """Dropdown options for the pitcher selector (value = PitcherId): the full
+    roster for the given academic-year season (default = current_season()),
+    further scoped to [start, end] when both are given. Every account sees the
+    whole roster (team-transparent view)."""
+    df = (pitching_caps.lmu_pitchers(season, start=start, end=end)
+          if start is not None and end is not None
+          else pitching_caps.lmu_pitchers(season))
+    return [{"label": str(r.Pitcher), "value": int(r.PitcherId)}
+            for r in df.itertuples()]
 
 
 def outing_options(pitcher_id) -> list[dict]:
