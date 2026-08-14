@@ -37,24 +37,27 @@ def _patch_reads(monkeypatch, teams_df=None, daily_df=None, computed=None):
 def test_coach_grid_is_editable_and_has_required_ids(monkeypatch):
     _patch_reads(monkeypatch)
 
-    comp = G.coach_grid("2026-03-02", "cycle-1", "2025/2026")
+    comp = G.coach_grid("2026-03-02", "2026-03-02", "2025/2026")
     s = str(comp)
 
     assert "cauldron-grid" in s
+    assert "cauldron-grid-wrap" in s   # grid lives in a hide-until-edit wrapper
     assert "cauldron-save" in s
-    assert "cauldron-recompute" in s
     assert "cauldron-date" in s
-    assert "cauldron-cycle" in s
+    assert "cauldron-week" in s        # Week selector replaces the Cycle selector
     assert "cauldron-save-status" in s
-    assert "cauldron-edit" in s        # Edit button unlocks the grid
+    assert "cauldron-edit" in s        # Edit button reveals + unlocks the grid
     assert "editable=False" in s       # grid starts LOCKED until Edit is pressed
+    assert "Captain" in s              # captain control column
+    assert "cauldron-recompute" not in s   # Recompute auto button removed
+    assert "cauldron-cycle" not in s       # Cycle selector removed
 
 
 def test_coach_grid_prefills_team_and_scores_auto_metric_live(monkeypatch):
     teams_df = pd.DataFrame([{"player_id": 823008, "cycle_id": "cycle-1", "team": "Team 2"}])
     _patch_reads(monkeypatch, teams_df=teams_df, computed={"strike_pct": 60.0})
 
-    comp = G.coach_grid("2026-03-02", "cycle-1", "2025/2026")
+    comp = G.coach_grid("2026-03-02", "2026-03-02", "2025/2026")
     s = str(comp)
 
     # Team 2 pre-filled from read_teams, and the AUTO metric scored live
@@ -80,6 +83,24 @@ def test_save_grid_routes_team_to_set_team(monkeypatch):
                 "2026-03-02", "cycle-1", updated_by=7)
 
     assert captured["team_call"] == (823008, "cycle-1", "Team 1", 7)
+
+
+def test_save_grid_routes_captain_to_set_captain(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("app.data.cauldron.read_scoring", lambda: _scoring_df())
+    monkeypatch.setattr("app.data.cauldron.compute_players_day",
+                         lambda pids, play_date: {int(p): {} for p in pids})
+    monkeypatch.setattr("app.data.cauldron.set_team", lambda *a, **k: None)
+    monkeypatch.setattr("app.data.cauldron.upsert_daily", lambda rows, updated_by=None: None)
+    monkeypatch.setattr("app.data.cauldron.set_captain",
+                         lambda pid, cycle_id, updated_by=None: captured.setdefault(
+                             "cap_call", (pid, cycle_id, updated_by)))
+
+    G.save_grid([{"player_id": 823008, "player": "Behrens, Adam", "team": "Team 1",
+                  "captain": "Yes"}],
+                "2026-03-02", "cycle-1", updated_by=7)
+
+    assert captured["cap_call"] == (823008, "cycle-1", 7)
 
 
 def test_save_grid_routes_filled_metric_cell_to_upsert_daily_as_manual(monkeypatch):

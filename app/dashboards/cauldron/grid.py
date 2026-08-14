@@ -70,7 +70,9 @@ _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px"
 
 # Row keys that are never metric columns -- everything else in a grid row
 # dict is a metric id (see `_grid_rows`/`save_grid`).
-_NON_METRIC_KEYS = {"player_id", "player", "team"}
+_NON_METRIC_KEYS = {"player_id", "player", "team", "captain"}
+
+_CAPTAIN_OPTIONS = [{"label": "★ Captain", "value": "Yes"}, {"label": "—", "value": "No"}]
 
 
 def _metric_columns(scoring: pd.DataFrame) -> list[dict]:
@@ -96,8 +98,12 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
     """One dict per rostered pitcher: `player_id`/`player`/`team` plus one key
     per metric id, pre-filled per `coach_grid`'s docstring rules."""
     team_by_player: dict[int, str] = {}
+    captain_by_player: dict[int, int] = {}
     if teams is not None and not teams.empty:
         team_by_player = dict(zip(teams["player_id"].astype(int), teams["team"]))
+        if "is_captain" in teams.columns:
+            captain_by_player = dict(zip(teams["player_id"].astype(int),
+                                         teams["is_captain"].fillna(0).astype(int)))
 
     stored: dict[tuple[int, str], object] = {}
     if daily is not None and not daily.empty:
@@ -113,7 +119,8 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
     for _, r in roster.iterrows():
         pid = int(r["PitcherId"])
         pmetrics = metrics_by_pid.get(pid, {})
-        row = {"player_id": pid, "player": r["Pitcher"], "team": team_by_player.get(pid)}
+        row = {"player_id": pid, "player": r["Pitcher"], "team": team_by_player.get(pid),
+               "captain": "Yes" if captain_by_player.get(pid) else "No"}
         for _, srow in scoring.iterrows():
             metric = srow["metric"]
             key = (pid, metric)
@@ -127,11 +134,20 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
     return rows
 
 
-def coach_grid(play_date, cycle_id, season) -> html.Div:
-    """The coach-facing editable grid: Date picker, Cycle selector, the
-    editable DataTable itself (id `cauldron-grid`), and Save/Recompute
-    buttons (`cauldron-save`/`cauldron-recompute`) + status line
-    (`cauldron-save-status`)."""
+def coach_grid(play_date, week_start, season) -> html.Div:
+    """The coach-facing editable grid section. Layout order:
+
+      1. Edit / Save buttons + status line, at the TOP (`cauldron-edit` /
+         `cauldron-save` / `cauldron-save-status`).
+      2. A always-visible **Week** selector (`cauldron-week`, Mon-start) that
+         drives the weekly scoreboard.
+      3. A wrapper (`cauldron-grid-wrap`) -- HIDDEN by default -- holding the
+         entry-date picker (`cauldron-date`) and the editable DataTable
+         (`cauldron-grid`). Edit reveals + unlocks it; Save persists + hides it.
+
+    The competition cycle is derived internally (`{season}-c1`) for team reads/
+    writes -- teams persist across weeks, so it is no longer a visible control."""
+    cycle_id = f"{season}-c1"
     scoring = cauldron.read_scoring()
     roster = pitching_caps.lmu_pitchers(season)
     teams = cauldron.read_teams(cycle_id)
@@ -142,29 +158,28 @@ def coach_grid(play_date, cycle_id, season) -> html.Div:
     columns = [
         {"name": "Player", "id": "player", "editable": False},
         {"name": "Team", "id": "team", "editable": True, "presentation": "dropdown"},
+        {"name": "Captain", "id": "captain", "editable": True, "presentation": "dropdown"},
     ] + _metric_columns(scoring)
 
-    dropdown = {"team": {"options": [{"label": t, "value": t} for t in _TEAM_OPTIONS]}}
+    dropdown = {
+        "team": {"options": [{"label": t, "value": t} for t in _TEAM_OPTIONS]},
+        "captain": {"options": _CAPTAIN_OPTIONS},
+    }
 
-    # Centered, single-line filter row under the emblem.
-    filters = html.Div([
+    buttons = shell.edit_save_buttons("cauldron-edit", "cauldron-save",
+                                      "cauldron-save-status")
+
+    # Week selector stays visible (it drives the scoreboard everyone sees).
+    week_filter = html.Div([
         html.Div([
-            html.Label("Date", style=_LABEL_STYLE),
-            dcc.DatePickerSingle(id="cauldron-date", date=play_date),
-        ]),
-        html.Div([
-            html.Label("Cycle", style=_LABEL_STYLE),
-            dcc.Dropdown(
-                id="cauldron-cycle",
-                options=[{"label": cycle_id, "value": cycle_id}],
-                value=cycle_id, clearable=False,
-                style={"minWidth": "150px"}),
+            html.Label("Week (starts Monday)", style=_LABEL_STYLE),
+            dcc.DatePickerSingle(id="cauldron-week", date=week_start),
         ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
-              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "16px 16px 8px"})
+              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "8px 16px"})
 
-    # Grid starts LOCKED (editable=False). "Edit" unlocks it; "Save" persists
-    # and re-locks -- see callbacks.py.
+    # Grid starts LOCKED (editable=False) AND hidden. "Edit" reveals + unlocks;
+    # "Save" persists + hides -- see callbacks.py.
     grid = dash_table.DataTable(
         id="cauldron-grid",
         columns=columns,
@@ -177,12 +192,15 @@ def coach_grid(play_date, cycle_id, season) -> html.Div:
         style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold"},
     )
 
-    recompute = html.Button("Recompute auto", id="cauldron-recompute", n_clicks=0,
-                            style=shell._btn_style("#0076A5"))
-    buttons = shell.edit_save_buttons("cauldron-edit", "cauldron-save",
-                                      "cauldron-save-status", extra=[recompute])
+    grid_wrap = html.Div([
+        html.Div([
+            html.Label("Entry date", style=_LABEL_STYLE),
+            dcc.DatePickerSingle(id="cauldron-date", date=play_date),
+        ], style={"textAlign": "center", "padding": "0 16px 8px"}),
+        html.Div(grid, style={"padding": "0 16px"}),
+    ], id="cauldron-grid-wrap", style={"display": "none"})
 
-    return html.Div([filters, html.Div(grid, style={"padding": "0 16px"}), buttons],
+    return html.Div([buttons, week_filter, grid_wrap],
                     style={"borderBottom": f"2px solid {shell.CRIMSON}",
                            "backgroundColor": "rgba(255,255,255,0.55)"})
 
@@ -225,6 +243,8 @@ def save_grid(grid_data: list[dict], play_date, cycle_id, updated_by=None) -> No
         team = r.get("team")
         if team not in (None, ""):
             cauldron.set_team(pid, cycle_id, team, updated_by)
+        if r.get("captain") == "Yes":
+            cauldron.set_captain(pid, cycle_id, updated_by)
 
         pmetrics = metrics_by_pid.get(int(pid), {}) if pid is not None else {}
         for key, value in r.items():
