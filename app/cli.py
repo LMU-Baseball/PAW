@@ -31,7 +31,7 @@ def register_cli(server):
 
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",
-                  type=click.Choice(["all", "hitting", "pitching", "catching"]),
+                  type=click.Choice(["all", "hitting", "pitching"]),
                   help="Which precalc rollup(s) to rebuild from CAPS.")
     def rebuild_precalc(module):
         """Rebuild the precalc rollup tables from CAPS."""
@@ -39,8 +39,7 @@ def register_cli(server):
         from app.db import get_engine
         engine = get_engine()
         fns = {"hitting": precalc.rebuild_hitting,
-               "pitching": precalc.rebuild_pitching,
-               "catching": precalc.rebuild_catching}
+               "pitching": precalc.rebuild_pitching}
         targets = list(fns) if module == "all" else [module]
         for m in targets:
             click.echo(f"rebuilt {m}: {fns[m](engine)} rows")

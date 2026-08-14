@@ -6,7 +6,7 @@ pays a second rebuild.
 """
 import pytest
 
-from app.data import precalc, hitting_caps, pitching_caps, catching_caps
+from app.data import precalc, hitting_caps, pitching_caps
 from app.db import get_engine
 
 WADAS = 806253
@@ -91,30 +91,6 @@ def test_pitching_covering_range_uses_rollup(rebuilt_pitching):
     tiles = pitching_caps.range_summary(pid, row["min_date"], row["max_date"])
     assert tiles == {k: row[k] for k in
                      ("appearances", "ip", "k_pct", "bb_pct", "barrel_pct")}
-
-
-# ---- catching --------------------------------------------------------------
-
-@pytest.fixture(scope="module")
-def rebuilt_catching():
-    return precalc.rebuild_catching(get_engine())
-
-
-def test_catching_rebuild_populates_every_lmu_catcher(rebuilt_catching):
-    from app.data import seasons
-    expected = sum(catching_caps.lmu_catchers(s)["CatcherId"].nunique()
-                   for s in seasons.available_seasons())
-    assert rebuilt_catching == expected
-    for cid in catching_caps.lmu_catchers()["CatcherId"]:
-        assert precalc.read_catching_season(int(cid)) is not None
-
-
-def test_catching_read_matches_compute(rebuilt_catching):
-    cid = int(catching_caps.lmu_catchers().iloc[0]["CatcherId"])
-    row = precalc.read_catching_season(cid)
-    comp = catching_caps._compute_season_rollup(cid)
-    for k in ("games", "pitches", "net_strikes", "steal_pct"):
-        assert row[k] == comp[k], k
 
 
 def test_data_version_bumps():

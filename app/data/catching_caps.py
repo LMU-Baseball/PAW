@@ -230,12 +230,10 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
 def _rollup_over(catcher_id, start, end) -> dict:
     """The catching framing rollup (games, pitches, net strikes, steal%) for one
     catcher over an arbitrary [start, end] date window, as a single SQL
-    aggregate over GAMES (sibling-id union). Single source of truth for the
-    PRECALC rollup math (feeds `flask rebuild-precalc` / `precalc_catching_
-    player_season`) -- as of the 2026-08-12 sidebar redesign this is no
-    longer read by `framing_season_tiles` (see its docstring), but it's kept
-    exactly as it was so the precalc table/rebuild/`read_catching_season`
-    keep behaving identically."""
+    aggregate over GAMES (sibling-id union). Since the 2026-08-12 sidebar
+    redesign `framing_season_tiles` no longer reads it (see its docstring), and
+    the catching precalc rollup was retired 2026-08-13, so it now backs only
+    `_compute_season_rollup` and its tests."""
     from app.data.catching import _pct
     cid = int(catcher_id)
     ph, idp = _in_clause(_sibling_catcher_ids(cid))
@@ -276,9 +274,9 @@ def _rollup_over(catcher_id, start, end) -> dict:
 def _compute_season_rollup(catcher_id, season=None) -> dict:
     """Catching season rollup: the PRECALC row (games, pitches, net strikes,
     steal%) plus catcher_id/name. Thin wrapper over `_rollup_over` with the
-    season's date bounds. This is the `flask rebuild-precalc` source (see
-    `precalc.rebuild_catching`) -- unrelated to the sidebar tiles now (see
-    `framing_season_tiles`).
+    season's date bounds. (Was the catching precalc source; that rollup was
+    retired 2026-08-13 -- unrelated to the sidebar tiles, see
+    `framing_season_tiles`.)
 
     Scoped to the academic-year `season` (default current_season()) via
     Date-bounds -- which for the current season equals the old numeric-GameID

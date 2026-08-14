@@ -6,14 +6,14 @@ here), so precalc is always reproducible from CAPS -- not a second source of
 truth. Refresh with `flask rebuild-precalc`; a daily cron will call it after each
 pipeline load later.
 
-Three season rollups (one row per player), one per module:
+Two season rollups (one row per player), one per module:
   hitting  -> precalc_hitting_player_season   (kills the profiled full-season
               sidebar load; the big win)
   pitching -> precalc_pitching_player_season  (same full-season hotspot in
               range_summary)
-  catching -> precalc_catching_player_season  (light: framing_season_tiles was
-              already a cheap aggregate -- rollup kept for a uniform read path
-              + the daily-cron story)
+Catching has NO rollup -- framing_season_tiles is already a cheap aggregate off
+a cached primitive, so the once-built precalc_catching_player_season was retired
+(2026-08-13).
 See docs/superpowers/specs/2026-08-07-phase4-precalc-hitting-design.md.
 """
 from __future__ import annotations
@@ -30,8 +30,11 @@ from app.data import cache
 
 HITTING_SEASON_TABLE = "precalc_hitting_player_season"
 PITCHING_SEASON_TABLE = "precalc_pitching_player_season"
-CATCHING_SEASON_TABLE = "precalc_catching_player_season"
 PRECALC_META_TABLE = "precalc_meta"
+# NOTE: catching has NO precalc rollup -- catching_caps.framing_season_tiles
+# computes its sidebar tiles fresh from a cached primitive, so a
+# precalc_catching_player_season table was retired (2026-08-13). An orphan
+# table may still exist in prod from older rebuilds; it is unused.
 
 # Each season rollup is keyed by (player_id, season_label) so one row exists per
 # player PER academic-year season -- picking a past season from the Season
@@ -60,16 +63,6 @@ _DDL = {
             built_at     DATETIME,
             PRIMARY KEY (pitcher_id, season_label)
         )""",
-    CATCHING_SEASON_TABLE: f"""
-        CREATE TABLE IF NOT EXISTS {CATCHING_SEASON_TABLE} (
-            catcher_id   BIGINT NOT NULL,
-            catcher_name VARCHAR(128),
-            games VARCHAR(8), pitches VARCHAR(8),
-            net_strikes VARCHAR(8), steal_pct VARCHAR(8),
-            season_label VARCHAR(32) NOT NULL,
-            built_at     DATETIME,
-            PRIMARY KEY (catcher_id, season_label)
-        )""",
     PRECALC_META_TABLE: f"""
         CREATE TABLE IF NOT EXISTS {PRECALC_META_TABLE} (
             id INT PRIMARY KEY,
@@ -83,7 +76,6 @@ _DDL = {
 _ROLLUP_PK = {
     HITTING_SEASON_TABLE: {"batter_id", "season_label"},
     PITCHING_SEASON_TABLE: {"pitcher_id", "season_label"},
-    CATCHING_SEASON_TABLE: {"catcher_id", "season_label"},
 }
 
 
@@ -238,23 +230,7 @@ def read_pitching_season(pitcher_id, season=None) -> dict | None:
     return _read_one(PITCHING_SEASON_TABLE, "pitcher_id", pitcher_id, season)
 
 
-# ---- catching --------------------------------------------------------------
-
-def rebuild_catching(engine=None) -> int:
-    from app.data import catching_caps
-    engine = engine or get_engine()
-    ensure_tables(engine)
-    rows = _build_all_seasons(engine, catching_caps.lmu_catchers, "CatcherId",
-                              catching_caps._compute_season_rollup)
-    return _replace_rows(engine, CATCHING_SEASON_TABLE, rows)
-
-
-def read_catching_season(catcher_id, season=None) -> dict | None:
-    return _read_one(CATCHING_SEASON_TABLE, "catcher_id", catcher_id, season)
-
-
 def rebuild_all(engine=None) -> dict:
     engine = engine or get_engine()
     return {"hitting": rebuild_hitting(engine),
-            "pitching": rebuild_pitching(engine),
-            "catching": rebuild_catching(engine)}
+            "pitching": rebuild_pitching(engine)}
