@@ -20,6 +20,7 @@ from app.data.seasons import season_bounds
 from app.db import get_engine, query_df
 
 VELO_BOARD_TABLE = "velo_board_entries"
+OVERRIDES_TABLE = "velo_board_overrides"
 
 # Fastball/Sinker RelSpeed is what "velo" means everywhere on this board
 # (matches the warehouse's vw_pitcher_appearance_velo filter -- see
@@ -48,11 +49,56 @@ _UPDATE_COLS = ("pitcher_name", "velo_avg", "velo_max", "velo_goal",
                 "assessment", "max_pr", "updated_by", "updated_at")
 
 
+_OVERRIDES_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {OVERRIDES_TABLE} (
+        pitcher_id    BIGINT NOT NULL,
+        season_label  VARCHAR(16) NOT NULL,
+        season_max    FLOAT,
+        season_avg    FLOAT,
+        updated_by    INT,
+        updated_at    DATETIME,
+        PRIMARY KEY (pitcher_id, season_label)
+    )"""
+
+
 def ensure_tables(engine=None) -> None:
-    """Idempotently create velo_board_entries."""
+    """Idempotently create velo_board_entries + velo_board_overrides."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         conn.execute(text(_DDL))
+        conn.execute(text(_OVERRIDES_DDL))
+
+
+def read_overrides(season_label) -> pd.DataFrame:
+    """Coach velo corrections for a season (season_max/season_avg overrides)."""
+    ensure_tables()
+    return query_df(
+        f"SELECT * FROM {OVERRIDES_TABLE} WHERE season_label = :s",
+        {"s": season_label})
+
+
+def set_override(pitcher_id, season_label, season_max=None, season_avg=None,
+                 updated_by=None) -> None:
+    """Upsert a coach velo correction for (pitcher, season). A field left None
+    means 'no override for that field' -- board_rows keeps the computed value."""
+    ensure_tables()
+    sql = text(f"""
+        INSERT INTO {OVERRIDES_TABLE}
+            (pitcher_id, season_label, season_max, season_avg, updated_by, updated_at)
+        VALUES (:pitcher_id, :season_label, :season_max, :season_avg, :updated_by, :updated_at)
+        ON DUPLICATE KEY UPDATE season_max = VALUES(season_max),
+            season_avg = VALUES(season_avg), updated_by = VALUES(updated_by),
+            updated_at = VALUES(updated_at)
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, {
+            "pitcher_id": int(pitcher_id),
+            "season_label": season_label,
+            "season_max": _clean(season_max),
+            "season_avg": _clean(season_avg),
+            "updated_by": _clean(updated_by),
+            "updated_at": _now(),
+        })
 
 
 def _now() -> str:
@@ -611,3 +657,68 @@ def leaderboard(season_label) -> pd.DataFrame:
     BATCHED path (`_leaderboard_batched`) -- two queries total instead of ~5 per
     pitcher; verified byte-identical to the per-pitcher oracle."""
     return _leaderboard_batched(season_label)
+
+
+_BOARD_COLS = ["pitcher_id", "pitcher_name", "season_max", "season_max_date",
+               "season_avg", "last_velo", "last_date", "versus", "trend",
+               "velo_goal", "assessment"]
+
+
+def board_rows(season_label, week_start) -> pd.DataFrame:
+    """One row per rostered pitcher for the UNIFIED velo table: the leaderboard
+    columns -- with any coach season_max/season_avg override applied (and rows
+    re-ranked by the effective season_max) -- plus this week's velo_goal /
+    assessment. `pitcher_id` rides along (hidden) for save-mapping. Raw values
+    (numeric velos, ISO dates, numeric trend); the view formats read-only cells.
+
+    Overrides are applied HERE, not inside the @cached `leaderboard`, so a
+    coach's correction shows immediately (this function isn't cached) without
+    touching the leaderboard cache or its byte-parity oracle."""
+    from app.data import pitching_caps  # lazy
+
+    roster = pitching_caps.lmu_pitchers(season_label)
+    if roster.empty:
+        return pd.DataFrame(columns=_BOARD_COLS)
+
+    lb = leaderboard(season_label)
+    lb_by_name = {r["pitcher_name"]: r for _, r in lb.iterrows()} if not lb.empty else {}
+
+    entries = read_entries(season_label, week_start)
+    goal_by_id = (dict(zip(entries["pitcher_id"].astype(int), entries["velo_goal"]))
+                  if not entries.empty else {})
+    assess_by_id = (dict(zip(entries["pitcher_id"].astype(int), entries["assessment"]))
+                    if not entries.empty else {})
+
+    overrides = read_overrides(season_label)
+    ovr_max = (dict(zip(overrides["pitcher_id"].astype(int), overrides["season_max"]))
+               if not overrides.empty else {})
+    ovr_avg = (dict(zip(overrides["pitcher_id"].astype(int), overrides["season_avg"]))
+               if not overrides.empty else {})
+
+    rows = []
+    for _, r in roster.iterrows():
+        pid = int(r["PitcherId"])
+        name = r["Pitcher"]
+        lbr = lb_by_name.get(name, {})
+
+        def _lb(k):
+            v = lbr.get(k) if hasattr(lbr, "get") else None
+            return _clean(v)
+
+        om, oa = _clean(ovr_max.get(pid)), _clean(ovr_avg.get(pid))
+        rows.append({
+            "pitcher_id": pid,
+            "pitcher_name": name,
+            "season_max": om if om is not None else _lb("season_max"),
+            "season_max_date": _lb("season_max_date"),
+            "season_avg": oa if oa is not None else _lb("season_avg"),
+            "last_velo": _lb("last_velo"),
+            "last_date": _lb("last_date"),
+            "versus": _lb("versus"),
+            "trend": _lb("trend"),
+            "velo_goal": _clean(goal_by_id.get(pid)),
+            "assessment": _clean(assess_by_id.get(pid)),
+        })
+    df = pd.DataFrame(rows, columns=_BOARD_COLS)
+    return df.sort_values("season_max", ascending=False, na_position="last",
+                          kind="mergesort").reset_index(drop=True)

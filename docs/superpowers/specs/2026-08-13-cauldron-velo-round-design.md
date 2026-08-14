@@ -124,3 +124,47 @@ week/month/X via nightly cron). Deferred.
 
 Fresh branch off the current work; subagent-driven. No precalc schema change
 → no rebuild. `cauldron_teams` ALTER is additive + idempotent.
+
+---
+
+## ADDENDUM (2026-08-13) — Velo board: one unified editable table
+
+Coach feedback after the first round: the velo board's TWO tables (read-only
+leaderboard + a separate hide-until-edit grid) are confusing — the coach wants
+to "type right into the existing chart" and to fix bad readings (e.g. a 100.0
+outlier in Season Max). Decisions (from the user): **one table**, **weekly
+cadence** kept, editable **in place** (not a separate/hidden grid).
+
+**Design:**
+- Replace the HTML `leaderboard_view` + the separate editable grid with ONE
+  `dash_table.DataTable` (id `velo-grid`) shown to everyone. Columns: Pitcher ·
+  Season Max · Max Date · Season Avg · Last Outing · Date · Versus · Trend ·
+  **Velo Goal** · **Assessment**. Heat-row gradient preserved via
+  `style_data_conditional` keyed on `row_index` (rank 0 = crimson → last = blue,
+  reusing `visual._row_color`).
+- **In-place edit:** the table is read-only by default (`editable=False`). The
+  editable columns (Season Max, Season Avg, Velo Goal, Assessment) are left
+  WITHOUT a per-column `editable` flag so they inherit the table's; the other
+  columns are pinned `editable: False`. Edit flips table `editable=True`
+  (unlocking exactly those four in place); Save persists + flips it back. No
+  hide-until-edit wrapper for velo (supersedes the round-1 velo grid wrap).
+- **Storage / cadence:** Velo Goal + Assessment stay WEEKLY in
+  `velo_board_entries` (`upsert_entries`). Velo corrections (Season Max /
+  Season Avg) are SEASON-level overrides in a NEW `velo_board_overrides`
+  (`pitcher_id`, `season_label`, `season_max`, `season_avg`, PK
+  `(pitcher_id, season_label)`; additive table). `leaderboard(season)` applies
+  an override when present (and re-ranks); Save writes an override only for a
+  value the coach actually CHANGED vs. the computed baseline (so a fresh higher
+  reading still surfaces for untouched rows), and clears the `leaderboard`
+  cache (`leaderboard.cache_clear()`).
+- `board_rows(season, week)`: roster (id+name) ⟵join⟶ `leaderboard(season)` by
+  name (leaderboard is name-keyed) + weekly `velo_goal`/`assessment` from
+  entries. Trend rendered as a precomputed "▲ x.x"/"▼ x.x" string for the
+  DataTable.
+- Player sees the read-only table (no Edit/Save, no selectors → default
+  season/week); coach sees Edit/Save + Season/Week selectors. Coach-write
+  double gate unchanged (save callback re-checks `is_coach`).
+
+**Tests:** overrides applied + re-rank; changed-only override write on Save;
+goal/assessment persisted weekly; edit toggles table editable; player has no
+Save; board_rows merges by name.

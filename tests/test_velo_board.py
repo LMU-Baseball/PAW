@@ -1,11 +1,52 @@
 """velo_board_entries storage layer (live DB): ensure_tables idempotency and
 upsert-then-update-in-place semantics."""
+import pandas as pd
+
 from app.data import velo_board as V
 
 
 def test_ensure_tables_idempotent():
     V.ensure_tables()
     V.ensure_tables()  # second call is a no-op, not an error
+
+
+def test_board_rows_applies_override_and_reranks(monkeypatch):
+    from app.data import pitching_caps
+    roster = pd.DataFrame([{"PitcherId": 1, "Pitcher": "A"},
+                           {"PitcherId": 2, "Pitcher": "B"}])
+    monkeypatch.setattr(pitching_caps, "lmu_pitchers", lambda season=None: roster)
+    lb = pd.DataFrame([
+        {"pitcher_name": "A", "season_max": 100.0, "season_max_date": "2026-04-15",
+         "season_avg": 89.0, "last_velo": 89.0, "last_date": "2026-05-15",
+         "versus": "USD", "trend": 0.4},
+        {"pitcher_name": "B", "season_max": 95.0, "season_max_date": "2026-04-28",
+         "season_avg": 91.0, "last_velo": 91.0, "last_date": "2026-05-08",
+         "versus": "SMC", "trend": 0.1},
+    ])
+    monkeypatch.setattr(V, "leaderboard", lambda s: lb)
+    monkeypatch.setattr(V, "read_entries", lambda s, w=None: pd.DataFrame(
+        [{"pitcher_id": 1, "velo_goal": 96.0, "assessment": 90.0}]))
+    # A's 100.0 is a bad reading -> coach overrode season_max to 94.0 (avg untouched)
+    monkeypatch.setattr(V, "read_overrides", lambda s: pd.DataFrame(
+        [{"pitcher_id": 1, "season_max": 94.0, "season_avg": None}]))
+
+    df = V.board_rows("2025/2026", "2026-05-11")
+    by_id = {int(r["pitcher_id"]): r for _, r in df.iterrows()}
+    assert by_id[1]["season_max"] == 94.0        # override applied
+    assert by_id[1]["season_avg"] == 89.0        # None override -> keep computed
+    assert by_id[1]["velo_goal"] == 96.0         # weekly goal merged in
+    # re-ranked by effective season_max: B (95) now above the corrected A (94)
+    assert int(df.iloc[0]["pitcher_id"]) == 2
+    assert int(df.iloc[1]["pitcher_id"]) == 1
+
+
+def test_set_override_roundtrip():
+    V.ensure_tables()
+    V.set_override(9990001, "TEST-OVR", season_max=93.5, season_avg=88.2, updated_by=1)
+    ovr = V.read_overrides("TEST-OVR")
+    row = ovr[ovr["pitcher_id"] == 9990001].iloc[0]
+    assert float(row["season_max"]) == 93.5
+    assert float(row["season_avg"]) == 88.2
 
 
 def test_upsert_inserts_then_updates():
