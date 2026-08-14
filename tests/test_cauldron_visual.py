@@ -91,6 +91,34 @@ def test_scoreboard_view_groups_by_team_with_totals():
     assert _cell_text(_cells(total_row)[-1]) == "+20"
 
 
+def test_scoreboard_captain_first_with_star():
+    scoring = pd.DataFrame([
+        {"metric": "strike_pct", "label": "Strike%", "sort_order": 1, "is_manual": False},
+    ])
+    teams = pd.DataFrame([
+        {"player_id": 1, "team": "Crimson", "is_captain": 0},
+        {"player_id": 2, "team": "Crimson", "is_captain": 1},
+    ])
+    daily = pd.DataFrame([
+        {"player_id": 1, "play_date": "2026-08-01", "metric": "strike_pct", "points": 30, "source": "auto"},
+        {"player_id": 2, "play_date": "2026-08-01", "metric": "strike_pct", "points": 10, "source": "auto"},
+    ])
+    names = {1: "Aaron, Bo", 2: "Cruz, Dan"}
+    view = V.scoreboard_view(daily, teams, scoring, names)
+    rows = _rows(view)
+    player_rows = [r for r in rows if _cell_text(_cells(r)[0]) in ("Aaron, Bo", "★ Cruz, Dan")]
+    # captain (player 2) floats to the top of the team despite FEWER points
+    assert _cell_text(_cells(player_rows[0])[0]) == "★ Cruz, Dan"
+    assert _cell_text(_cells(player_rows[1])[0]) == "Aaron, Bo"
+
+
+def test_scoreboard_has_dark_background():
+    daily, teams, scoring, roster_names = _fixture()
+    teams = teams.assign(is_captain=0)
+    view = V.scoreboard_view(daily, teams, scoring, roster_names)
+    assert "#161616" in str(view)   # dark table background so white text reads
+
+
 def test_scoreboard_view_handles_empty_df():
     empty_daily = pd.DataFrame(columns=["player_id", "play_date", "metric", "points", "source"])
     empty_teams = pd.DataFrame(columns=["player_id", "team"])

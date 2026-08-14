@@ -216,6 +216,13 @@ def scoreboard_view(daily_df: pd.DataFrame, teams_df: pd.DataFrame,
     teams["player_id"] = teams["player_id"].astype(int)
     team_by_player = dict(zip(teams["player_id"], teams["team"]))
 
+    # Team captains float to the top of their team and render with a ★.
+    if "is_captain" in teams.columns:
+        captain_ids = set(teams.loc[
+            teams["is_captain"].fillna(0).astype(int) == 1, "player_id"].astype(int))
+    else:
+        captain_ids = set()
+
     # Players present in the daily results but not rostered onto any team
     # this cycle fall under an "Unassigned" group (rather than being
     # silently dropped) so a coach notices a missing roster assignment.
@@ -247,13 +254,18 @@ def scoreboard_view(daily_df: pd.DataFrame, teams_df: pd.DataFrame,
             html.Td(team, colSpan=n_cols, style=_TEAM_HEADER_STYLE)
         ))
 
+        # Captain first (0 sorts before 1), then by points desc, then name.
         pids = sorted(players_by_team[team],
-                      key=lambda p: (-_player_total(p), _display_name(p, roster_names)))
+                      key=lambda p: (0 if p in captain_ids else 1,
+                                     -_player_total(p), _display_name(p, roster_names)))
         team_total = 0
         for pid in pids:
             total = _player_total(pid)
             team_total += total
-            cells = [html.Td(_display_name(pid, roster_names), style=_CELL_STYLE_LEFT)]
+            name = _display_name(pid, roster_names)
+            if pid in captain_ids:
+                name = f"★ {name}"
+            cells = [html.Td(name, style=_CELL_STYLE_LEFT)]
             for m in metrics:
                 pts = points_by_player_metric.get((pid, m))
                 cells.append(html.Td(_fmt_points(pts), style=_points_cell_style(pts)))
@@ -269,4 +281,8 @@ def scoreboard_view(daily_df: pd.DataFrame, teams_df: pd.DataFrame,
         "width": "100%", "borderCollapse": "collapse",
         "fontFamily": "Teko, Arial, sans-serif", "fontSize": "18px", "color": "#fff",
     })
-    return html.Div(table, style={"padding": "12px", "overflowX": "auto"})
+    # Solid dark background: the table's text is white, so on the site's light
+    # page the neutral values/names were white-on-white -- the dark ground fixes
+    # readability while green/red point tints keep their meaning.
+    return html.Div(table, style={"padding": "12px", "overflowX": "auto",
+                                   "backgroundColor": "#161616", "borderRadius": "8px"})
