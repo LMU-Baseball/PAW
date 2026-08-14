@@ -94,12 +94,26 @@ _SCORING_DEFAULTS = [
 _DAILY_UPDATE_COLS = ("raw_value", "points", "source", "updated_by", "updated_at")
 
 
+def _ensure_column(conn, table, col, coldef) -> None:
+    """Additive, idempotent migration: ADD COLUMN only when it's missing (MySQL
+    has no portable ADD COLUMN IF NOT EXISTS, so gate on information_schema)."""
+    exists = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name = :t AND column_name = :c"),
+        {"t": table, "c": col}).scalar()
+    if not exists:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {coldef}"))
+
+
 def ensure_tables(engine=None) -> None:
-    """Idempotently create cauldron_scoring/cauldron_teams/cauldron_daily."""
+    """Idempotently create cauldron_scoring/cauldron_teams/cauldron_daily, and
+    migrate cauldron_teams to carry the (additive) is_captain flag."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         for ddl in _DDL.values():
             conn.execute(text(ddl))
+        _ensure_column(conn, TEAMS_TABLE, "is_captain",
+                       "is_captain TINYINT(1) NOT NULL DEFAULT 0")
 
 
 def _now() -> str:
@@ -194,9 +208,10 @@ def upsert_daily(rows: list[dict], updated_by=None) -> None:
             conn.execute(sql, params)
 
 
-def read_daily(play_date=None, player_id=None) -> pd.DataFrame:
-    """cauldron_daily rows, optionally narrowed to a play_date and/or
-    player_id."""
+def read_daily(play_date=None, player_id=None, start=None, end=None) -> pd.DataFrame:
+    """cauldron_daily rows, optionally narrowed to a single play_date, a
+    player_id, and/or an inclusive [start, end] play_date window (the weekly
+    scoreboard passes the Mon..Sun window)."""
     ensure_tables()
     clauses, params = [], {}
     if play_date is not None:
@@ -205,6 +220,12 @@ def read_daily(play_date=None, player_id=None) -> pd.DataFrame:
     if player_id is not None:
         clauses.append("player_id = :p")
         params["p"] = int(player_id)
+    if start is not None:
+        clauses.append("play_date >= :start")
+        params["start"] = start
+    if end is not None:
+        clauses.append("play_date <= :end")
+        params["end"] = end
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     return query_df(f"SELECT * FROM {DAILY_TABLE}{where}", params)
 
@@ -230,8 +251,29 @@ def set_team(player_id, cycle_id, team, updated_by=None) -> None:
         })
 
 
+def set_captain(player_id, cycle_id, updated_by=None) -> None:
+    """Mark `player_id` as the captain of their team for `cycle_id`, clearing
+    any prior captain on that same team (one captain per team). No-op if the
+    player isn't assigned to a team in this cycle."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        row = conn.execute(text(
+            f"SELECT team FROM {TEAMS_TABLE} WHERE player_id = :p AND cycle_id = :c"),
+            {"p": int(player_id), "c": cycle_id}).fetchone()
+        if row is None or row[0] is None:
+            return
+        conn.execute(text(
+            f"UPDATE {TEAMS_TABLE} "
+            f"SET is_captain = CASE WHEN player_id = :p THEN 1 ELSE 0 END, "
+            f"    updated_by = CASE WHEN player_id = :p THEN :u ELSE updated_by END, "
+            f"    updated_at = CASE WHEN player_id = :p THEN :now ELSE updated_at END "
+            f"WHERE cycle_id = :c AND team = :team"),
+            {"p": int(player_id), "c": cycle_id, "team": row[0],
+             "u": _clean(updated_by), "now": _now()})
+
+
 def read_teams(cycle_id) -> pd.DataFrame:
-    """All cauldron_teams rows for one competition cycle."""
+    """All cauldron_teams rows for one competition cycle (carries is_captain)."""
     ensure_tables()
     return query_df(f"SELECT * FROM {TEAMS_TABLE} WHERE cycle_id = :c", {"c": cycle_id})
 
@@ -320,6 +362,7 @@ def compute_player_day(pitcher_id, play_date) -> dict:
     return _metrics_from_df(df) if not df.empty else {}
 
 
+@cached
 def compute_players_day(pitcher_ids, play_date) -> dict:
     """BATCHED `compute_player_day`: one GAMES query for ALL `pitcher_ids` on
     `play_date` (sibling-union) instead of one round-trip per pitcher, then each

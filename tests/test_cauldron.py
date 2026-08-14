@@ -1,12 +1,55 @@
 """Competitive Cauldron storage layer (live DB): ensure_tables idempotency,
 scoring seed idempotency, daily upsert-then-update semantics, and team
 upserts."""
+import pandas as pd
+
 from app.data import cauldron as C
 
 
 def test_ensure_tables_idempotent():
     C.ensure_tables()
     C.ensure_tables()  # second call is a no-op, not an error
+
+
+def test_read_daily_window_filters_by_date_range(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(C, "ensure_tables", lambda *a, **k: None)
+    monkeypatch.setattr(C, "query_df", lambda sql, params=None: (
+        captured.update(sql=sql, params=params or {}), pd.DataFrame())[1])
+    C.read_daily(start="2026-03-02", end="2026-03-08")
+    assert "play_date >= :start" in captured["sql"]
+    assert "play_date <= :end" in captured["sql"]
+    assert captured["params"]["start"] == "2026-03-02"
+    assert captured["params"]["end"] == "2026-03-08"
+
+
+def test_compute_players_day_is_memoized(monkeypatch):
+    from app.data import cache, pitching_caps
+    cache.clear_all()
+    calls = []
+    monkeypatch.setattr(pitching_caps, "_sibling_pitcher_ids", lambda pid: [int(pid)])
+    monkeypatch.setattr(C, "query_df",
+                        lambda sql, params=None: (calls.append(1), pd.DataFrame())[1])
+    C.compute_players_day([1, 2], "2026-03-02")
+    C.compute_players_day([1, 2], "2026-03-02")
+    assert len(calls) == 1                 # second call served from cache
+
+
+def test_set_captain_one_per_team():
+    """set_captain marks exactly one captain on the player's team and clears
+    any prior captain -- verified live on an isolated test cycle."""
+    cyc = "TEST-CAP-c1"
+    C.ensure_tables()
+    C.set_team(9000001, cyc, "Team 1")
+    C.set_team(9000002, cyc, "Team 1")
+    C.set_team(9000003, cyc, "Team 2")
+    C.set_captain(9000001, cyc)
+    C.set_captain(9000002, cyc)            # moving the captain clears player 1
+    teams = C.read_teams(cyc)
+    cap = dict(zip(teams["player_id"].astype(int), teams["is_captain"].astype(int)))
+    assert cap[9000002] == 1
+    assert cap[9000001] == 0
+    assert cap[9000003] == 0                # other team untouched
 
 
 def test_read_scoring_seeded_content_after_fresh_ensure_tables():
