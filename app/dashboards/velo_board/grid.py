@@ -1,124 +1,61 @@
-"""Top Gun Velo Board — coach-editable grid + save-to-RDS mapping.
+"""Top Gun Velo Board coach controls + save mapping.
 
-`coach_grid` builds the FIRST `editable=True` DataTable in the repo: one row
-per rostered pitcher (`velo_board.grid_rows`), with `velo_goal`/`assessment`
-as the primary coach inputs and velo_avg/velo_max/max_pr left editable too,
-per the spec's "coaches can override any auto cell" -- `grid_rows` makes a
-saved override to any of those stick (stored snapshot wins over recomputed
-Trackman on the next render). `pitcher_name` stays locked, and so do
-change_avg/change_max: those are always COMPUTED (this week's shown
-velo_avg/velo_max minus the pitcher's previous stored week), never stored,
-so editing them would be silently discarded on re-render. A Season dropdown
-and a Week date-picker sit above the grid; a Save button + status line below
-it. No callbacks are wired here -- Task 6 owns the Dash callback that reads
-`dcc.Dropdown`/`DatePickerSingle`/DataTable state, snaps the picked date to
-its Monday via `velo_board.week_start_for`, and calls `save_rows`.
+The board is now ONE unified table (`visual.board_table`, id `velo-grid`) that
+everyone sees read-only and a coach edits IN PLACE. This module owns:
+
+- `coach_controls(season, week)`: the coach-only Edit/Save buttons + status and
+  the Season/Week selectors (no table -- the table is shared, rendered by
+  `layout` for all users).
+- `save_board(grid_data, season, week, updated_by)`: maps the edited table rows
+  back to storage. Velo Goal + Assessment persist WEEKLY to `velo_board_entries`
+  (`upsert_entries`). Season Max / Season Avg are SEASON-level coach corrections
+  written to `velo_board_overrides` (`set_override`) ONLY where the coach's
+  value differs from the computed leaderboard baseline -- so an untouched row
+  still surfaces a fresh higher reading, and reverting a cell to the baseline
+  clears the override.
 """
 from __future__ import annotations
 
 import math
 
-import pandas as pd
-from dash import dash_table, dcc, html
+from dash import dcc, html
 
 from app.data import velo_board
 from app.data.seasons import available_seasons
 from app.dashboards import shell
-
-_GOLD = "#F2C744"          # new-PR row highlight, echoing the reference sheet's yellow PR flag
-
-_COLUMNS = [
-    {"name": "Pitcher", "id": "pitcher_name", "editable": False},
-    {"name": "Velo Avg", "id": "velo_avg", "editable": True, "type": "numeric"},
-    {"name": "Velo Max", "id": "velo_max", "editable": True, "type": "numeric"},
-    {"name": "Velo Goal", "id": "velo_goal", "editable": True, "type": "numeric"},
-    {"name": "Assessment", "id": "assessment", "editable": True, "type": "numeric"},
-    {"name": "Max PR", "id": "max_pr", "editable": True, "type": "numeric"},
-    {"name": "Chg Avg", "id": "change_avg", "editable": False, "type": "numeric"},
-    {"name": "Chg Max", "id": "change_max", "editable": False, "type": "numeric"},
-]
-
-_STYLE_DATA_CONDITIONAL = [
-    {
-        # New-PR row: this week's velo_max IS the pitcher's running max_pr
-        # (and both are populated -- excludes rows where neither threw).
-        "if": {"filter_query": "{velo_max} = {max_pr} && {velo_max} is not blank"},
-        "backgroundColor": _GOLD,
-        "color": shell.CRIMSON,
-        "fontWeight": "bold",
-    },
-]
-
-
-def _grid_columns(df: pd.DataFrame) -> list[dict]:
-    """`_COLUMNS` narrowed to whatever `df` actually has, so a caller with a
-    thinner frame (e.g. an empty roster) doesn't blow up the DataTable."""
-    return [c for c in _COLUMNS if c["id"] in df.columns]
-
 
 _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
                 "textTransform": "uppercase", "letterSpacing": "1px",
                 "display": "block", "marginBottom": "4px", "textAlign": "center"}
 
 
-def coach_grid(season_label: str, week_start: str) -> html.Div:
-    """The coach-facing editable grid: a centered Season + Week filter row
-    (one line, directly under the emblem), then a clearly-labeled editable
-    DataTable (id `velo-grid`) whose numbers a coach can change, and a Save
-    button (id `velo-save`) that writes them to the database + a status line
-    (id `velo-save-status`)."""
-    df = velo_board.grid_rows(season_label, week_start)
-    data = df.to_dict("records")  # pitcher_id rides along, hidden from _COLUMNS
-
-    # Centered, single-line filter row under the emblem.
+def coach_controls(season_label: str, week_start: str) -> html.Div:
+    """Coach-only Edit/Save buttons (top) + a centered Season/Week selector row.
+    The editable table itself is the shared `velo-grid` rendered by `layout`."""
+    buttons = shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status")
     filters = html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
             dcc.Dropdown(
                 id="velo-season",
                 options=[{"label": s, "value": s} for s in available_seasons()],
-                value=season_label, clearable=False,
-                style={"minWidth": "150px"}),
+                value=season_label, clearable=False, style={"minWidth": "150px"}),
         ]),
         html.Div([
             html.Label("Week (starts Monday)", style=_LABEL_STYLE),
             dcc.DatePickerSingle(id="velo-week", date=week_start),
         ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
-              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "16px 16px 8px"})
+              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})
 
-    # Grid starts LOCKED (editable=False). "Edit" unlocks it; "Save" persists
-    # and re-locks -- see callbacks.py. This is what makes the Edit button do
-    # something visible (before, it was just a static label).
-    grid = dash_table.DataTable(
-        id="velo-grid",
-        columns=_grid_columns(df),
-        data=data,
-        editable=False,
-        style_table={"overflowX": "auto"},
-        style_cell={"fontFamily": "Teko, sans-serif", "fontSize": "15px",
-                    "padding": "4px 8px", "textAlign": "center"},
-        style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold"},
-        style_data_conditional=_STYLE_DATA_CONDITIONAL,
-    )
-
-    buttons = shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status")
-
-    # Buttons on top; the editable grid table lives in a wrapper hidden until
-    # Edit is pressed (Save hides it again). Season/Week filters stay visible --
-    # Season drives the read-only leaderboard below.
-    grid_wrap = html.Div(grid, id="velo-grid-wrap",
-                         style={"display": "none", "padding": "0 16px"})
-
-    return html.Div([buttons, filters, grid_wrap],
+    return html.Div([buttons, filters],
                     style={"borderBottom": f"2px solid {shell.CRIMSON}",
                            "backgroundColor": "rgba(255,255,255,0.55)"})
 
 
 def _coerce_numeric(value):
-    """Blank/empty-string (and NaN) numeric grid inputs -> None; everything
-    else passes through unchanged for `velo_board.upsert_entries`'s own
-    `_clean` to scrub."""
+    """Blank/empty-string (and NaN) grid inputs -> None; everything else passes
+    through for `upsert_entries`/`set_override`'s own scrub."""
     if value is None or value == "":
         return None
     if isinstance(value, float) and math.isnan(value):
@@ -126,20 +63,47 @@ def _coerce_numeric(value):
     return value
 
 
-def save_rows(grid_data: list[dict], season_label: str, week_start: str, updated_by=None) -> None:
-    """Map the coach grid's edited rows -> `velo_board_entries` rows and
-    persist the whole week in one `upsert_entries` call."""
-    rows = []
+def _round1(v):
+    """Round to 1 decimal for baseline comparison, or None if missing."""
+    if v is None:
+        return None
+    try:
+        if math.isnan(float(v)):
+            return None
+        return round(float(v), 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def save_board(grid_data: list[dict], season_label: str, week_start: str,
+               updated_by=None) -> None:
+    """Persist the edited unified table: weekly velo_goal/assessment ->
+    `velo_board_entries`; changed season_max/season_avg -> `velo_board_overrides`."""
+    entry_rows = [{
+        "pitcher_id": r.get("pitcher_id"),
+        "pitcher_name": r.get("pitcher_name"),
+        "season_label": season_label,
+        "week_start": week_start,
+        "velo_goal": _coerce_numeric(r.get("velo_goal")),
+        "assessment": _coerce_numeric(r.get("assessment")),
+    } for r in grid_data if r.get("pitcher_id") is not None]
+    velo_board.upsert_entries(entry_rows, updated_by=updated_by)
+
+    baseline = velo_board.leaderboard(season_label)
+    base_by_name = ({row["pitcher_name"]: row for _, row in baseline.iterrows()}
+                    if baseline is not None and not baseline.empty else {})
     for r in grid_data:
-        rows.append({
-            "pitcher_id": r.get("pitcher_id"),
-            "pitcher_name": r.get("pitcher_name"),
-            "season_label": season_label,
-            "week_start": week_start,
-            "velo_avg": _coerce_numeric(r.get("velo_avg")),
-            "velo_max": _coerce_numeric(r.get("velo_max")),
-            "velo_goal": _coerce_numeric(r.get("velo_goal")),
-            "assessment": _coerce_numeric(r.get("assessment")),
-            "max_pr": _coerce_numeric(r.get("max_pr")),
-        })
-    velo_board.upsert_entries(rows, updated_by=updated_by)
+        pid = r.get("pitcher_id")
+        if pid is None:
+            continue
+        base = base_by_name.get(r.get("pitcher_name"))
+        bm = _round1(base["season_max"]) if base is not None else None
+        ba = _round1(base["season_avg"]) if base is not None else None
+        gm = _round1(_coerce_numeric(r.get("season_max")))
+        ga = _round1(_coerce_numeric(r.get("season_avg")))
+        # override only a value the coach actually CHANGED vs. the baseline;
+        # a match writes NULL (no override) so fresh readings still surface.
+        om = gm if (gm is not None and gm != bm) else None
+        oa = ga if (ga is not None and ga != ba) else None
+        velo_board.set_override(pid, season_label, season_max=om, season_avg=oa,
+                                updated_by=updated_by)

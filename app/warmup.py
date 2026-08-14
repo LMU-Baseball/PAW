@@ -102,7 +102,7 @@ def warm_caches() -> None:
         anchor = s_b
     week = _safe(lambda: velo_board.week_start_for(anchor))
     if week:
-        _safe(lambda: velo_board.grid_rows(season, week))  # coach grid prefill
+        _safe(lambda: velo_board.board_rows(season, week))  # unified board rows
 
     cycle = f"{season}-c1"
     _safe(cauldron.read_scoring)

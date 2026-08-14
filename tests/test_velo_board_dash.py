@@ -62,8 +62,9 @@ def test_serve_layout_hides_grid_for_player(server):
             out = layout.serve_layout()
     s = str(out)
     assert "Please log in" not in s
-    assert "velo-grid" not in s
-    assert "velo-save" not in s
+    assert "velo-grid" in s          # player sees the shared read-only table
+    assert "velo-save" not in s      # but no Save/Edit controls
+    assert "velo-edit" not in s
     assert "LMU" in s
 
 
@@ -86,9 +87,9 @@ def _raw_callback(dash_app, *, input_id):
     raise AssertionError(f"no callback found with sole Input id {input_id!r}")
 
 
-def test_edit_reveals_grid_wrap_for_coach(server):
-    """Edit must flip velo-grid-wrap to a visible style (the editable grid
-    appears above the read-only leaderboard) and unlock the table."""
+def test_edit_unlocks_table_in_place_for_coach(server):
+    """Edit flips the shared velo-grid table to editable=True (in place), so the
+    four editable columns can be typed into -- no separate/hidden grid."""
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
@@ -106,9 +107,8 @@ def test_edit_reveals_grid_wrap_for_coach(server):
         on_edit = _raw_callback(dash_app, input_id="velo-edit")
         with server.test_request_context("/dash/velo_board/"):
             login_user(coach)
-            editable, style, status = on_edit(1)
+            editable, status = on_edit(1)
     assert editable is True
-    assert style.get("display") == "block"   # grid wrapper revealed
     assert "Editing" in status
 
 

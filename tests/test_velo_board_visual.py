@@ -5,6 +5,30 @@ import pandas as pd
 from app.dashboards.velo_board import visual as V
 
 
+def test_board_table_editable_columns_hidden_id_and_trend_format():
+    df = pd.DataFrame([
+        {"pitcher_id": 1, "pitcher_name": "A", "season_max": 100.0,
+         "season_max_date": "2026-04-15", "season_avg": 89.0, "last_velo": 89.3,
+         "last_date": "2026-05-15", "versus": "USD", "trend": 0.4,
+         "velo_goal": 96.0, "assessment": 90.0},
+    ])
+    dt = V.board_table(df)
+    assert dt.id == "velo-grid"
+    col_by_id = {c["id"]: c for c in dt.columns}
+    # editable columns carry NO explicit editable flag (inherit the table's,
+    # which the Edit button toggles); read-only columns are pinned False
+    for cid in ("season_max", "season_avg", "velo_goal", "assessment"):
+        assert "editable" not in col_by_id[cid]
+    assert col_by_id["pitcher_name"]["editable"] is False
+    # pitcher_id rides in the data but is not a visible column
+    assert "pitcher_id" not in col_by_id
+    assert dt.data[0]["pitcher_id"] == 1
+    # trend rendered with a direction arrow
+    assert dt.data[0]["trend"].startswith("▲")
+    # table starts locked
+    assert dt.editable is False
+
+
 def test_leaderboard_view_renders_rows_and_header():
     lb = pd.DataFrame([
         {"pitcher_name": "A, B", "season_max": 95.8, "season_max_date": "2026-03-15",

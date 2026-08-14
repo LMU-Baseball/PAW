@@ -1,16 +1,15 @@
 """Dash callbacks for the Velo Board dashboard.
 
-Two callbacks, both coach-grid-only inputs (a player's layout never renders
-`velo-season`/`velo-week`/`velo-grid`/`velo-save`, so these simply never fire
-for a player -- `suppress_callback_exceptions=True` on the app, set in
-index.py, is what lets Dash accept callbacks referencing ids absent from a
-given render):
+The board is ONE unified table (`velo-grid`) everyone sees; a coach edits it in
+place. All inputs here are coach-only (a player's layout renders neither the
+Season/Week selectors nor the Edit/Save buttons, so these never fire for a
+player -- `suppress_callback_exceptions=True`, set in index.py, lets Dash
+accept callbacks referencing ids absent from a given render):
 
-- Season/Week change -> re-read the grid + leaderboard for the new
-  (season, week).
-- Save click -> persist the edited grid to RDS, then re-read both. The
-  coach-write gate is re-checked HERE (not just trusted from the layout
-  omitting the grid for players) -- the second half of the double-gate.
+- Season/Week change -> re-read the table rows.
+- Edit click -> unlock the table's four editable columns in place.
+- Save click -> persist (goal/assessment weekly + changed velo overrides), then
+  re-read and re-lock. The coach-write gate is re-checked HERE.
 """
 from __future__ import annotations
 
@@ -21,41 +20,39 @@ from app.data import velo_board
 from app.dashboards.velo_board import grid, visual
 
 
+def _is_coach() -> bool:
+    return bool(getattr(current_user, "is_coach", False))
+
+
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
         Output("velo-grid", "data"),
-        Output("velo-leaderboard", "children"),
         Input("velo-season", "value"),
         Input("velo-week", "date"),
         prevent_initial_call=True,
     )
     def _on_season_or_week(season, week_date):
         week = velo_board.week_start_for(week_date)
-        rows = velo_board.grid_rows(season, week).to_dict("records")
-        lb = visual.leaderboard_view(velo_board.leaderboard(season))
-        return rows, lb
+        return visual.board_records(velo_board.board_rows(season, week))
 
     @dash_app.callback(
         Output("velo-grid", "editable", allow_duplicate=True),
-        Output("velo-grid-wrap", "style", allow_duplicate=True),
         Output("velo-save-status", "children", allow_duplicate=True),
         Input("velo-edit", "n_clicks"),
         prevent_initial_call=True,
     )
     def _on_edit(n_clicks):
-        """Edit reveals + unlocks the grid for typing (re-checks coach)."""
-        if not n_clicks or not bool(getattr(current_user, "is_coach", False)):
-            return no_update, no_update, no_update
-        return (True, {"display": "block", "padding": "0 16px"},
-                "Editing — type new numbers into any cell, then Save.")
+        """Edit unlocks the four editable columns in place (re-checks coach)."""
+        if not n_clicks or not _is_coach():
+            return no_update, no_update
+        return True, ("Editing — type into Season Max / Season Avg / Velo Goal / "
+                      "Assessment, then Save.")
 
     @dash_app.callback(
         Output("velo-grid", "data", allow_duplicate=True),
-        Output("velo-save-status", "children"),
-        Output("velo-leaderboard", "children", allow_duplicate=True),
         Output("velo-grid", "editable"),
-        Output("velo-grid-wrap", "style"),
+        Output("velo-save-status", "children"),
         Input("velo-save", "n_clicks"),
         State("velo-grid", "data"),
         State("velo-season", "value"),
@@ -63,11 +60,9 @@ def register_callbacks(dash_app) -> None:
         prevent_initial_call=True,
     )
     def _on_save(n_clicks, grid_data, season, week_date):
-        if not n_clicks or not bool(getattr(current_user, "is_coach", False)):
-            return no_update, no_update, no_update, no_update, no_update
+        if not n_clicks or not _is_coach():
+            return no_update, no_update, no_update
         week = velo_board.week_start_for(week_date)
-        grid.save_rows(grid_data, season, week, updated_by=getattr(current_user, "id", None))
-        rows = velo_board.grid_rows(season, week).to_dict("records")
-        lb = visual.leaderboard_view(velo_board.leaderboard(season))
-        # re-lock AND hide the grid after saving
-        return rows, "Saved.", lb, False, {"display": "none", "padding": "0 16px"}
+        grid.save_board(grid_data, season, week, updated_by=getattr(current_user, "id", None))
+        rows = visual.board_records(velo_board.board_rows(season, week))
+        return rows, False, "Saved."   # re-read + re-lock in place

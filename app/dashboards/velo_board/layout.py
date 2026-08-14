@@ -41,16 +41,17 @@ def serve_layout() -> html.Div:
     season = seasons.current_season()
     week = _default_week(season)
 
+    board = velo_board.board_rows(season, week)
     children = [
         dcc.Store(id="velo-selection", data={"season": season, "week": week}),
         shell.header(back_href="/pitching", back_label="← Pitching"),
         visual.top_gun_header(),
     ]
-    # Filters + the editable grid live directly under the emblem, coach-only.
+    # Coach-only Edit/Save + Season/Week controls sit above the shared table.
     if is_coach:
-        children.append(html.Div(grid.coach_grid(season, week), id="velo-coach-section"))
-    children.append(html.Div(
-        id="velo-leaderboard",
-        children=visual.leaderboard_view(velo_board.leaderboard(season)),
-    ))
+        children.append(html.Div(grid.coach_controls(season, week), id="velo-coach-section"))
+    # ONE unified table for everyone (read-only leaderboard; a coach edits the
+    # four editable columns in place). Always a DataTable so callbacks find it.
+    children.append(html.Div(visual.board_table(board), id="velo-board",
+                             style={"padding": "0 20px"}))
     return html.Div(children)

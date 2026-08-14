@@ -1,52 +1,55 @@
-"""Top Gun Velo Board coach grid: editable DataTable component + the
-save-week -> upsert_entries row mapping."""
+"""Top Gun Velo Board coach controls + the save-board row mapping."""
+import pandas as pd
+
 from app.dashboards.velo_board import grid as G
 
 
-def test_coach_grid_is_editable_and_save_maps_rows(monkeypatch):
-    comp = G.coach_grid("2025/2026", "2026-03-02")
-    s = str(comp)
-    assert "velo-grid" in s and "velo-save" in s
+def test_coach_controls_has_buttons_and_selectors():
+    s = str(G.coach_controls("2025/2026", "2026-03-02"))
+    assert "velo-edit" in s and "velo-save" in s and "velo-save-status" in s
     assert "velo-season" in s and "velo-week" in s
-
-    def _fake_upsert(rows, updated_by=None):
-        captured["rows"] = rows
-        captured["updated_by"] = updated_by
-
-    captured = {}
-    monkeypatch.setattr("app.data.velo_board.upsert_entries", _fake_upsert)
-
-    G.save_rows([{"pitcher_id": 823008, "pitcher_name": "Behrens, Adam",
-                  "velo_avg": 90.0, "velo_max": 93.0, "velo_goal": 95.0,
-                  "assessment": 91.0, "max_pr": 93.0}],
-                "2025/2026", "2026-03-02", updated_by=1)
-
-    assert captured["rows"][0]["season_label"] == "2025/2026"
-    assert captured["rows"][0]["week_start"] == "2026-03-02"
-    assert captured["rows"][0]["pitcher_id"] == 823008
-    assert captured["updated_by"] == 1
+    # the table is NOT here -- it's the shared velo-grid rendered by layout
+    assert "velo-grid" not in s
 
 
-def test_coach_grid_hides_grid_until_edit():
-    """The editable grid table sits in a wrapper hidden by default; Edit reveals
-    it (callbacks), Save hides it again."""
-    s = str(G.coach_grid("2025/2026", "2026-03-02"))
-    assert "velo-grid-wrap" in s
-    assert "'display': 'none'" in s          # wrapper hidden until Edit
-    assert "velo-edit" in s and "velo-save" in s
-
-
-def test_save_rows_coerces_blank_numeric_to_none(monkeypatch):
-    captured = {}
+def test_save_board_persists_goal_assessment_and_changed_override(monkeypatch):
+    from app.data import velo_board
+    entry_calls, ovr_calls = [], []
+    monkeypatch.setattr(velo_board, "upsert_entries",
+                        lambda rows, updated_by=None: entry_calls.append((rows, updated_by)))
     monkeypatch.setattr(
-        "app.data.velo_board.upsert_entries",
-        lambda rows, updated_by=None: captured.setdefault("rows", rows))
+        velo_board, "set_override",
+        lambda pid, season, season_max=None, season_avg=None, updated_by=None:
+            ovr_calls.append((pid, season_max, season_avg)))
+    # leaderboard baseline: A season_max 100.0 (a bad reading), season_avg 89.0
+    monkeypatch.setattr(velo_board, "leaderboard", lambda s: pd.DataFrame(
+        [{"pitcher_name": "A", "season_max": 100.0, "season_avg": 89.0}]))
 
-    G.save_rows([{"pitcher_id": 823008, "pitcher_name": "Behrens, Adam",
-                  "velo_avg": 90.0, "velo_max": 93.0, "velo_goal": "",
-                  "assessment": None, "max_pr": 93.0}],
-                "2025/2026", "2026-03-02")
+    G.save_board([{"pitcher_id": 1, "pitcher_name": "A",
+                   "season_max": 94.0,      # CHANGED vs baseline 100 -> override
+                   "season_avg": 89.0,      # unchanged -> no override
+                   "velo_goal": 96.0, "assessment": 90.0}],
+                 "2025/2026", "2026-03-02", updated_by=7)
 
-    row = captured["rows"][0]
-    assert row["velo_goal"] is None
-    assert row["assessment"] is None
+    rows, ub = entry_calls[0]
+    assert rows[0]["velo_goal"] == 96.0 and rows[0]["assessment"] == 90.0
+    assert rows[0]["week_start"] == "2026-03-02" and ub == 7
+    pid, om, oa = ovr_calls[0]
+    assert pid == 1 and om == 94.0 and oa is None   # only the changed velo overrides
+
+
+def test_save_board_no_override_when_value_matches_baseline(monkeypatch):
+    from app.data import velo_board
+    ovr_calls = []
+    monkeypatch.setattr(velo_board, "upsert_entries", lambda rows, updated_by=None: None)
+    monkeypatch.setattr(
+        velo_board, "set_override",
+        lambda pid, season, season_max=None, season_avg=None, updated_by=None:
+            ovr_calls.append((season_max, season_avg)))
+    monkeypatch.setattr(velo_board, "leaderboard", lambda s: pd.DataFrame(
+        [{"pitcher_name": "A", "season_max": 95.0, "season_avg": 90.0}]))
+
+    G.save_board([{"pitcher_id": 1, "pitcher_name": "A", "season_max": 95.0,
+                   "season_avg": 90.0, "velo_goal": None, "assessment": None}],
+                 "2025/2026", "2026-03-02")
+    assert ovr_calls == [(None, None)]   # nothing changed -> null (no-op) override

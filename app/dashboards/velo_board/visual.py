@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
-from dash import html
+from dash import dash_table, html
 
 from app.dashboards import shell
 
@@ -184,3 +184,104 @@ def leaderboard_view(lb_df: pd.DataFrame) -> html.Div:
         "fontFamily": "Teko, Arial, sans-serif", "fontSize": "18px", "color": "#fff",
     })
     return html.Div(table, style={"padding": "12px", "overflowX": "auto"})
+
+
+# ===================== UNIFIED EDITABLE BOARD (DataTable) ====================
+#
+# One table for everyone: read-only heat leaderboard by default; a coach's Edit
+# unlocks exactly the four editable columns IN PLACE (Season Max / Season Avg to
+# correct bad readings, plus Velo Goal / Assessment), Save re-locks. Same heat
+# gradient as `leaderboard_view`, ported to `style_data_conditional` by rank.
+
+_EDITABLE_IDS = ("season_max", "season_avg", "velo_goal", "assessment")
+
+# (label, id, type). Editable columns are numeric with NO per-column `editable`
+# flag, so they inherit the table's `editable` (toggled by the Edit button); the
+# rest are pinned read-only.
+_BOARD_TABLE_COLUMNS = [
+    ("Pitcher", "pitcher_name", "text"), ("Season Max", "season_max", "numeric"),
+    ("Max Date", "season_max_date", "text"), ("Season Avg", "season_avg", "numeric"),
+    ("Last Outing", "last_velo", "text"), ("Date", "last_date", "text"),
+    ("Versus", "versus", "text"), ("Trend", "trend", "text"),
+    ("Velo Goal", "velo_goal", "numeric"), ("Assessment", "assessment", "numeric"),
+]
+
+_DT_HEADER = {
+    "backgroundColor": "#161616", "color": "#fff", "fontWeight": "bold",
+    "textTransform": "uppercase", "letterSpacing": "1px", "border": "none",
+    "borderBottom": f"2px solid {BLUE}",
+}
+
+
+def _trend_str(t) -> str:
+    if _is_missing(t):
+        return ""
+    t = float(t)
+    return f"{'▲' if t >= 0 else '▼'} {abs(t):.1f}"
+
+
+def _num1(v):
+    return None if _is_missing(v) else round(float(v), 1)
+
+
+def _board_record(row) -> dict:
+    """One board_rows row -> a DataTable record: editable velos/goal/assessment
+    stay NUMERIC; read-only cells are pre-formatted strings; pitcher_id rides
+    along (hidden from the columns) for save-mapping."""
+    return {
+        "pitcher_id": int(row["pitcher_id"]),
+        "pitcher_name": _fmt_text(row["pitcher_name"]),
+        "season_max": _num1(row["season_max"]),
+        "season_max_date": _fmt_date(row["season_max_date"]),
+        "season_avg": _num1(row["season_avg"]),
+        "last_velo": _fmt_velo(row["last_velo"]),
+        "last_date": _fmt_date(row["last_date"]),
+        "versus": _fmt_text(row["versus"]),
+        "trend": _trend_str(row["trend"]),
+        "velo_goal": _num1(row["velo_goal"]),
+        "assessment": _num1(row["assessment"]),
+    }
+
+
+def board_records(board_df: pd.DataFrame) -> list[dict]:
+    """The DataTable `data` records for `board_df` (shared by `board_table` and
+    the refresh callbacks so both format identically)."""
+    df = (board_df if board_df is not None else pd.DataFrame()).reset_index(drop=True)
+    return [_board_record(r) for _, r in df.iterrows()]
+
+
+def board_table(board_df: pd.DataFrame) -> dash_table.DataTable:
+    """The unified velo table (id `velo-grid`): read-only heat leaderboard that
+    a coach edits in place. Always a DataTable (even empty) so the refresh /
+    edit-toggle callbacks always find `velo-grid`."""
+    df = (board_df if board_df is not None else pd.DataFrame()).reset_index(drop=True)
+    total = len(df)
+    data = board_records(df)
+
+    columns = []
+    for label, cid, ctype in _BOARD_TABLE_COLUMNS:
+        col = {"name": label, "id": cid, "type": ctype}
+        if cid not in _EDITABLE_IDS:
+            col["editable"] = False           # pinned read-only
+        columns.append(col)
+
+    # Heat gradient by rank (row 0 = crimson -> last = blue), white text.
+    heat = [{"if": {"row_index": i}, "backgroundColor": _row_color(i, total),
+             "color": "#fff"} for i in range(total)]
+    # Faint divider so a coach sees which columns are editable.
+    edges = [{"if": {"column_id": cid}, "borderLeft": "1px solid rgba(255,255,255,0.28)"}
+             for cid in _EDITABLE_IDS]
+
+    return dash_table.DataTable(
+        id="velo-grid",
+        columns=columns,
+        data=data,
+        editable=False,
+        style_table={"overflowX": "auto"},
+        style_header=_DT_HEADER,
+        style_cell={"fontFamily": "Teko, Arial, sans-serif", "fontSize": "17px",
+                    "padding": "8px 12px", "textAlign": "center", "border": "none"},
+        style_cell_conditional=[{"if": {"column_id": "pitcher_name"},
+                                 "textAlign": "left", "fontWeight": "700"}],
+        style_data_conditional=heat + edges,
+    )
