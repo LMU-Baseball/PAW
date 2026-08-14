@@ -132,6 +132,16 @@ def twok_kill_pct(df: pd.DataFrame) -> tuple[float, int]:
     return _pct(kills, int(reached.sum())), kills
 
 
+def count_work_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Count Work %. PROVISIONAL v1: share of pitches thrown in an ahead-or-even
+    count (strikes >= balls) -- i.e. staying ahead / not falling behind. The
+    count on each pitch is the count BEFORE that pitch is thrown."""
+    if df.empty:
+        return 0.0, 0
+    ahead_even = int((df["strikes"] >= df["balls"]).sum())
+    return _pct(ahead_even, len(df)), ahead_even
+
+
 def barrel_pct(df: pd.DataFrame) -> tuple[float, int]:
     """Barrel %. PROVISIONAL v1 (no launch-angle column in the warehouse):
     barrels / balls in play, barrel ~ exit_speed >= 95 and tagged_hit_type in

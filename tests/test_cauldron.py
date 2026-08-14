@@ -129,8 +129,11 @@ def test_compute_player_day_standard_metrics():
     date = str(apps.sort_values("game_date")["game_date"].iloc[-1])
     m = C.compute_player_day(pid, date)
     assert "strike_pct" in m and (m["strike_pct"] is None or 0 <= m["strike_pct"] <= 100)
-    for stub in ("early_ahead", "pre2k_zone", "twok_kill", "count_work"):
-        assert m.get(stub) is None   # not yet defined
+    # PROVISIONAL v1 formulas now wired: each is a real percentage in [0,100], or
+    # None only when its denominator was empty for the day (never a false 0).
+    for m_key in ("early_ahead", "pre2k_zone", "twok_kill", "count_work"):
+        v = m.get(m_key)
+        assert v is None or 0 <= v <= 100
     assert C.compute_player_day(pid, "1900-01-01") == {}   # no data
 
 

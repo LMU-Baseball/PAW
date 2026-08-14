@@ -342,11 +342,17 @@ def _metrics_from_df(df) -> dict:
         bip_with_ev = df.loc[df["pitch_call"] == "InPlay", "exit_speed"].dropna()
         metrics["barrel"] = P.barrel_pct_ev(df)[0] if len(bip_with_ev) else None
 
-    # NON-STANDARD metrics: no coach-approved formula yet (placeholders only
-    # in the Task-1 scoring seed). Each stays None until defined.
-    for metric in _NON_STANDARD_METRICS:
-        # TODO(coach-def): formula pending coach sign-off for this metric.
-        metrics[metric] = None
+    # NON-STANDARD metrics -- PROVISIONAL v1 formulas (definitions live in
+    # app.data.pitching; thresholds + point values are coach-tunable in-app via
+    # cauldron_scoring). Each resolves to None when its denominator is empty for
+    # the day (never a false 0 that would read as "met the bar").
+    metrics["early_ahead"] = P.ea_pct(df)[0] if pa_count else None
+    pre2k = df[df["strikes"] < 2]
+    metrics["pre2k_zone"] = P.pre2k_pct(df)[0] if len(pre2k) else None
+    metrics["twok_kill"] = (P.twok_kill_pct(df)[0]
+                            if bool((df["strikes"] >= 2).any()) else None)
+    # count_work denominator is all pitches; df is non-empty (caller guarantees).
+    metrics["count_work"] = P.count_work_pct(df)[0]
 
     return metrics
 
