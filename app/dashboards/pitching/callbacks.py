@@ -10,7 +10,7 @@ from flask_login import current_user
 from app.data import pitching as P
 from app.data import pitching_caps
 from app.data import video as videodata
-from app.dashboards import date_range as dr, notes_ui, video as videotab
+from app.dashboards import background_warm, date_range as dr, notes_ui, video as videotab
 from app.dashboards.pitching import layout, selectors
 from app.dashboards.pitching.tabs import (last_outings, location_movement,
                                           pitch_breakdown, counts, heatmaps)
@@ -127,6 +127,12 @@ def register_callbacks(dash_app) -> None:
         g = pitching_caps.games_for_pitcher(pid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, pitcher_id=pid))
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value
+        # Layer 3: warm the all-in-range pitch pull in the background (the
+        # default view is a single game; switching to "All in range" is
+        # otherwise cold).
+        if pid:
+            background_warm.warm_async(
+                lambda: pitching_caps.range_pitches_for(int(pid), start, end))
         return opts, value
 
     # Pitcher/date-range -> sidebar (range_summary is date-range-driven, so the

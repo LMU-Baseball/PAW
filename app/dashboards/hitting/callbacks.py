@@ -10,7 +10,7 @@ from flask_login import current_user
 from app.data import hitting_caps
 from app.data import video as videodata
 from app.data import dev_plans
-from app.dashboards import date_range as dr, notes_ui, video as videotab
+from app.dashboards import background_warm, date_range as dr, notes_ui, video as videotab
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import (game_level, plate_appearances as pa,
                                          zone_location as zl, balls_in_play, last_27,
@@ -170,6 +170,14 @@ def register_callbacks(dash_app) -> None:
         g = hitting_caps.games_for_batter(bid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, batter_id=bid))
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value
+        # Layer 3: warm this player's off-the-default-path reads (BIP / Last-27 /
+        # all-in-range) in the background so those tabs open instantly.
+        if bid and value:
+            background_warm.warm_async(
+                lambda: hitting_caps.bip_points(int(bid), [value]),
+                lambda: hitting_caps.last_n_pas(int(bid), 27),
+                lambda: hitting_caps.range_pitches(int(bid), start, end),
+            )
         return opts, value
 
     # Hitter/season/date-range -> sidebar (KPIs rescope to the selected range;

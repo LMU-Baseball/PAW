@@ -9,7 +9,7 @@ from flask_login import current_user
 
 from app.data import catching_caps
 from app.data import video as videodata
-from app.dashboards import date_range as dr, notes_ui, video as videotab
+from app.dashboards import background_warm, date_range as dr, notes_ui, video as videotab
 from app.dashboards.catching import charts, layout, selectors
 from app.dashboards.catching.tabs import framing, static_framing, caught_stealing
 
@@ -112,6 +112,11 @@ def register_callbacks(dash_app) -> None:
         g = catching_caps.games_for_catcher(cid, start=start, end=end)
         opts = dr.game_options(g, videodata.video_game_ids(g, catcher_id=cid))
         value = str(g.iloc[0]["game_id"]) if not g.empty else None  # empty range -> no value (sentinel isn't an option when 0 games); game_id is an opaque string
+        # Layer 3: warm the all-in-range pitch pull in the background so the
+        # "All in range" framing view opens instantly.
+        if cid:
+            background_warm.warm_async(
+                lambda: catching_caps.range_pitches_for(int(cid), start, end))
         return opts, value
 
     # Catcher/season/date-range -> sidebar (tiles rescope to the selected range;
