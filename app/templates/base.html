@@ -108,7 +108,7 @@
     </div>
     {% if current_user.is_authenticated %}
       <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
-        <a href="{{ url_for('auth.change_password') }}">Change password</a> ·
+        {% if current_user.is_coach %}<a href="{{ url_for('auth.change_password') }}">Change password</a> ·{% endif %}
         <a href="{{ url_for('auth.logout') }}">Log out</a></span>
     {% endif %}
   </header>

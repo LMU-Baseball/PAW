@@ -150,6 +150,18 @@ def test_change_password_requires_login(client):
     assert "/login" in resp.headers["Location"]
 
 
+def test_change_password_player_forbidden(client):
+    # The player login is shared, so a player must NOT be able to change it
+    # (would lock out the whole team) -- redirected away, password unchanged.
+    _login(client, "player@lmu.edu", "pw-player")
+    resp = client.post("/change-password", data={
+        "current_password": "pw-player", "new_password": "sneaky-new-pw",
+        "confirm": "sneaky-new-pw"}, follow_redirects=True)
+    assert b"coach-only" in resp.data
+    client.get("/logout")
+    assert b"Devan O" in _login(client, "player@lmu.edu", "pw-player").data  # unchanged
+
+
 def test_change_password_wrong_current_rejected(client):
     _login(client, "coach@lmu.edu", "pw-coach")
     resp = client.post("/change-password", data={

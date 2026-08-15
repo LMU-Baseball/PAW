@@ -81,11 +81,13 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
             "marginLeft": "18px"}))
     right = html.Span()
     if current_user.is_authenticated:
+        # Change-password link is coach-only (the player login is shared).
+        pw_link = ([html.A("Change password", href="/change-password",
+                           style={"color": "#fff", "textDecoration": "underline"}),
+                    " · "] if getattr(current_user, "is_coach", False) else [])
         right = html.Span([
             f"{current_user.name} · {current_user.role} · ",
-            html.A("Change password", href="/change-password",
-                   style={"color": "#fff", "textDecoration": "underline"}),
-            " · ",
+            *pw_link,
             html.A("Log out", href="/logout",
                    style={"color": "#fff", "textDecoration": "underline"}),
         ], style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})

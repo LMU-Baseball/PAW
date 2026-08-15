@@ -55,8 +55,12 @@ def login():
 @auth_bp.route("/change-password", methods=["GET", "POST"])
 @login_required
 def change_password():
-    """Let a logged-in user change their own password (verifies the current one
-    first). Works for any account, coach or player."""
+    """Let a coach change their account password (verifies the current one
+    first). Coach-only: the player login is SHARED, so letting a player change
+    it would lock out the whole team."""
+    if not current_user.is_coach:
+        flash("Password changes are coach-only.", "error")
+        return redirect(url_for("main.index"))
     form = ChangePasswordForm()
     if form.validate_on_submit():
         if not current_user.check_password(form.current_password.data):
