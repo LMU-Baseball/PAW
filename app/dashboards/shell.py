@@ -83,6 +83,9 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
     if current_user.is_authenticated:
         right = html.Span([
             f"{current_user.name} · {current_user.role} · ",
+            html.A("Change password", href="/change-password",
+                   style={"color": "#fff", "textDecoration": "underline"}),
+            " · ",
             html.A("Log out", href="/logout",
                    style={"color": "#fff", "textDecoration": "underline"}),
         ], style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})

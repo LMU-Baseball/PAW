@@ -29,6 +29,19 @@ def register_cli(server):
         db.session.commit()
         click.echo(f"Created {role} {email} (id={user.id}).")
 
+    @server.cli.command("set-password")
+    @click.option("--email", required=True)
+    @click.option("--password", required=True, help="The new password.")
+    def set_password(email, password):
+        """Reset an existing user's password (admin recovery path)."""
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        user.set_password(password)
+        db.session.commit()
+        click.echo(f"Password updated for {email}.")
+
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",
                   type=click.Choice(["all", "hitting", "pitching"]),

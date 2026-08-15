@@ -140,3 +140,39 @@ def test_dash_accessible_after_login(client):
     _login(client, "player@lmu.edu", "pw-player")
     resp = client.get("/dash/hitting/")
     assert resp.status_code == 200
+
+
+# --------------------------- change password ------------------------------
+
+def test_change_password_requires_login(client):
+    resp = client.get("/change-password")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_change_password_wrong_current_rejected(client):
+    _login(client, "coach@lmu.edu", "pw-coach")
+    resp = client.post("/change-password", data={
+        "current_password": "not-it", "new_password": "brand-new-pw",
+        "confirm": "brand-new-pw"}, follow_redirects=True)
+    assert b"Current password is incorrect." in resp.data
+
+
+def test_change_password_mismatch_rejected(client):
+    _login(client, "coach@lmu.edu", "pw-coach")
+    resp = client.post("/change-password", data={
+        "current_password": "pw-coach", "new_password": "brand-new-pw",
+        "confirm": "different-pw"}, follow_redirects=True)
+    assert b"Passwords must match." in resp.data
+
+
+def test_change_password_success_updates_login(client):
+    _login(client, "coach@lmu.edu", "pw-coach")
+    resp = client.post("/change-password", data={
+        "current_password": "pw-coach", "new_password": "brand-new-pw",
+        "confirm": "brand-new-pw"}, follow_redirects=True)
+    assert b"Password changed." in resp.data
+    client.get("/logout")
+    # old password no longer works; the new one does
+    assert b"Invalid email or password." in _login(client, "coach@lmu.edu", "pw-coach").data
+    assert b"Coach K" in _login(client, "coach@lmu.edu", "brand-new-pw").data
