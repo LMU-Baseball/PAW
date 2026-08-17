@@ -12,8 +12,11 @@ venv/
 env/
 .Python
 
-# Generated reports / assets
-instance/
+# Generated reports / assets. Ignore the instance dir EXCEPT the scraped roster
+# media (jersey #s + public headshot URLs) — it must ship so photos render on a
+# host with an ephemeral instance dir (e.g. Render).
+instance/*
+!instance/roster_media.json
 *.pdf
 !docs/**/*.pdf
 
