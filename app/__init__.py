@@ -57,5 +57,10 @@ def create_app(config_object=Config) -> Flask:
 
     with server.app_context():
         db.create_all()
+        # Provision shared logins from env vars when present (lets a shell-less
+        # host with an ephemeral disk — e.g. Render free tier — seed its own
+        # accounts on every boot). No-op when the PAW_SEED_* vars are unset.
+        from app.auth.models import seed_users_from_env
+        seed_users_from_env()
 
     return server

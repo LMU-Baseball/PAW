@@ -9,12 +9,21 @@ convenience default now, no longer a view restriction).
 """
 from __future__ import annotations
 
+import os
+
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
 
 ROLES = ("player", "coach")
+
+# Env-var specs for boot-time account seeding (see seed_users_from_env). Each is
+# (email_var, password_var, name_var, role).
+_SEED_SPECS = (
+    ("PAW_SEED_COACH_EMAIL", "PAW_SEED_COACH_PASSWORD", "PAW_SEED_COACH_NAME", "coach"),
+    ("PAW_SEED_PLAYER_EMAIL", "PAW_SEED_PLAYER_PASSWORD", "PAW_SEED_PLAYER_NAME", "player"),
+)
 
 
 class User(UserMixin, db.Model):
@@ -48,6 +57,35 @@ class User(UserMixin, db.Model):
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"
+
+
+def seed_users_from_env() -> int:
+    """Create shared login accounts from env vars when they don't already exist.
+
+    For a host with no shell or one-off command (e.g. Render's free tier) and an
+    ephemeral disk, the app provisions its own logins on every boot. Reads a
+    coach spec and a player spec; each is skipped unless BOTH its email and
+    password env vars are set. Create-if-missing, so an in-app password change
+    survives until the next restart. Returns the number of accounts created.
+
+    Must run inside an app context, after the tables exist (db.create_all).
+    """
+    created = 0
+    for email_var, pw_var, name_var, role in _SEED_SPECS:
+        email = (os.getenv(email_var) or "").strip().lower()
+        password = os.getenv(pw_var) or ""
+        if not email or not password:
+            continue
+        if User.query.filter_by(email=email).first():
+            continue
+        user = User(email=email, name=(os.getenv(name_var) or email).strip(),
+                    role=role)
+        user.set_password(password)
+        db.session.add(user)
+        created += 1
+    if created:
+        db.session.commit()
+    return created
 
 
 @login_manager.user_loader

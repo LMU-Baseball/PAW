@@ -53,6 +53,85 @@ def _login(client, email, password):
                        follow_redirects=True)
 
 
+# --- boot-time account seeding from env (shell-less hosts, e.g. Render free) ---
+
+def _make_temp_app(monkeypatch, **env):
+    """Build a create_app instance on a throwaway sqlite DB with the given env
+    vars set BEFORE construction (so seed_users_from_env sees them)."""
+    for key, val in env.items():
+        monkeypatch.setenv(key, val)
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    class TestConfig(Config):
+        TESTING = True
+        WTF_CSRF_ENABLED = False
+        SECRET_KEY = "test-secret"
+        SQLALCHEMY_DATABASE_URI = "sqlite:///" + path.replace("\\", "/")
+
+    return create_app(TestConfig), path
+
+
+def _dispose(application, path):
+    with application.app_context():
+        db.session.remove()
+        db.engine.dispose()
+    try:
+        os.remove(path)
+    except PermissionError:
+        pass  # Windows may still hold the handle; temp file is harmless
+
+
+def test_seed_users_from_env_creates_accounts(monkeypatch):
+    application, path = _make_temp_app(
+        monkeypatch,
+        PAW_SEED_COACH_EMAIL="Coaches@LMU.edu",  # mixed case -> normalized
+        PAW_SEED_COACH_PASSWORD="coach-pw",
+        PAW_SEED_COACH_NAME="LMU Coaches",
+        PAW_SEED_PLAYER_EMAIL="team@lmu.edu",
+        PAW_SEED_PLAYER_PASSWORD="team-pw",
+    )
+    try:
+        with application.app_context():
+            coach = User.query.filter_by(email="coaches@lmu.edu").first()
+            assert coach is not None and coach.role == "coach"
+            assert coach.name == "LMU Coaches"
+            assert coach.check_password("coach-pw")
+            player = User.query.filter_by(email="team@lmu.edu").first()
+            assert player is not None and player.role == "player"
+            assert player.check_password("team-pw")
+    finally:
+        _dispose(application, path)
+
+
+def test_seed_users_from_env_is_idempotent(monkeypatch):
+    from app.auth.models import seed_users_from_env
+    application, path = _make_temp_app(
+        monkeypatch,
+        PAW_SEED_COACH_EMAIL="coaches@lmu.edu",
+        PAW_SEED_COACH_PASSWORD="coach-pw",
+    )
+    try:
+        with application.app_context():
+            # create_app already seeded once; a second call adds nothing.
+            assert seed_users_from_env() == 0
+            assert User.query.filter_by(email="coaches@lmu.edu").count() == 1
+    finally:
+        _dispose(application, path)
+
+
+def test_seed_users_from_env_noop_without_env(monkeypatch):
+    for var in ("PAW_SEED_COACH_EMAIL", "PAW_SEED_COACH_PASSWORD",
+                "PAW_SEED_PLAYER_EMAIL", "PAW_SEED_PLAYER_PASSWORD"):
+        monkeypatch.delenv(var, raising=False)
+    application, path = _make_temp_app(monkeypatch)
+    try:
+        with application.app_context():
+            assert User.query.count() == 0
+    finally:
+        _dispose(application, path)
+
+
 # --------------------------- model / role logic ---------------------------
 
 def test_password_hashing(app):
