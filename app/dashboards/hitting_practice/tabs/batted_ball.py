@@ -52,7 +52,7 @@ def body(plays: pd.DataFrame, active_labels) -> html.Div:
             html.Div([section("Landing Chart"),
                       dcc.Graph(figure=charts.spray_chart_fig(spray))],
                      style={"flex": "1"}),
-        ], style={"display": "flex", "gap": "16px"}),
+        ], className="paw-chart-row", style={"display": "flex", "gap": "16px"}),
         section("Contact Type"),
         dcc.Graph(figure=charts.contact_type_bar(counts)),
     ])

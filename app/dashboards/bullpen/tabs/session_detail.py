@@ -67,6 +67,7 @@ def render(pitcher_id, date) -> html.Div:
     charts_grid = html.Div(
         [graph(charts.velo_fig(df)), graph(charts.movement_fig(df)),
          graph(charts.release_fig(df)), graph(charts.location_fig(df))],
+        className="paw-chart-grid",
         style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"})
 
     fb = P.fastball_callout(df, pt_col="tagged_pitch_type")

@@ -32,7 +32,7 @@ def body(bip_df: pd.DataFrame) -> html.Div:
     return html.Div([
         html.Div(dcc.Graph(figure=charts.radial_fig(bip_df)), style={"flex": "1"}),
         html.Div(dcc.Graph(figure=charts.spray_fig(bip_df)), style={"flex": "1"}),
-    ], style={"display": "flex", "gap": "16px"})
+    ], className="paw-chart-row", style={"display": "flex", "gap": "16px"})
 
 
 def render(bip_df: pd.DataFrame) -> html.Div:

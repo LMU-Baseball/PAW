@@ -70,6 +70,11 @@ _INDEX_STRING = """<!DOCTYPE html>
        row that needs horizontal scrolling to see either one. */
     .paw-video-row { flex-direction: column !important; }
     .paw-video-media, .paw-video-table { min-width: 0 !important; width: 100%; }
+    /* Chart pairs (movement+location, spray+radial, etc.): one full-width
+       chart per row instead of two squeezed side by side -- scrolling to see
+       the second one beats both being unreadable. */
+    .paw-chart-row { flex-direction: column !important; }
+    .paw-chart-grid { grid-template-columns: 1fr !important; }
   }
 </style>
 </head>

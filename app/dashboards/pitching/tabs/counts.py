@@ -28,7 +28,7 @@ def body(df: pd.DataFrame) -> html.Div:
                  style={"flex": "1"}),
         html.Div([section("Location"), dcc.Graph(figure=P.fig_location(df))],
                  style={"flex": "1"}),
-    ], style={"display": "flex", "gap": "16px"})
+    ], className="paw-chart-row", style={"display": "flex", "gap": "16px"})
 
 
 def render(df: pd.DataFrame) -> html.Div:
