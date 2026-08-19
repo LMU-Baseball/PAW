@@ -166,7 +166,7 @@ def serve_layout() -> html.Div:
         ]),
         html.Div(id="scoreboard"),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": _BANNER})
+              "flexWrap": "wrap", "padding": "12px 16px", "backgroundColor": _BANNER})
 
     tabs = dcc.Tabs(id="tabs", value="game", children=[
         dcc.Tab(label="Game Level", value="game"),
@@ -187,10 +187,10 @@ def serve_layout() -> html.Div:
             html.Div([
                 html.Div(id="sidebar", children=sidebar(default_batter, season, start_d, end_d)),
                 notes_ui.note_card("hitting"),
-            ], style={"width": "260px", "flexShrink": "0"}),
+            ], className="paw-dash-sidebar", style={"width": "260px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],
                      style={"flexGrow": "1"}),
-        ], style={"display": "flex", "gap": "16px", "padding": "16px",
+        ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px",
                   "alignItems": "flex-start"}),
     ])

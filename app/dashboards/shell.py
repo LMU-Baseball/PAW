@@ -47,6 +47,17 @@ _INDEX_STRING = """<!DOCTYPE html>
     background-size: cover; background-attachment: fixed;
     font-family: 'Teko', sans-serif;
   }
+  /* Phone-only overrides (tablet/laptop/desktop untouched). The dashboards'
+     sidebar+content shell is a fixed-width flex row with no wrap, which just
+     squeezes on a phone instead of reflowing -- stack it, and let the fixed-
+     width sidebar go full width. Banner crest/title get a touch smaller so
+     the branded headers don't overflow a narrow box. */
+  @media (max-width: 720px) {
+    .paw-dash-row { flex-direction: column !important; align-items: stretch !important; }
+    .paw-dash-sidebar { width: 100% !important; }
+    .paw-banner-crest { height: 72px !important; }
+    .paw-banner-title { font-size: 20px !important; letter-spacing: 4px !important; }
+  }
 </style>
 </head>
 <body>

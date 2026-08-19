@@ -110,7 +110,7 @@ def cauldron_header() -> html.Div:
     Cauldron" wordmark on an upward-bowing arc nesting into the arch's
     underbelly, all on an opaque crimson-with-blue-palms backdrop (anchored to
     the bottom so the palms show). Pure presentation -- no data dependency."""
-    arch = html.Img(src=_LMU_ARCH_SRC, alt="LMU", style={
+    arch = html.Img(src=_LMU_ARCH_SRC, alt="LMU", className="paw-banner-crest", style={
         "display": "block", "margin": "0 auto", "height": "104px", "width": "auto",
     })
     wordmark = html.Img(

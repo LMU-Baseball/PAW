@@ -102,7 +102,7 @@ def serve_layout() -> html.Div:
                          clearable=False, style={"minWidth": "220px"}),
         ]),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
-              "padding": "12px 16px", "backgroundColor": BANNER})
+              "flexWrap": "wrap", "padding": "12px 16px", "backgroundColor": BANNER})
 
     tabs = dcc.Tabs(id="bp-tabs", value="session", children=[
         dcc.Tab(label="Session Detail", value="session"),
@@ -116,10 +116,10 @@ def serve_layout() -> html.Div:
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div([
             html.Div(id="bp-sidebar", children=sidebar(default_pitcher, start_d, end_d),
-                     style={"width": "240px", "flexShrink": "0"}),
+                     className="paw-dash-sidebar", style={"width": "240px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,
                       html.Div(id="bp-tab-content", style={"padding": "8px 16px"})],
                      style={"flexGrow": "1"}),
-        ], style={"display": "flex", "gap": "16px", "padding": "16px",
+        ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px",
                   "alignItems": "flex-start"}),
     ])

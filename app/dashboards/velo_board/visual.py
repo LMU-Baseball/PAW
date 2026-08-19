@@ -54,7 +54,7 @@ def top_gun_header() -> html.Div:
     arch logo on top, the transparent Top Gun wings mark centered beneath, and
     a "VELO BOARD" marquee. Pure presentation -- no data dependency."""
     lmu_logo = html.Img(
-        src=_LMU_ARCH_SRC, alt="LMU",
+        src=_LMU_ARCH_SRC, alt="LMU", className="paw-banner-crest",
         # Identical to the cauldron header's LMU arch (same 104px size, cleanly
         # centered via auto side-margins).
         style={"display": "block", "margin": "0 auto", "height": "104px",
@@ -67,7 +67,7 @@ def top_gun_header() -> html.Div:
         style={"display": "block", "margin": "-48px auto 0", "width": "100%",
                "maxWidth": "500px", "height": "auto"},
     )
-    subtitle = html.Div("VELO BOARD", style={
+    subtitle = html.Div("VELO BOARD", className="paw-banner-title", style={
         "textAlign": "center", "color": "#ffffff", "fontFamily": MARQUEE_FONT,
         "fontSize": "34px", "letterSpacing": "10px", "marginTop": "-14px",
         "textTransform": "uppercase", "lineHeight": "1",
