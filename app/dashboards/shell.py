@@ -53,10 +53,23 @@ _INDEX_STRING = """<!DOCTYPE html>
      width sidebar go full width. Banner crest/title get a touch smaller so
      the branded headers don't overflow a narrow box. */
   @media (max-width: 720px) {
+    /* Filters/tabs first, profile+KPIs below -- opening a dashboard on a
+       phone should show what to pick, not a face. */
     .paw-dash-row { flex-direction: column !important; align-items: stretch !important; }
-    .paw-dash-sidebar { width: 100% !important; }
+    .paw-dash-sidebar { width: 100% !important; order: 2; }
+    .paw-dash-content { order: 1; }
     .paw-banner-crest { height: 72px !important; }
     .paw-banner-title { font-size: 20px !important; letter-spacing: 4px !important; }
+    /* Site header: let the user-info block drop to its own row instead of
+       squeezing the wordmark into a mid-word wrap. */
+    .paw-header { flex-wrap: wrap; height: auto !important; min-height: 64px;
+                  row-gap: 4px; padding: 10px 14px !important; }
+    .paw-header-user { width: 100%; text-align: right; font-size: 12px !important; }
+    .paw-header-brand-text { font-size: 22px !important; }
+    /* Video tab: clip above the pitch table instead of a forced side-by-side
+       row that needs horizontal scrolling to see either one. */
+    .paw-video-row { flex-direction: column !important; }
+    .paw-video-media, .paw-video-table { min-width: 0 !important; width: 100%; }
   }
 </style>
 </head>
@@ -77,10 +90,10 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
     brand_children = [
         html.Img(src="/static/reports/lmu.png",
                  style={"height": "40px", "width": "auto", "display": "block"}),
-        html.Span("The Paw", style={
+        html.Span("The Paw", className="paw-header-brand-text", style={
             "fontFamily": "Teko, sans-serif", "fontWeight": "700", "fontSize": "30px",
             "lineHeight": "1", "letterSpacing": "1px", "textTransform": "uppercase",
-            "color": "#fff"}),
+            "color": "#fff", "whiteSpace": "nowrap"}),
     ]
     brand = html.A(brand_children, href="/",
                    style={"display": "flex", "alignItems": "center", "gap": "12px",
@@ -101,9 +114,9 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
             *pw_link,
             html.A("Log out", href="/logout",
                    style={"color": "#fff", "textDecoration": "underline"}),
-        ], style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
+        ], className="paw-header-user", style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
     return html.Div([html.Div(left, style={"display": "flex", "alignItems": "center"}),
-                     right], style={
+                     right], className="paw-header", style={
         "background": BANNER, "color": "#fff", "padding": "0 20px", "height": "64px",
         "display": "flex", "alignItems": "center", "justifyContent": "space-between",
         "boxShadow": "0 2px 8px rgba(0,0,0,.15)"})

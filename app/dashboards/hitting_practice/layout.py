@@ -153,6 +153,6 @@ def serve_layout() -> html.Div:
                          style={"color": "#555", "marginBottom": "8px"}),
                 filters, tabs,
                 html.Div(id="prac-tab-content", style={"padding": "8px 16px"}),
-            ], style={"flexGrow": "1"}),
+            ], className="paw-dash-content", style={"flexGrow": "1"}),
         ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px", "alignItems": "flex-start"}),
     ])

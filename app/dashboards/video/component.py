@@ -58,10 +58,11 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
                          style={"color": "#555", "marginBottom": "6px"}),
                 player,
                 reload_sink,
-            ], style={"flex": "2", "minWidth": "480px"}),
+            ], className="paw-video-media", style={"flex": "2", "minWidth": "480px"}),
             # RIGHT: the pitch table, compact.
-            html.Div([table], style={"flex": "1", "minWidth": "300px"}),
-        ], style={"display": "flex", "gap": "16px", "alignItems": "flex-start"}),
+            html.Div([table], className="paw-video-table", style={"flex": "1", "minWidth": "300px"}),
+        ], className="paw-video-row",
+           style={"display": "flex", "gap": "16px", "alignItems": "flex-start"}),
     ])
 
 

@@ -119,7 +119,7 @@ def serve_layout() -> html.Div:
                      className="paw-dash-sidebar", style={"width": "240px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,
                       html.Div(id="bp-tab-content", style={"padding": "8px 16px"})],
-                     style={"flexGrow": "1"}),
+                     className="paw-dash-content", style={"flexGrow": "1"}),
         ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px",
                   "alignItems": "flex-start"}),
     ])
