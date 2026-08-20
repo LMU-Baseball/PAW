@@ -264,7 +264,7 @@ def _split_name(name: str | None) -> tuple[str | None, str | None]:
     PROVISIONAL heuristic (see module docstring) -- SessionExport has no
     separate first/last columns, only the combined `UserName`.
     """
-    if name is None:
+    if name is None or (isinstance(name, float) and pd.isna(name)):
         return None, None
     parts = name.split(None, 1)
     if not parts:

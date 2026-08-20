@@ -20,6 +20,7 @@ import pytest
 from app.ingest.hittrax import (
     PLAYS_FIELD_MAP,
     SESSION_FIELD_MAP,
+    _split_name,
     transform,
     transform_plays,
     transform_sessions,
@@ -157,6 +158,16 @@ def test_transform_sessions_first_last_name_split_from_username():
     out = transform_sessions(raw_df)
     assert out.loc[0, "first_name"] == "Conner"
     assert out.loc[0, "last_name"] == "Larkin"
+
+
+def test_split_name_handles_nan_float_without_crashing():
+    # A production run against a newer pandas release than pinned locally hit
+    # a bare NaN float reaching _split_name (despite the upstream _to_str
+    # conversion) and crashed with AttributeError: 'float' object has no
+    # attribute 'split'. _split_name must be defensive on its own, the same
+    # way _to_str already is, regardless of what pandas version let a NaN
+    # through upstream.
+    assert _split_name(float("nan")) == (None, None)
 
 
 def test_transform_sessions_empty_raw_df_returns_empty_frame():
