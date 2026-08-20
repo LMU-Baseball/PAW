@@ -39,6 +39,12 @@ flask --app run pipeline-load [--dry-run|--no-dry-run] [--since-days N]
 
 ## Scheduling (choose one, once verified)
 
+**Superseded:** `flask pipeline-load` is now actually scheduled via GitHub Actions —
+see `docs/PIPELINE_CRON.md` and `.github/workflows/pipeline-cron.yml` (the `games`
+job, currently `--dry-run`). The options below predate that and are historical
+background only; don't stand up a second, duplicate schedule for the same loader
+from this list.
+
 - **OS cron (Linux host)** — daily at, say, 06:00:
   ```
   0 6 * * *  cd /path/to/PAW && /path/to/venv/bin/flask --app run pipeline-load --no-dry-run --since-days 3 >> /var/log/paw-pipeline.log 2>&1
