@@ -1,0 +1,73 @@
+name: pipeline-cron
+
+on:
+  schedule:
+    - cron: "30 9 * * *"   # ~09:30 UTC daily — after HitTrax's ~08:40 UTC export
+  workflow_dispatch: {}     # manual "Run workflow" button, for on-demand verification
+
+jobs:
+  games:
+    runs-on: ubuntu-latest
+    env:
+      MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
+      MYSQL_USER: ${{ secrets.MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+      MYSQL_DB: ${{ secrets.MYSQL_DB }}
+      TM_SFTP_HOST: ${{ secrets.TM_SFTP_HOST }}
+      TM_SFTP_USER: ${{ secrets.TM_SFTP_USER }}
+      TM_SFTP_PASS: ${{ secrets.TM_SFTP_PASS }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      # DRY-RUN ONLY this round (see spec §2 rollout table). Flip to
+      # --no-dry-run once fall data is confirmed flowing and a few dry-run
+      # runs have been reviewed.
+      - run: python -m flask --app run pipeline-load --dry-run --since-days 3
+
+  bullpen:
+    runs-on: ubuntu-latest
+    env:
+      MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
+      MYSQL_USER: ${{ secrets.MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+      MYSQL_DB: ${{ secrets.MYSQL_DB }}
+      TM_SFTP_HOST: ${{ secrets.TM_SFTP_HOST }}
+      TM_SFTP_USER: ${{ secrets.TM_SFTP_USER }}
+      TM_SFTP_PASS: ${{ secrets.TM_SFTP_PASS }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      # LIVE from day one — already run against prod once (2026-08) and
+      # proved safe (insert-only, PlayID-deduped).
+      - run: python -m flask --app run ingest bullpen --no-dry-run
+
+  hittrax:
+    runs-on: ubuntu-latest
+    env:
+      MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
+      MYSQL_USER: ${{ secrets.MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+      MYSQL_DB: ${{ secrets.MYSQL_DB }}
+      HT_FTPS_HOST: ${{ secrets.HT_FTPS_HOST }}
+      HT_FTPS_USER: ${{ secrets.HT_FTPS_USER }}
+      HT_FTPS_PASSWORD: ${{ secrets.HT_FTPS_PASSWORD }}
+      HT_FTPS_REMOTE_DIR: ${{ secrets.HT_FTPS_REMOTE_DIR }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      # DRY-RUN ONLY this round (see spec §2 rollout table). Flip to
+      # --no-dry-run once fall data is confirmed flowing and a few dry-run
+      # runs have been reviewed.
+      - run: python -m flask --app run ingest hittrax --dry-run --limit 20
