@@ -121,7 +121,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="prac-player", options=players, value=default_player,
-                         clearable=False, disabled=not is_coach and len(players) <= 1,
+                         clearable=False,
                          style={"minWidth": "200px"}),
         ]),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",

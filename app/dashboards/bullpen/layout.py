@@ -90,7 +90,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Pitcher", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="bp-pitcher-dd", options=pitchers, value=default_pitcher,
-                         clearable=False, disabled=not is_coach, style={"minWidth": "220px"}),
+                         clearable=False, style={"minWidth": "220px"}),
         ]),
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),

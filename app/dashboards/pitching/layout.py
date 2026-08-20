@@ -143,7 +143,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Pitcher", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="pitcher-dd", options=pitchers, value=default_pitcher,
-                         clearable=False, disabled=not is_coach,
+                         clearable=False,
                          style={"minWidth": "220px"}),
         ]),
         html.Div([

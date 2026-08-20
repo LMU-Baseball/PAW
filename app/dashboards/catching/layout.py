@@ -144,7 +144,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Catcher", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="catcher-dd", options=catchers, value=default_catcher,
-                         clearable=False, disabled=not is_coach,
+                         clearable=False,
                          style={"minWidth": "220px"}),
         ]),
         html.Div([
