@@ -1,15 +1,33 @@
 name: pipeline-cron
 
+# GitHub Actions schedules are WORKFLOW-level, not job-level, so all three crons
+# are declared here and each job gates itself on `github.event.schedule` below.
+# If you add/change a cron string, update the matching job `if:` too, or that job
+# silently stops running.
+#
+#   "30 9 * * *"  -> games + hittrax
+#   "0 4 * * *"   -> bullpen (evening)
+#   "0 16 * * *"  -> bullpen (morning)
+#
+# Cron here is UTC-only and does NOT observe daylight saving. The bullpen times are
+# anchored to PST (UTC-8), so they drift an hour later in summer (PDT): 4:00 UTC is
+# 8pm PST / 9pm PDT, and 16:00 UTC is 8am PST / 9am PDT. That direction is
+# deliberate -- an evening run that drifted *earlier* could fire before practice
+# ends and miss the session entirely, defeating the point of the 8pm slot.
 on:
   schedule:
-    - cron: "30 9 * * *"   # ~09:30 UTC daily — after HitTrax's ~08:40 UTC export
-  workflow_dispatch: {}     # manual "Run workflow" button, for on-demand verification
+    - cron: "30 9 * * *"   # ~09:30 UTC daily -- after HitTrax's ~08:40 UTC export
+    - cron: "0 4 * * *"    # bullpen evening -- 8pm PST / 9pm PDT
+    - cron: "0 16 * * *"   # bullpen morning -- 8am PST / 9am PDT
+  workflow_dispatch: {}     # manual "Run workflow" button, runs ALL jobs, for on-demand verification
 
 permissions:
   contents: read
 
 jobs:
   games:
+    # Only the ~09:30 UTC slot (post-HitTrax-export); manual dispatch also runs it.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 9 * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +50,8 @@ jobs:
           PYTHONIOENCODING: utf-8
 
   bullpen:
+    # Only the two bullpen slots (evening + morning); manual dispatch also runs it.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 4 * * *' || github.event.schedule == '0 16 * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +73,8 @@ jobs:
           PYTHONIOENCODING: utf-8
 
   hittrax:
+    # Only the ~09:30 UTC slot (post-HitTrax-export); manual dispatch also runs it.
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 9 * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

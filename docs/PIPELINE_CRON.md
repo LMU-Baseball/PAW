@@ -1,7 +1,15 @@
 # Pipeline cron (GitHub Actions)
 
-Runs `.github/workflows/pipeline-cron.yml` daily at ~09:30 UTC (and on-demand via
-"Run workflow" in the Actions tab, or `gh workflow run pipeline-cron.yml`).
+`.github/workflows/pipeline-cron.yml` runs on three daily UTC crons, and each job is
+gated to the slots it belongs to: `games` and `hittrax` at ~09:30 UTC (after HitTrax's
+~08:40 UTC export), and `bullpen` twice a day at 04:00 and 16:00 UTC so players can see
+bullpen reports the same evening as practice. A manual run ("Run workflow" in the
+Actions tab, or `gh workflow run pipeline-cron.yml`) still runs all three jobs.
+
+GitHub Actions cron is UTC-only and does not observe daylight saving. The bullpen times
+are anchored to PST (UTC-8), so they land at 8pm/8am in winter and drift an hour later
+(9pm/9am PDT) in summer. That drift direction is deliberate: an evening run that drifted
+*earlier* could fire before practice ends and miss the session entirely.
 
 This is the actual implemented schedule for `flask pipeline-load`. For the
 pre-existing manual-run background (what the loader does, pre-flight steps, idempotency)
@@ -9,11 +17,15 @@ this grew out of, see `docs/pipeline-cron-runbook.md`.
 
 ## Jobs
 
-| Job | Command | Mode |
-|---|---|---|
-| `games` | `flask pipeline-load --dry-run --since-days 3` | Dry-run — writes nothing yet. |
-| `bullpen` | `flask ingest bullpen --no-dry-run` | **Live** — writes to `BULLPEN`. |
-| `hittrax` | `flask ingest hittrax --dry-run --limit 20` | Dry-run — writes nothing yet. |
+| Job | Command | Schedule (UTC) | Mode |
+|---|---|---|---|
+| `games` | `flask pipeline-load --dry-run --since-days 3` | `30 9 * * *` | Dry-run — writes nothing yet. |
+| `bullpen` | `flask ingest bullpen --no-dry-run` | `0 4 * * *`, `0 16 * * *` | **Live** — writes to `BULLPEN`. |
+| `hittrax` | `flask ingest hittrax --dry-run --limit 20` | `30 9 * * *` | Dry-run — writes nothing yet. |
+
+Because `on.schedule` is workflow-level in GitHub Actions, all three crons fire the whole
+workflow; each job carries an `if:` condition on `github.event.schedule` (plus
+`github.event_name == 'workflow_dispatch'`) so only the intended jobs actually run.
 
 ## Known issue: HitTrax FTPS connection limit AND `--limit` is not incremental
 
@@ -71,7 +83,8 @@ Once fall data is confirmed flowing (check a dry-run run's log for a nonzero
 
 1. Edit `.github/workflows/pipeline-cron.yml`.
 2. In the `games` job, change `--dry-run` to `--no-dry-run` on the `pipeline-load`
-   line.
+   line. Leave the job's `if:` condition alone — this flip is about the flag, not the
+   schedule.
 3. Commit and push. No other change needed — the next scheduled or manual run uses
    the new flag. Note that the first LIVE run that actually inserts rows will also
    trigger `precalc.rebuild_all()` and bump the cache-invalidation version stamp
@@ -81,6 +94,29 @@ Once fall data is confirmed flowing (check a dry-run run's log for a nonzero
 `hittrax` is **not** part of this flip yet — see "Known issue: HitTrax FTPS
 connection limit AND `--limit` is not incremental" above for why it must stay
 `--dry-run` until incremental file selection is built.
+
+## Changing a schedule
+
+**The cron strings and the job `if:` conditions must be kept in sync.** `on.schedule` is
+workflow-level, so every cron triggers the whole workflow and each job decides for itself
+whether to run by comparing `github.event.schedule` against a literal cron string. If you
+edit a cron in the `on:` block without updating the job condition that matches it, that
+job's `if:` will never be true again and the job silently stops running — no failure, no
+email, just a workflow run where the job is skipped. This is the easiest way to break this
+workflow, so treat it as a two-line change every time.
+
+To change when a job runs:
+
+1. Edit the cron string in the `on.schedule` list in
+   `.github/workflows/pipeline-cron.yml`.
+2. Edit the **same** string inside that job's `if: ... github.event.schedule == '...'`
+   condition. `games` and `hittrax` share the `30 9 * * *` slot, so changing it means
+   updating both jobs. `bullpen` matches two crons and needs both updated.
+3. Commit and push, then confirm on the next scheduled run that the job shows up in the
+   Actions tab rather than being skipped.
+
+Remember the times are UTC and do not shift with daylight saving — see the DST note at
+the top of this doc before picking a new hour.
 
 ## Failure notifications
 
