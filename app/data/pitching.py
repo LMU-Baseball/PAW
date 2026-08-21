@@ -416,6 +416,61 @@ def fig_movement(df: pd.DataFrame) -> go.Figure:
     return _base_layout(fig, "Pitch Movement")
 
 
+# Half-width (ft) of the release panel's x-axis when the frame carries no
+# usable rel_side -- keeps the empty-state figure from collapsing to a
+# degenerate [-0, 0] range that Plotly renders as a single hairline.
+_RELEASE_X_FALLBACK = 3.0
+# Padding (ft) beyond the outermost release point, so a marker sitting at the
+# pitcher's extreme arm side isn't clipped by the axis line.
+_RELEASE_X_PAD = 0.5
+
+
+def fig_release(df: pd.DataFrame) -> go.Figure:
+    """Release-point scatter -- rel_side (x) vs rel_height (y), one trace per
+    pitch type.
+
+    Structurally a sibling of `fig_movement` (same `pitch_type` grouping, same
+    `pitch_color` map, same `_base_layout` chrome, same hovertemplate
+    register) with two deliberate departures:
+
+    * **Markers only, no covariance ellipses.** A release cluster spans a few
+      tenths of a foot, so a 1-sigma ellipse would be about the size of the
+      markers it describes -- it would hide the points instead of summarizing
+      them. Coaches read this plot for cluster tightness and for drift between
+      pitch types, both of which need the raw points visible.
+    * **Axes are pinned, not autoranged.** x is forced symmetric about 0
+      because 0 IS the middle of the rubber: letting Plotly autorange would
+      recentre a lefty's cluster in the panel and destroy the "which arm side
+      does he work from" read, which is the whole point of plotting rel_side.
+      y is then scaleanchor'd to x at 1:1 so a foot of height and a foot of
+      side occupy the same pixels -- without it Plotly stretches the
+      (typically much narrower) side spread to fill the panel and a genuinely
+      repeatable release looks scattered.
+
+    Both release columns are dropna'd up front, so an all-NaN frame yields an
+    empty figure (chrome + axes, zero traces) rather than raising -- the same
+    graceful degradation `fig_movement` gets from its own dropna.
+    """
+    d = df.dropna(subset=["rel_side", "rel_height"]).copy()
+    fig = go.Figure()
+    if not d.empty:
+        d["_pt"] = pitch_type(d)
+        for pt, sub in d.groupby("_pt"):
+            fig.add_trace(go.Scatter(
+                x=sub["rel_side"], y=sub["rel_height"], mode="markers", name=pt,
+                marker=dict(color=pitch_color(pt), size=9),
+                hovertemplate=(f"{pt}<br>Rel Side: %{{x:.2f}} ft<br>"
+                               "Rel Height: %{y:.2f} ft<extra></extra>")))
+    span = float(d["rel_side"].abs().max()) if not d.empty else float("nan")
+    if not np.isfinite(span) or span <= 0:
+        span = _RELEASE_X_FALLBACK
+    half = span + _RELEASE_X_PAD
+    fig.update_xaxes(title="Release Side (ft)", range=[-half, half], zeroline=True)
+    fig.update_yaxes(title="Release Height (ft)", zeroline=True,
+                     scaleanchor="x", scaleratio=1)
+    return _base_layout(fig, "Release Point")
+
+
 def _add_zone(fig: go.Figure) -> None:
     fig.add_shape(type="rect", line=dict(color="black", width=2), **_SZ)
 

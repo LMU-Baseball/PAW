@@ -25,7 +25,14 @@ OVERRIDES_TABLE = "velo_board_overrides"
 # Fastball/Sinker RelSpeed is what "velo" means everywhere on this board
 # (matches the warehouse's vw_pitcher_appearance_velo filter -- see
 # pitching_caps._pitcher_velo_appearances).
-_VELO_PITCH_TYPES = "'Fastball', 'Sinker'"
+#
+# The TUPLE is the source of truth and the SQL fragment is derived from it, not
+# the other way round: `pitcher_development` reuses this definition so the YoY
+# development card can't disagree with the board about what a fastball is, and
+# string-parsing a SQL literal list back into names would break the moment a
+# pitch type with an apostrophe or different spacing was added here.
+VELO_PITCH_TYPES: tuple[str, ...] = ("Fastball", "Sinker")
+_VELO_PITCH_TYPES = ", ".join(f"'{t}'" for t in VELO_PITCH_TYPES)
 
 _DDL = f"""
     CREATE TABLE IF NOT EXISTS {VELO_BOARD_TABLE} (
