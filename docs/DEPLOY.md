@@ -26,8 +26,11 @@ loopback. Result: a private, login-gated URL players can open from any device.
 
 1. Lightsail → **Create instance** → Region **us-east-2** (same as RDS).
 2. Platform **Linux/Unix** → Blueprint **OS Only → Ubuntu 22.04 LTS**.
-3. Plan: **$10/mo** (2 GB RAM) — Chromium for the PDF reports needs the headroom;
-   the $5 (1 GB) plan can OOM during a report build.
+3. Plan: **$10/mo** (2 GB RAM) — the safe choice for a shared host: Chromium for
+   the PDF reports wants headroom for back-to-back/concurrent builds. It is not a
+   hard floor — a single report rendered fine on Render's 512 MB free instance
+   (2026-08-20) — but concurrent rendering under load was never tested, so stay
+   on 2 GB for the box coaches and players share.
 4. Name it `paw-prod`, create.
 5. Instance → **Networking** → attach a **Static IP** (free while attached). Note
    it — call it `LIGHTSAIL_IP` below.
@@ -81,6 +84,35 @@ pip install gunicorn                      # already in requirements, explicit fo
 # --- headless Chromium for the pitcher-report PDFs (Playwright) ---
 python -m playwright install --with-deps chromium
 ```
+
+> **Playwright: pin the package, and know where the browsers land.** Two traps
+> took down PDF downloads on the Render interim host (2026-08-20); both apply
+> here:
+>
+> - **Keep `playwright` pinned in `requirements.txt`** (currently
+>   `playwright==1.61.0`). Playwright stamps its browser directory with a build
+>   number tied to the package version — 1.61.0 installs
+>   `chromium_headless_shell-1228`. An unpinned `playwright>=1.44` can resolve to
+>   a newer package on some later rebuild that then looks for a build number the
+>   cache never downloaded. **Bump the pin and re-run the
+>   `playwright install --with-deps chromium` above together** — never one
+>   without the other.
+> - **Browsers install to `~/.cache/ms-playwright` by default.** On this
+>   Lightsail box that is fine: the same `/home/ubuntu` exists when you install
+>   and when gunicorn runs. On a host that builds in one container and runs the
+>   app in another (managed platforms like Render, or a multi-stage image), that
+>   cache does not survive the handoff — set **`PLAYWRIGHT_BROWSERS_PATH=0`**
+>   in the environment used for **both** build and runtime. The special value `0`
+>   installs the browsers into the `playwright` pip package directory inside
+>   site-packages, which is part of the build output that ships to runtime, so
+>   the install location and the lookup location always agree.
+>
+> **Symptom to recognize:** report downloads fail and the log shows
+> `BrowserType.launch: Executable doesn't exist at …/chrome-headless-shell`
+> followed by the boxed "Looks like Playwright was just installed or updated"
+> banner. That is always a missing or mismatched browser install — not memory,
+> not RDS. `/reports/*` returns **503 with the underlying cause in the response
+> body** for exactly this reason, so read the body before guessing.
 
 ---
 
@@ -245,5 +277,10 @@ automatic (systemd timer). Done — `https://paw.lmulions.com` is live.
   at boot (a few seconds of DB reads ×3). Expected; keeps every worker fast.
 - **RDS password not rotated** (deferred). The `/32` security-group rule is the
   active mitigation until you rotate.
-- **Chromium footprint:** the PDF path needs the 2 GB plan; the 1 GB plan can OOM
-  during a build.
+- **Chromium footprint:** 2 GB is a headroom recommendation, not a hard floor —
+  one report rendered on a 512 MB Render instance. Concurrent/sustained report
+  builds were never load-tested, so keep the 2 GB plan on a shared host.
+- **Playwright version ↔ browser build are coupled:** the `requirements.txt` pin
+  and the installed browser must move together, and on hosts that don't preserve
+  `~/.cache/ms-playwright` between build and runtime you need
+  `PLAYWRIGHT_BROWSERS_PATH=0`. See §3.

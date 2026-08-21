@@ -41,7 +41,7 @@ Internet (HTTPS)
 - Same credentials / same warehouse you already use locally
 - Lower DB latency than a different cloud region
 - Straightforward security group: RDS accepts MySQL **only** from the app
-- Playwright (pitcher PDF) needs Chromium + RAM; a small VM is predictable
+- Playwright (pitcher PDF) needs Chromium on the host; a small VM is predictable
 
 Render/Railway/Fly are fine for a **quick staging link**. For in-season daily use, prefer this AWS path.
 
@@ -105,6 +105,20 @@ Create these if they do not exist yet:
    - Base: Python 3.12 (or whatever CI/local uses)
    - `pip install -r requirements.txt`
    - Install Playwright Chromium **and** OS deps (`playwright install --with-deps chromium`)
+   - **Pin `playwright` in `requirements.txt`, and bump the pin and that install
+     step together.** Playwright stamps its browser dir with a build number tied
+     to the package version (`playwright==1.61.0` →
+     `chromium_headless_shell-1228`), so a drifting version looks for a build the
+     image never downloaded
+   - **Set `PLAYWRIGHT_BROWSERS_PATH=0` if the browsers are installed on a
+     different filesystem than the one the app runs on** (multi-stage image, or a
+     managed platform like Render). `0` puts the browsers inside the `playwright`
+     package in site-packages so they ship with the build; a single-stage
+     Dockerfile that installs as the same user it runs as does not need it.
+     Symptom when this is wrong: `Executable doesn't exist at
+     …/chrome-headless-shell` + "Looks like Playwright was just installed or
+     updated" — this broke PDF downloads on the Render interim host, 2026-08-20
+     (see `docs/DEPLOY.md` §3)
    - `WORKDIR` = app root; copy app code
    - Default `CMD`: gunicorn (see below)
    - Do **not** bake `.env` or secrets into the image
@@ -152,6 +166,11 @@ Put EC2 in the **same VPC** (and region) as RDS so private connectivity works wi
 |----------|-------------------------|
 | Dashboards + light PDF use | `t3.small` (2 vCPU / 2 GB) may work |
 | Regular Playwright PDF generation | Prefer **`t3.medium` (2 vCPU / 4 GB)** |
+
+Playwright is less of a RAM floor than it looks: a single pitcher PDF rendered
+fine on a 512 MB Render instance (2026-08-20). Size for concurrent report builds
+plus dashboard traffic on an always-on box, not for one PDF — the table above
+still stands.
 
 Storage: 20–30 GB gp3 is usually enough; watch report-cache growth.
 
