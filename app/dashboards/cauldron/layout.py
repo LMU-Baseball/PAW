@@ -1,12 +1,16 @@
 """Competitive Cauldron dashboard shell: role-branched layout.
 
-Every logged-in user (player or coach) sees the branded header + the
-team scoreboard (`visual.scoreboard_view`). A coach ALSO sees the editable
-daily grid (`grid.coach_grid`), placed above the scoreboard in its own
-coach-only section -- players never receive the grid in the component tree
-at all (the first half of the coach-write double-gate; `callbacks.py`'s
-save/recompute callbacks re-checking `current_user.is_coach` is the second
-half).
+Every logged-in user (player or coach) sees the branded header, the Week filter
+(`grid.week_filter`) and the team scoreboard (`visual.scoreboard_view`) -- the
+Week selector is a pure VIEW control, so a player browses weeks just like a
+coach.
+
+A coach ALSO sees the editable daily grid (`grid.coach_grid`), placed above the
+filter in its own coach-only section -- players never receive the grid in the
+component tree at all (the first half of the coach-write double-gate;
+`callbacks.py`'s save/recompute callbacks re-checking `current_user.is_coach`
+is the second half). The grid's own **Entry date** picker stays inside it: that
+one chooses the day being written to, so it is an edit control, not a filter.
 """
 from __future__ import annotations
 
@@ -72,9 +76,16 @@ def serve_layout() -> html.Div:
         visual.cauldron_header(),
     ]
     # Buttons + the (hidden-until-edit) grid live directly under the emblem,
-    # coach-only.
+    # coach-only. The Week filter below them is for EVERYONE -- it only chooses
+    # which week the shared scoreboard totals.
+    controls = []
     if is_coach:
-        children.append(html.Div(grid.coach_grid(play_date, week, season), id="cauldron-coach-section"))
+        controls.append(html.Div(grid.coach_grid(play_date, week, season),
+                                 id="cauldron-coach-section"))
+    controls.append(grid.week_filter(week))
+    children.append(html.Div(controls,
+                             style={"borderBottom": f"2px solid {shell.CRIMSON}",
+                                    "backgroundColor": "rgba(255,255,255,0.55)"}))
     # Weekly scoreboard: only the selected week's daily points (reset each week).
     children.append(html.Div(
         id="cauldron-scoreboard",

@@ -1,12 +1,18 @@
 """Dash callbacks for the Velo Board dashboard.
 
 The board is ONE unified table (`velo-grid`) everyone sees; a coach edits it in
-place. All inputs here are coach-only (a player's layout renders neither the
-Season/Week selectors nor the Edit/Save buttons, so these never fire for a
-player -- `suppress_callback_exceptions=True`, set in index.py, lets Dash
-accept callbacks referencing ids absent from a given render):
+place.
 
-- Season/Week change -> re-read the table rows.
+- Season/Week change -> re-read the table rows. This fires for EVERY account:
+  the selectors, the table and this callback's Output are all in a player's
+  render too, so a player browses seasons/weeks exactly like a coach. (Dash will
+  not fire a callback whose Inputs/Outputs are missing from the current render,
+  which is why the filters must live outside the coach-only section.)
+
+The remaining inputs are coach-only -- a player's layout renders no Edit/Save
+buttons, so they never fire for a player (`suppress_callback_exceptions=True`,
+set in index.py, lets Dash accept callbacks referencing ids absent from a given
+render):
 - Edit click -> unlock the table's four editable columns in place.
 - Save click -> persist (goal/assessment weekly + changed velo overrides), then
   re-read and re-lock. The coach-write gate is re-checked HERE.

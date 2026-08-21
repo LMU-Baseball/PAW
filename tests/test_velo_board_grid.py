@@ -4,12 +4,20 @@ import pandas as pd
 from app.dashboards.velo_board import grid as G
 
 
-def test_coach_controls_has_buttons_and_selectors():
-    s = str(G.coach_controls("2025/2026", "2026-03-02"))
+def test_coach_controls_has_buttons_only():
+    """Edit/Save live here; the Season/Week selectors moved to `board_filters`
+    so that players get them too."""
+    s = str(G.coach_controls())
     assert "velo-edit" in s and "velo-save" in s and "velo-save-status" in s
-    assert "velo-season" in s and "velo-week" in s
+    assert "velo-season" not in s and "velo-week" not in s
     # the table is NOT here -- it's the shared velo-grid rendered by layout
     assert "velo-grid" not in s
+
+
+def test_board_filters_has_selectors_and_no_write_controls():
+    s = str(G.board_filters("2025/2026", "2026-03-02"))
+    assert "velo-season" in s and "velo-week" in s
+    assert "velo-edit" not in s and "velo-save" not in s
 
 
 def test_save_board_persists_goal_assessment_and_changed_override(monkeypatch):

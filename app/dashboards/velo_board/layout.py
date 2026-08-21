@@ -1,11 +1,14 @@
 """Top Gun Velo Board dashboard shell: role-branched layout.
 
-Every logged-in user (player or coach) sees the branded header + the
-player-facing heat leaderboard. A coach ALSO sees the editable weekly grid
-(`grid.coach_grid`), placed above the leaderboard in its own coach-only
-section -- players never receive the grid in the component tree at all (the
-first half of the coach-write double-gate; `callbacks.py`'s save callback
-re-checking `current_user.is_coach` is the second half).
+Every logged-in user (player or coach) sees the branded header, the Season/Week
+filters (`grid.board_filters`) and the heat leaderboard -- the filters are pure
+VIEW controls, so a player browses any season/week just like a coach.
+
+A coach ALSO sees the Edit/Save buttons (`grid.coach_controls`), placed above
+the filters in their own coach-only section -- players never receive those
+controls in the component tree at all (the first half of the coach-write
+double-gate; `callbacks.py`'s save callback re-checking `current_user.is_coach`
+is the second half).
 """
 from __future__ import annotations
 
@@ -47,9 +50,15 @@ def serve_layout() -> html.Div:
         shell.header(back_href="/pitching", back_label="← Pitching"),
         visual.top_gun_header(),
     ]
-    # Coach-only Edit/Save + Season/Week controls sit above the shared table.
+    # Control bar above the shared table: the Season/Week filters are for
+    # EVERYONE; only a coach additionally gets the Edit/Save buttons on top.
+    controls = []
     if is_coach:
-        children.append(html.Div(grid.coach_controls(season, week), id="velo-coach-section"))
+        controls.append(html.Div(grid.coach_controls(), id="velo-coach-section"))
+    controls.append(grid.board_filters(season, week))
+    children.append(html.Div(controls,
+                             style={"borderBottom": f"2px solid {shell.CRIMSON}",
+                                    "backgroundColor": "rgba(255,255,255,0.55)"}))
     # ONE unified table for everyone (read-only leaderboard; a coach edits the
     # four editable columns in place). Always a DataTable so callbacks find it.
     children.append(html.Div(visual.board_table(board), id="velo-board",

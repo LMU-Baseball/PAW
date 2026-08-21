@@ -1,20 +1,23 @@
 """Dash callbacks for the Competitive Cauldron dashboard.
 
-Three callbacks, all coach-grid-only inputs except the scoreboard output
-(a player's layout never renders `cauldron-date`/`cauldron-cycle`/
-`cauldron-grid`/`cauldron-save`/`cauldron-recompute`, so these simply never
-fire for a player -- `suppress_callback_exceptions=True` on the app, set in
-index.py, is what lets Dash accept callbacks referencing ids absent from a
-given render):
-
-- Date/Cycle change -> refresh the grid rows + the scoreboard for the new
-  (play_date, cycle).
-- Save click -> persist the edited grid to RDS, then re-read both. The
-  coach-write gate is re-checked HERE (not just trusted from the layout
+- **Week change -> rebuild the scoreboard.** This one is for EVERYONE. It is
+  deliberately kept free of any coach-only component: a player's layout renders
+  neither `cauldron-date` nor `cauldron-grid`, and Dash will not fire a callback
+  whose Inputs/Outputs are missing from the current render -- so pairing the
+  week Input with a grid Output (as it used to be) left the filter inert for
+  players. Week drives only the scoreboard and entry-date drives only the grid
+  rows, so the split is clean rather than a workaround.
+- **Entry-date change -> refresh the grid rows.** Coach-only in practice: the
+  date picker and grid live inside the coach section.
+- **Save click** -> persist the edited grid to RDS, then rebuild the scoreboard.
+  The coach-write gate is re-checked HERE (not just trusted from the layout
   omitting the grid for players) -- the second half of the double-gate.
-- Recompute click -> auto-score the day (`cauldron.score_day`, which never
-  clobbers a coach's manual entries), then re-read both. Also re-checks
-  `is_coach` -- Recompute writes too.
+- **Recompute click** -> auto-score the day (`cauldron.score_day`, which never
+  clobbers a coach's manual entries), then re-read. Also re-checks `is_coach`
+  -- Recompute writes too.
+
+`suppress_callback_exceptions=True` on the app (set in index.py) is what lets
+Dash accept callbacks referencing ids absent from a given render.
 """
 from __future__ import annotations
 
@@ -65,27 +68,36 @@ def _scoreboard(week_start, season):
                                   f_scoring.result(), f_roster.result())
 
 
-def _refresh(play_date, week_start, season):
-    """Refresh BOTH the grid rows and the scoreboard (for a date/week change)."""
+def _grid_data(play_date, season):
+    """The coach grid's rows for `play_date` (independent of the selected week --
+    the grid is a single day's entry sheet, the scoreboard is the week's total)."""
     cycle_id = f"{season}-c1"
-    rows = grid._grid_rows(
+    return grid._grid_rows(
         pitching_caps.lmu_pitchers(season), cauldron.read_scoring(),
         cauldron.read_teams(cycle_id), cauldron.read_daily(play_date), play_date,
     )
-    return rows, _scoreboard(week_start, season)
 
 
 def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
-        Output("cauldron-grid", "data"),
         Output("cauldron-scoreboard", "children"),
-        Input("cauldron-date", "date"),
         Input("cauldron-week", "date"),
         prevent_initial_call=True,
     )
-    def _on_date_or_week(play_date, week_start):
-        return _refresh(play_date, week_start, seasons.current_season())
+    def _on_week(week_start):
+        """EVERY account: pick a week, get that week's scoreboard. No coach-only
+        component may be referenced here or the filter goes dead for players."""
+        return _scoreboard(week_start, seasons.current_season())
+
+    @dash_app.callback(
+        Output("cauldron-grid", "data"),
+        Input("cauldron-date", "date"),
+        prevent_initial_call=True,
+    )
+    def _on_entry_date(play_date):
+        """Coach-only in practice (the date picker ships inside the grid)."""
+        return _grid_data(play_date, seasons.current_season())
 
     @dash_app.callback(
         Output("cauldron-grid", "editable", allow_duplicate=True),

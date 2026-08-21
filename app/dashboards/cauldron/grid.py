@@ -20,11 +20,14 @@ pitcher (`pitching_caps.lmu_pitchers(season)`), mirroring
     cell is editable: typing over an AUTO cell is the "override" path, typing
     into a MANUAL cell is the only way that metric ever gets scored.
 
-A Date picker (`cauldron-date`) and a Cycle selector (`cauldron-cycle`) sit
-above the grid. Cycle lifecycle isn't defined yet, so the selector is a plain
-`dcc.Dropdown` seeded with just the current `cycle_id` -- a single default
-cycle is enough for now; a real cycle picker is future work once cycles have
-start/end dates of their own. Below the grid: **Save** (`cauldron-save`),
+The entry-date picker (`cauldron-date`) sits inside the hidden grid wrapper --
+it chooses which day a coach is ENTERING data for, so it is an edit control,
+not a filter, and stays coach-only. The **Week** selector (`cauldron-week`) is
+the opposite: it picks which week the shared scoreboard shows, so it lives in
+`week_filter` and is rendered for every account. Cycle lifecycle isn't defined
+yet, so the cycle is derived internally (`{season}-c1`) rather than exposed as
+a control; a real cycle picker is future work once cycles have start/end dates
+of their own. Below the grid: **Save** (`cauldron-save`),
 **Recompute auto** (`cauldron-recompute`), and a status line
 (`cauldron-save-status`). No callbacks are wired here -- Task 6 owns the Dash
 callback that reads this state and invokes `save_grid` /
@@ -134,16 +137,33 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
     return rows
 
 
+def week_filter(week_start) -> html.Div:
+    """The **Week** selector (`cauldron-week`, Mon-start), rendered for EVERY
+    account. It is a pure VIEW control -- it picks which week the shared
+    scoreboard totals -- so a player browses weeks exactly like a coach. Write
+    access stays coach-only via `coach_grid` + the save/recompute callbacks'
+    `is_coach` re-check."""
+    return html.Div([
+        html.Div([
+            html.Label("Week (starts Monday)", style=_LABEL_STYLE),
+            dcc.DatePickerSingle(id="cauldron-week", date=week_start),
+        ]),
+    ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
+              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "8px 16px"})
+
+
 def coach_grid(play_date, week_start, season) -> html.Div:
     """The coach-facing editable grid section. Layout order:
 
       1. Edit / Save buttons + status line, at the TOP (`cauldron-edit` /
          `cauldron-save` / `cauldron-save-status`).
-      2. A always-visible **Week** selector (`cauldron-week`, Mon-start) that
-         drives the weekly scoreboard.
-      3. A wrapper (`cauldron-grid-wrap`) -- HIDDEN by default -- holding the
+      2. A wrapper (`cauldron-grid-wrap`) -- HIDDEN by default -- holding the
          entry-date picker (`cauldron-date`) and the editable DataTable
          (`cauldron-grid`). Edit reveals + unlocks it; Save persists + hides it.
+
+    `week_start` is accepted for signature stability but is no longer rendered
+    here -- the Week selector moved to `week_filter`, which EVERY account gets,
+    since choosing a week is a view action rather than a write.
 
     The competition cycle is derived internally (`{season}-c1`) for team reads/
     writes -- teams persist across weeks, so it is no longer a visible control."""
@@ -169,15 +189,6 @@ def coach_grid(play_date, week_start, season) -> html.Div:
     buttons = shell.edit_save_buttons("cauldron-edit", "cauldron-save",
                                       "cauldron-save-status")
 
-    # Week selector stays visible (it drives the scoreboard everyone sees).
-    week_filter = html.Div([
-        html.Div([
-            html.Label("Week (starts Monday)", style=_LABEL_STYLE),
-            dcc.DatePickerSingle(id="cauldron-week", date=week_start),
-        ]),
-    ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
-              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "8px 16px"})
-
     # Grid starts LOCKED (editable=False) AND hidden. "Edit" reveals + unlocks;
     # "Save" persists + hides -- see callbacks.py.
     grid = dash_table.DataTable(
@@ -200,9 +211,7 @@ def coach_grid(play_date, week_start, season) -> html.Div:
         html.Div(grid, style={"padding": "0 16px"}),
     ], id="cauldron-grid-wrap", style={"display": "none"})
 
-    return html.Div([buttons, week_filter, grid_wrap],
-                    style={"borderBottom": f"2px solid {shell.CRIMSON}",
-                           "backgroundColor": "rgba(255,255,255,0.55)"})
+    return html.Div([buttons, grid_wrap])
 
 
 def _coerce_numeric(value):

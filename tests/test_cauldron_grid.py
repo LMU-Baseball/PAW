@@ -44,7 +44,8 @@ def test_coach_grid_is_editable_and_has_required_ids(monkeypatch):
     assert "cauldron-grid-wrap" in s   # grid lives in a hide-until-edit wrapper
     assert "cauldron-save" in s
     assert "cauldron-date" in s
-    assert "cauldron-week" in s        # Week selector replaces the Cycle selector
+    # The Week selector moved OUT to grid.week_filter so players get it too.
+    assert "cauldron-week" not in s
     assert "cauldron-save-status" in s
     assert "cauldron-edit" in s        # Edit button reveals + unlocks the grid
     assert "editable=False" in s       # grid starts LOCKED until Edit is pressed

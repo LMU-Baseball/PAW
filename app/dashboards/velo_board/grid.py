@@ -3,9 +3,11 @@
 The board is now ONE unified table (`visual.board_table`, id `velo-grid`) that
 everyone sees read-only and a coach edits IN PLACE. This module owns:
 
-- `coach_controls(season, week)`: the coach-only Edit/Save buttons + status and
-  the Season/Week selectors (no table -- the table is shared, rendered by
-  `layout` for all users).
+- `board_filters(season, week)`: the Season/Week selectors, rendered for EVERY
+  account. They only choose WHICH rows the shared table shows, so a player
+  browses seasons/weeks exactly like a coach (team-transparent view).
+- `coach_controls()`: the coach-only Edit/Save buttons + status line (no table
+  and no filters -- the table is shared, rendered by `layout` for all users).
 - `save_board(grid_data, season, week, updated_by)`: maps the edited table rows
   back to storage. Velo Goal + Assessment persist WEEKLY to `velo_board_entries`
   (`upsert_entries`). Season Max / Season Avg are SEASON-level coach corrections
@@ -29,11 +31,13 @@ _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px"
                 "display": "block", "marginBottom": "4px", "textAlign": "center"}
 
 
-def coach_controls(season_label: str, week_start: str) -> html.Div:
-    """Coach-only Edit/Save buttons (top) + a centered Season/Week selector row.
-    The editable table itself is the shared `velo-grid` rendered by `layout`."""
-    buttons = shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status")
-    filters = html.Div([
+def board_filters(season_label: str, week_start: str) -> html.Div:
+    """A centered Season/Week selector row, rendered for EVERY account.
+
+    These are pure VIEW controls -- they pick which season/week the shared
+    `velo-grid` table shows -- so players get them too. Write access stays
+    coach-only via `coach_controls` + the save callback's `is_coach` re-check."""
+    return html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
             dcc.Dropdown(
@@ -48,9 +52,13 @@ def coach_controls(season_label: str, week_start: str) -> html.Div:
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
               "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})
 
-    return html.Div([buttons, filters],
-                    style={"borderBottom": f"2px solid {shell.CRIMSON}",
-                           "backgroundColor": "rgba(255,255,255,0.55)"})
+
+def coach_controls() -> html.Div:
+    """Coach-only Edit/Save buttons + status line. The editable table itself is
+    the shared `velo-grid` rendered by `layout`; the Season/Week filters are
+    `board_filters`, which every account gets."""
+    return html.Div(
+        shell.edit_save_buttons("velo-edit", "velo-save", "velo-save-status"))
 
 
 def _coerce_numeric(value):

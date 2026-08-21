@@ -112,3 +112,106 @@ def test_no_filter_is_role_disabled_for_a_player(server, module_path, url, dd_id
     coach_off = disabled_ids(_render_as(server, "coach", module_path, url), set())
     assert player_off <= coach_off, (
         f"disabled for a player but not a coach: {sorted(player_off - coach_off)}")
+
+
+# --- Velo Board / Competitive Cauldron -------------------------------------
+#
+# These two aren't subject-dropdown dashboards: their filters (Season/Week on
+# the velo board, Week on the Cauldron) used to be nested INSIDE the coach-only
+# control block, so a player's render omitted them entirely. Splitting the view
+# filters out of the write controls is what these pin.
+
+def _render_board_as(server, role, module_path, url):
+    from importlib import import_module
+    layout = import_module(module_path)
+    with server.app_context():
+        # Email must be unique per (role, dashboard): one test renders both
+        # boards for the same role, and users.email is UNIQUE.
+        slug = module_path.rsplit(".", 2)[-2]
+        user = User(email=f"{role}-{slug}@lmu.edu", name="Board T",
+                    role=role, trackman_id=-999)
+        user.set_password("x")
+        db.session.add(user)
+        db.session.commit()
+        with server.test_request_context(url):
+            login_user(user)
+            return str(layout.serve_layout())
+
+
+def test_player_gets_velo_season_and_week_filters(server):
+    s = _render_board_as(server, "player", "app.dashboards.velo_board.layout",
+                         "/dash/velo_board/")
+    assert "velo-season" in s, "player has no Season filter on the velo board"
+    assert "velo-week" in s, "player has no Week filter on the velo board"
+    # ...and still no write controls.
+    assert "velo-edit" not in s and "velo-save" not in s
+
+
+def test_player_gets_cauldron_week_filter(server):
+    s = _render_board_as(server, "player", "app.dashboards.cauldron.layout",
+                         "/dash/cauldron/")
+    assert "cauldron-week" in s, "player has no Week filter on the Cauldron"
+    # The entry-date picker and the grid are WRITE controls -- still coach-only.
+    assert "cauldron-date" not in s
+    assert "cauldron-grid" not in s
+    assert "cauldron-save" not in s
+
+
+def test_coach_still_gets_board_write_controls(server):
+    """The split must not have cost the coach anything."""
+    velo = _render_board_as(server, "coach", "app.dashboards.velo_board.layout",
+                            "/dash/velo_board/")
+    assert all(t in velo for t in ("velo-season", "velo-week", "velo-edit", "velo-save"))
+    cauldron = _render_board_as(server, "coach", "app.dashboards.cauldron.layout",
+                                "/dash/cauldron/")
+    assert all(t in cauldron for t in ("cauldron-week", "cauldron-date",
+                                       "cauldron-grid", "cauldron-save"))
+
+
+def test_cauldron_week_callback_is_renderable_for_a_player(server):
+    """Dash won't fire a callback whose Inputs/Outputs are absent from the
+    current render. The week->scoreboard callback must therefore touch ONLY ids
+    a player actually gets, or the filter is inert for them despite rendering."""
+    from dash import Dash
+    from app.dashboards.cauldron import layout, callbacks
+    with server.app_context():
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldwk/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+    player_html = _render_board_as(server, "player", "app.dashboards.cauldron.layout",
+                                   "/dash/cauldron/")
+    specs = [spec for spec in dash_app.callback_map.values()
+             if [i["id"] for i in spec["inputs"]] == ["cauldron-week"]]
+    assert specs, "no callback driven solely by cauldron-week"
+    for spec in specs:
+        for dep in list(spec["inputs"]) + list(spec["output"]
+                                               if isinstance(spec["output"], list)
+                                               else [spec["output"]]):
+            comp_id = dep["id"] if isinstance(dep, dict) else dep.component_id
+            assert comp_id in player_html, (
+                f"week callback touches {comp_id!r}, which a player never renders "
+                "-- the Week filter would be dead for players")
+
+
+def test_velo_filter_callback_is_renderable_for_a_player(server):
+    """Same for the velo board's Season/Week -> table-rows callback."""
+    from dash import Dash
+    from app.dashboards.velo_board import layout, callbacks
+    with server.app_context():
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/vbwk/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+    player_html = _render_board_as(server, "player", "app.dashboards.velo_board.layout",
+                                   "/dash/velo_board/")
+    specs = [spec for spec in dash_app.callback_map.values()
+             if [i["id"] for i in spec["inputs"]] == ["velo-season", "velo-week"]]
+    assert specs, "no callback driven by velo-season + velo-week"
+    for spec in specs:
+        outs = spec["output"] if isinstance(spec["output"], list) else [spec["output"]]
+        for dep in list(spec["inputs"]) + list(outs):
+            comp_id = dep["id"] if isinstance(dep, dict) else dep.component_id
+            assert comp_id in player_html, (
+                f"velo filter callback touches {comp_id!r}, which a player never "
+                "renders -- the filters would be dead for players")
