@@ -182,6 +182,23 @@ def week_start_for(d) -> str:
     return (dt - timedelta(days=dt.weekday())).isoformat()
 
 
+def default_week_for(season_label) -> str:
+    """The most-recent sensible week inside `season_label`: today's week if the
+    season is still in progress (today falls within its bounds), else the
+    season's final week (today is past a completed season's end, or -- edge
+    case -- before its start).
+
+    Shared by the velo board and the Cauldron: both open on this week, and both
+    snap the week picker to it when the Season selector changes, so the two
+    controls can't drift into a week that isn't in the selected season."""
+    start, end = season_bounds(season_label)
+    today = date.today().isoformat()
+    anchor = min(today, end)
+    if anchor < start:
+        anchor = start
+    return week_start_for(anchor)
+
+
 def _week_end(week_start) -> str:
     """ISO date string 6 days after `week_start` (the week's Sunday)."""
     return (date.fromisoformat(str(week_start)[:10]) + timedelta(days=6)).isoformat()

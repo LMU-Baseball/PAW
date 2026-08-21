@@ -63,6 +63,7 @@ from dash import dash_table, dcc, html
 
 from app.data import cauldron
 from app.data import pitching_caps
+from app.data.seasons import available_seasons, season_bounds
 from app.dashboards import shell
 
 _TEAM_OPTIONS = ["Team 1", "Team 2", "Team 3", "Team 4"]
@@ -137,16 +138,31 @@ def _grid_rows(roster: pd.DataFrame, scoring: pd.DataFrame, teams: pd.DataFrame,
     return rows
 
 
-def week_filter(week_start) -> html.Div:
-    """The **Week** selector (`cauldron-week`, Mon-start), rendered for EVERY
-    account. It is a pure VIEW control -- it picks which week the shared
-    scoreboard totals -- so a player browses weeks exactly like a coach. Write
+def season_week_filters(season_label, week_start) -> html.Div:
+    """The **Season** (`cauldron-season`) + **Week** (`cauldron-week`, Mon-start)
+    selectors, rendered for EVERY account.
+
+    Both are pure VIEW controls -- they pick which season/week the shared
+    scoreboard totals -- so a player browses them exactly like a coach. Write
     access stays coach-only via `coach_grid` + the save/recompute callbacks'
-    `is_coach` re-check."""
+    `is_coach` re-check.
+
+    Season is the OUTER scope: it selects the roster, the `{season}-c1` cycle
+    the teams are read from, and the week the picker opens on. The week picker
+    is bounded to the selected season so the two can't drift apart."""
+    s_start, s_end = season_bounds(season_label)
     return html.Div([
         html.Div([
+            html.Label("Season", style=_LABEL_STYLE),
+            dcc.Dropdown(
+                id="cauldron-season",
+                options=[{"label": s, "value": s} for s in available_seasons()],
+                value=season_label, clearable=False, style={"minWidth": "150px"}),
+        ]),
+        html.Div([
             html.Label("Week (starts Monday)", style=_LABEL_STYLE),
-            dcc.DatePickerSingle(id="cauldron-week", date=week_start),
+            dcc.DatePickerSingle(id="cauldron-week", date=week_start,
+                                 min_date_allowed=s_start, max_date_allowed=s_end),
         ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
               "alignItems": "flex-end", "flexWrap": "wrap", "padding": "8px 16px"})

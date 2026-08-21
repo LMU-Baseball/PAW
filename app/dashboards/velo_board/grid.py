@@ -23,7 +23,7 @@ import math
 from dash import dcc, html
 
 from app.data import velo_board
-from app.data.seasons import available_seasons
+from app.data.seasons import available_seasons, season_bounds
 from app.dashboards import shell
 
 _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
@@ -37,6 +37,7 @@ def board_filters(season_label: str, week_start: str) -> html.Div:
     These are pure VIEW controls -- they pick which season/week the shared
     `velo-grid` table shows -- so players get them too. Write access stays
     coach-only via `coach_controls` + the save callback's `is_coach` re-check."""
+    _s_start, _s_end = season_bounds(season_label)
     return html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
@@ -47,7 +48,11 @@ def board_filters(season_label: str, week_start: str) -> html.Div:
         ]),
         html.Div([
             html.Label("Week (starts Monday)", style=_LABEL_STYLE),
-            dcc.DatePickerSingle(id="velo-week", date=week_start),
+            # Bounded to the selected season so the two controls can't drift
+            # apart; the season callback re-bounds + snaps this on a change.
+            dcc.DatePickerSingle(
+                id="velo-week", date=week_start,
+                min_date_allowed=_s_start, max_date_allowed=_s_end),
         ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
               "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})

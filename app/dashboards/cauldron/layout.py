@@ -1,12 +1,14 @@
 """Competitive Cauldron dashboard shell: role-branched layout.
 
-Every logged-in user (player or coach) sees the branded header, the Week filter
-(`grid.week_filter`) and the team scoreboard (`visual.scoreboard_view`) -- the
-Week selector is a pure VIEW control, so a player browses weeks just like a
-coach.
+Every logged-in user (player or coach) sees the branded header, the Season/Week
+filters (`grid.season_week_filters`) and the team scoreboard
+(`visual.scoreboard_view`) -- the selectors are pure VIEW controls, so a player
+browses seasons/weeks just like a coach. Season is the outer scope: it picks the
+roster, the `{season}-c1` cycle the teams come from, and the week the picker
+opens on.
 
 A coach ALSO sees the editable daily grid (`grid.coach_grid`), placed above the
-filter in its own coach-only section -- players never receive the grid in the
+filters in its own coach-only section -- players never receive the grid in the
 component tree at all (the first half of the coach-write double-gate;
 `callbacks.py`'s save/recompute callbacks re-checking `current_user.is_coach`
 is the second half). The grid's own **Entry date** picker stays inside it: that
@@ -35,17 +37,6 @@ def _default_cycle(season: str) -> str:
     return f"{season}-c1"
 
 
-def _default_week(season: str) -> str:
-    """The current week's Monday while the season is live, else its final week
-    (mirrors velo_board/layout.py::_default_week)."""
-    start, end = seasons.season_bounds(season)
-    today = date.today().isoformat()
-    anchor = min(today, end)
-    if anchor < start:
-        anchor = start
-    return velo_board.week_start_for(anchor)
-
-
 def _week_bounds(week_start: str) -> tuple[str, str]:
     """Inclusive Mon..Sun window for a Monday `week_start`."""
     end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
@@ -66,7 +57,7 @@ def serve_layout() -> html.Div:
 
     season = seasons.current_season()
     play_date = _default_play_date()
-    week = _default_week(season)
+    week = velo_board.default_week_for(season)
     cycle = _default_cycle(season)
     roster_names = _roster_names(season)
     w_start, w_end = _week_bounds(week)
@@ -82,7 +73,7 @@ def serve_layout() -> html.Div:
     if is_coach:
         controls.append(html.Div(grid.coach_grid(play_date, week, season),
                                  id="cauldron-coach-section"))
-    controls.append(grid.week_filter(week))
+    controls.append(grid.season_week_filters(season, week))
     children.append(html.Div(controls,
                              style={"borderBottom": f"2px solid {shell.CRIMSON}",
                                     "backgroundColor": "rgba(255,255,255,0.55)"}))

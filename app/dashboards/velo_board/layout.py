@@ -12,8 +12,6 @@ is the second half).
 """
 from __future__ import annotations
 
-from datetime import date
-
 from dash import dcc, html
 from flask_login import current_user
 
@@ -23,26 +21,13 @@ from app.dashboards import shell
 from app.dashboards.velo_board import grid, visual
 
 
-def _default_week(season_label: str) -> str:
-    """The most-recent sensible week inside `season_label`: today's week if
-    the season is still in progress (today falls within its bounds), else
-    the season's final week (today is past a completed season's end, or --
-    edge case -- before its start)."""
-    start, end = seasons.season_bounds(season_label)
-    today = date.today().isoformat()
-    anchor = min(today, end)
-    if anchor < start:
-        anchor = start
-    return velo_board.week_start_for(anchor)
-
-
 def serve_layout() -> html.Div:
     if not current_user.is_authenticated:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
 
     season = seasons.current_season()
-    week = _default_week(season)
+    week = velo_board.default_week_for(season)
 
     board = velo_board.board_rows(season, week)
     children = [

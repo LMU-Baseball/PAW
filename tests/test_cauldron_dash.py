@@ -140,7 +140,7 @@ def test_save_is_noop_for_non_coach(server, monkeypatch):
         with server.test_request_context("/dash/cauldron/"):
             login_user(player)
             save_out = on_save(1, [{"player_id": 1, "player": "X", "team": "Team 1"}],
-                               "2026-03-02", "2026-03-02")
+                               "2026-03-02", "2026-03-02", "2025/2026")
 
     assert all(v is no_update for v in save_out)   # all 5 outputs no_update
     assert save_calls == []

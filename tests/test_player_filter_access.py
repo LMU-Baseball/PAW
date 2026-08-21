@@ -151,6 +151,7 @@ def test_player_gets_cauldron_week_filter(server):
     s = _render_board_as(server, "player", "app.dashboards.cauldron.layout",
                          "/dash/cauldron/")
     assert "cauldron-week" in s, "player has no Week filter on the Cauldron"
+    assert "cauldron-season" in s, "player has no Season filter on the Cauldron"
     # The entry-date picker and the grid are WRITE controls -- still coach-only.
     assert "cauldron-date" not in s
     assert "cauldron-grid" not in s
@@ -164,8 +165,9 @@ def test_coach_still_gets_board_write_controls(server):
     assert all(t in velo for t in ("velo-season", "velo-week", "velo-edit", "velo-save"))
     cauldron = _render_board_as(server, "coach", "app.dashboards.cauldron.layout",
                                 "/dash/cauldron/")
-    assert all(t in cauldron for t in ("cauldron-week", "cauldron-date",
-                                       "cauldron-grid", "cauldron-save"))
+    assert all(t in cauldron for t in ("cauldron-season", "cauldron-week",
+                                       "cauldron-date", "cauldron-grid",
+                                       "cauldron-save"))
 
 
 def test_cauldron_week_callback_is_renderable_for_a_player(server):
@@ -182,8 +184,8 @@ def test_cauldron_week_callback_is_renderable_for_a_player(server):
     player_html = _render_board_as(server, "player", "app.dashboards.cauldron.layout",
                                    "/dash/cauldron/")
     specs = [spec for spec in dash_app.callback_map.values()
-             if [i["id"] for i in spec["inputs"]] == ["cauldron-week"]]
-    assert specs, "no callback driven solely by cauldron-week"
+             if [i["id"] for i in spec["inputs"]] == ["cauldron-season", "cauldron-week"]]
+    assert specs, "no callback driven by cauldron-season + cauldron-week"
     for spec in specs:
         for dep in list(spec["inputs"]) + list(spec["output"]
                                                if isinstance(spec["output"], list)

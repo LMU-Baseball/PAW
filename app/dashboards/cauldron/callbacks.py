@@ -1,14 +1,17 @@
 """Dash callbacks for the Competitive Cauldron dashboard.
 
-- **Week change -> rebuild the scoreboard.** This one is for EVERYONE. It is
-  deliberately kept free of any coach-only component: a player's layout renders
-  neither `cauldron-date` nor `cauldron-grid`, and Dash will not fire a callback
-  whose Inputs/Outputs are missing from the current render -- so pairing the
-  week Input with a grid Output (as it used to be) left the filter inert for
-  players. Week drives only the scoreboard and entry-date drives only the grid
-  rows, so the split is clean rather than a workaround.
+- **Season/Week change -> rebuild the scoreboard.** This one is for EVERYONE. It
+  is deliberately kept free of any coach-only component: a player's layout
+  renders neither `cauldron-date` nor `cauldron-grid`, and Dash will not fire a
+  callback whose Inputs/Outputs are missing from the current render -- so
+  pairing the week Input with a grid Output (as it used to be) left the filter
+  inert for players. Season/Week drive only the scoreboard and entry-date drives
+  only the grid rows, so the split is clean rather than a workaround. A season
+  change also snaps + re-bounds the week picker, so the two can't drift into a
+  week outside the selected season.
 - **Entry-date change -> refresh the grid rows.** Coach-only in practice: the
-  date picker and grid live inside the coach section.
+  date picker and grid live inside the coach section. Reads the season off the
+  shared `cauldron-season` selector, which a coach's render also has.
 - **Save click** -> persist the edited grid to RDS, then rebuild the scoreboard.
   The coach-write gate is re-checked HERE (not just trusted from the layout
   omitting the grid for players) -- the second half of the double-gate.
@@ -82,22 +85,41 @@ def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
         Output("cauldron-scoreboard", "children"),
+        Output("cauldron-week", "date"),
+        Output("cauldron-week", "min_date_allowed"),
+        Output("cauldron-week", "max_date_allowed"),
+        Input("cauldron-season", "value"),
         Input("cauldron-week", "date"),
         prevent_initial_call=True,
     )
-    def _on_week(week_start):
-        """EVERY account: pick a week, get that week's scoreboard. No coach-only
-        component may be referenced here or the filter goes dead for players."""
-        return _scoreboard(week_start, seasons.current_season())
+    def _on_season_or_week(season, week_start):
+        """EVERY account: pick a season/week, get that week's scoreboard.
+
+        No coach-only component may be referenced here or the filters go dead
+        for players. Mirrors the velo board: instead of asking which input
+        fired, this snaps the week whenever it falls outside the selected
+        season, so the two controls stay coherent without needing a callback
+        context. The week Output is `no_update` unless a snap is needed -- it is
+        also an Input, and echoing it back would fire this a second time.
+        """
+        start, end = seasons.season_bounds(season)
+        week = velo_board.week_start_for(week_start) if week_start else None
+        if week is None or not (velo_board.week_start_for(start) <= week <= end):
+            week = velo_board.default_week_for(season)
+            return _scoreboard(week, season), week, start, end
+        return _scoreboard(week, season), no_update, start, end
 
     @dash_app.callback(
         Output("cauldron-grid", "data"),
         Input("cauldron-date", "date"),
+        State("cauldron-season", "value"),
         prevent_initial_call=True,
     )
-    def _on_entry_date(play_date):
-        """Coach-only in practice (the date picker ships inside the grid)."""
-        return _grid_data(play_date, seasons.current_season())
+    def _on_entry_date(play_date, season):
+        """Coach-only in practice (the date picker ships inside the grid). Takes
+        the season from the shared selector -- which a coach's render also has --
+        so the roster/cycle the rows are built from follow the selection."""
+        return _grid_data(play_date, season)
 
     @dash_app.callback(
         Output("cauldron-grid", "editable", allow_duplicate=True),
@@ -123,12 +145,12 @@ def register_callbacks(dash_app) -> None:
         State("cauldron-grid", "data"),
         State("cauldron-date", "date"),
         State("cauldron-week", "date"),
+        State("cauldron-season", "value"),
         prevent_initial_call=True,
     )
-    def _on_save(n_clicks, grid_data, play_date, week_start):
+    def _on_save(n_clicks, grid_data, play_date, week_start, season):
         if not n_clicks or not _is_coach():
             return no_update, no_update, no_update, no_update, no_update
-        season = seasons.current_season()
         cycle_id = f"{season}-c1"
         grid.save_grid(grid_data, play_date, cycle_id, updated_by=getattr(current_user, "id", None))
         # The grid is being hidden, so DON'T re-read its rows (that was the slow

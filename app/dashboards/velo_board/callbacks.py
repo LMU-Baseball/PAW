@@ -23,6 +23,7 @@ from dash import Input, Output, State, no_update
 from flask_login import current_user
 
 from app.data import velo_board
+from app.data.seasons import season_bounds
 from app.dashboards.velo_board import grid, visual
 
 
@@ -34,13 +35,35 @@ def register_callbacks(dash_app) -> None:
 
     @dash_app.callback(
         Output("velo-grid", "data"),
+        Output("velo-week", "date"),
+        Output("velo-week", "min_date_allowed"),
+        Output("velo-week", "max_date_allowed"),
         Input("velo-season", "value"),
         Input("velo-week", "date"),
         prevent_initial_call=True,
     )
     def _on_season_or_week(season, week_date):
-        week = velo_board.week_start_for(week_date)
-        return visual.board_records(velo_board.board_rows(season, week))
+        """Season OR week change -> re-read the table rows, keeping the two
+        controls coherent.
+
+        Rather than asking WHICH input fired, this asks whether the picker's
+        week still lies inside the selected season and snaps it when it doesn't.
+        That covers the drift case (season changed, week left behind -- weekly
+        Velo Goal / Assessment would blank out while the season-level columns
+        updated) without depending on a callback context, and it leaves a week
+        the user picked alone whenever it is already valid for that season.
+
+        The week Output is `no_update` unless a snap is actually needed: it is
+        also an Input, so echoing a value back would fire this callback a second
+        time and pay another `board_rows` read for nothing."""
+        start, end = season_bounds(season)
+        week = velo_board.week_start_for(week_date) if week_date else None
+        if week is None or not (velo_board.week_start_for(start) <= week <= end):
+            week = velo_board.default_week_for(season)
+            return (visual.board_records(velo_board.board_rows(season, week)),
+                    week, start, end)
+        return (visual.board_records(velo_board.board_rows(season, week)),
+                no_update, start, end)
 
     @dash_app.callback(
         Output("velo-grid", "editable", allow_duplicate=True),
