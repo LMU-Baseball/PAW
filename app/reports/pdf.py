@@ -20,13 +20,29 @@ which thread they run on.
 from __future__ import annotations
 
 import atexit
+import logging
 import queue
 import re
 import threading
-from concurrent.futures import Future
+from concurrent.futures import Future, TimeoutError as FuturesTimeout
 from html import escape
 
 from playwright.sync_api import sync_playwright
+
+log = logging.getLogger(__name__)
+
+
+class ReportEngineError(RuntimeError):
+    """The PDF engine itself failed -- Chromium could not launch, crashed, or
+    timed out.
+
+    Distinct from `ReportDataError` (there is no data to report on, a 404): this
+    means the report COULD have been built but the renderer is broken, which is
+    an infrastructure problem and a 503. Hosts that can't run headless Chromium
+    -- too little RAM, or `playwright install` run without `--with-deps` so the
+    browser's shared libraries are missing -- fail here on every request.
+    """
+
 
 _MARGIN = {"top": "0.5in", "bottom": "0.5in", "left": "0.5in", "right": "0.5in"}
 
@@ -154,4 +170,16 @@ def html_to_pdf(html: str, base_url: str | None = None) -> bytes:
     _ensure_render_thread()
     fut: Future = Future()
     _JOBS.put((_with_base(html, base_url), fut))
-    return fut.result(timeout=_RENDER_TIMEOUT)
+    try:
+        return fut.result(timeout=_RENDER_TIMEOUT)
+    except FuturesTimeout as exc:
+        # A wedged Chromium must not read as a generic 500 with no explanation.
+        log.exception("PDF render timed out after %ss", _RENDER_TIMEOUT)
+        raise ReportEngineError(
+            f"PDF rendering timed out after {_RENDER_TIMEOUT:.0f}s") from exc
+    except Exception as exc:
+        # Chromium failed to launch or died mid-render. Log the real cause HERE
+        # -- it is the only place that sees it -- so the host's logs name the
+        # missing library / OOM kill instead of swallowing it into a bare 500.
+        log.exception("PDF render failed: %s", exc)
+        raise ReportEngineError(str(exc) or exc.__class__.__name__) from exc

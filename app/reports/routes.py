@@ -1,5 +1,16 @@
-"""Report download routes."""
+"""Report download routes.
+
+Every PDF route distinguishes three failure modes rather than collapsing them
+into one 500:
+
+- `ReportDataError`  -> 404. There is nothing to report on.
+- `ReportEngineError` -> 503 + a readable message. The renderer is broken (no
+  Chromium, missing shared libraries, out of memory, a wedged browser). This is
+  an infrastructure fault, not a bad request, and it used to surface as an
+  opaque "Internal Server Error" with the real cause lost.
+"""
 import io
+import logging
 import re
 import zipfile
 
@@ -9,10 +20,26 @@ from flask_login import current_user, login_required
 from app.auth.access import can_view_pitcher_report, can_view_bullpen
 from app.data import pitching_caps
 from app.data import bullpen as BULL
+from app.reports.pdf import ReportEngineError
 from app.reports.pitcher_postgame import ReportDataError, build_pitcher_postgame
 from app.reports.bullpen_report import build_bullpen_report
 
+log = logging.getLogger(__name__)
+
 report_bp = Blueprint("reports", __name__, url_prefix="/reports")
+
+_ENGINE_DOWN = (
+    "The report engine is unavailable on this server, so the PDF could not be "
+    "rendered. The data is fine -- this is a problem with the host, not the "
+    "report. Details are in the server log."
+)
+
+
+def _engine_unavailable(exc: ReportEngineError, what: str) -> Response:
+    """503 with a readable body instead of a bare 500."""
+    log.error("report engine unavailable building %s: %s", what, exc)
+    return Response("\n\n".join([_ENGINE_DOWN, f"({exc})", ""]),
+                    status=503, mimetype="text/plain")
 
 
 def _safe(text: str) -> str:
@@ -57,6 +84,8 @@ def pitcher_pdf(game_id: int, pitcher_id: int):
         pdf = build_pitcher_postgame(game_id, pitcher_id)
     except ReportDataError:
         abort(404)
+    except ReportEngineError as exc:
+        return _engine_unavailable(exc, f"pitcher {pitcher_id} game {game_id}")
     return Response(
         pdf, mimetype="application/pdf",
         headers={"Content-Disposition":
@@ -93,6 +122,10 @@ def pitching_all_zip(game_id: int):
                 pdf = build_pitcher_postgame(game_id, p["player_id"])
             except ReportDataError:
                 continue  # skip non-LMU / no-data pitchers rather than failing all
+            except ReportEngineError as exc:
+                # Don't keep looping: a broken renderer fails every pitcher, and
+                # swallowing it would return an empty zip -> a misleading 404.
+                return _engine_unavailable(exc, f"game {game_id} zip")
             name = f"{_safe(p['display_name'])}.pdf"
             if name in used_names:  # dedupe identical display names
                 name = f"{_safe(p['display_name'])}_{p['player_id']}.pdf"
@@ -167,6 +200,8 @@ def bullpen_pdf(pitcher_id: int, date: str):
         pdf = build_bullpen_report(pitcher_id, date)
     except ReportDataError:
         abort(404)
+    except ReportEngineError as exc:
+        return _engine_unavailable(exc, f"bullpen {pitcher_id} {date}")
     return Response(
         pdf, mimetype="application/pdf",
         headers={"Content-Disposition":
