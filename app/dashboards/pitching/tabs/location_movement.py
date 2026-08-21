@@ -1,9 +1,19 @@
-"""Location / Movement tab: pitch-type chip filter -> movement + location + table."""
+"""Location / Movement tab: pitch-type chip filter -> movement + location + table,
+plus a year-over-year movement comparison for returning pitchers.
+
+The chip/count/result/hand filters and the two figures at the top are scoped to
+the CURRENT selection (one outing, or the whole date range). The year-over-year
+panel underneath is deliberately NOT -- it is season vs season, read straight
+from `pitcher_development.season_movement`, because "has his slider moved
+differently this year?" is a question about full seasons, not about whichever
+outing happens to be selected.
+"""
 from __future__ import annotations
 
 import pandas as pd
 from dash import dcc, html
 
+from app.data import pitcher_development as PD
 from app.data import pitching as P
 from app.dashboards.pitching import tables
 from app.dashboards.shell import section
@@ -88,8 +98,98 @@ def _filter_row(df: pd.DataFrame) -> html.Div:
               "alignItems": "center", "margin": "6px 0"})
 
 
-def render(df: pd.DataFrame) -> html.Div:
+
+
+# ---------------------------------------------------------------------------
+# Year-over-year movement comparison (returning pitchers only).
+# ---------------------------------------------------------------------------
+
+# Inches of headroom around the union of both seasons' break extents, so a
+# marker sitting at the extreme never lands on the axis line.
+_YOY_PAD = 2.0
+# Half-width applied when both seasons collapse to a single break value -- a
+# zero-width range renders as a hairline and Plotly then ignores it.
+_YOY_MIN_HALF_SPAN = 1.0
+
+
+def _union_range(frames, col):
+    """The [lo, hi] axis range covering `col` across ALL of `frames`, padded.
+
+    Shared axes are the whole point of this panel: two movement scatters
+    side by side that each autorange to their own data are actively
+    MISLEADING -- a season with a tighter cluster gets zoomed in until it
+    looks like the pitch moved more, not less. So both figures get the union
+    of both seasons' extents. Returns None when nothing is plottable, in which
+    case the caller leaves the axis alone.
+    """
+    vals = [f[col].dropna() for f in frames if col in getattr(f, "columns", [])]
+    vals = pd.concat(vals, ignore_index=True) if vals else pd.Series(dtype="float64")
+    if vals.empty:
+        return None
+    lo, hi = float(vals.min()), float(vals.max())
+    if lo == hi:
+        lo, hi = lo - _YOY_MIN_HALF_SPAN, hi + _YOY_MIN_HALF_SPAN
+    return [lo - _YOY_PAD, hi + _YOY_PAD]
+
+
+def _yoy_panel(season_label: str, df: pd.DataFrame, x_range, y_range) -> html.Div:
+    """One side of the comparison: `fig_movement` with the SHARED axis ranges
+    forced on afterwards (reusing the existing figure builder rather than
+    writing a second movement plot)."""
+    fig = P.fig_movement(df)
+    if x_range:
+        fig.update_xaxes(range=x_range)
+    if y_range:
+        fig.update_yaxes(range=y_range)
+    fig.update_layout(title=f"Movement · {season_label}")
+    return html.Div([
+        html.Div(season_label, style={"fontFamily": "Teko, sans-serif",
+                                      "fontSize": "18px", "fontWeight": "bold",
+                                      "color": "#555"}),
+        dcc.Graph(figure=fig),
+    ], style={"flex": "1"})
+
+
+def yoy_movement(pitcher_id, season):
+    """Previous season LEFT, current season RIGHT -- or None.
+
+    None (and therefore nothing rendered at all: no empty panel, no apology
+    text) whenever there is no prior season in which this pitcher actually
+    threw. `previous_season_with_data` walks BACK past redshirt/injury years,
+    so "returning pitcher" here means "has tracked pitches in some earlier
+    season", not "was on the roster last year".
+    """
+    if pitcher_id is None or not season:
+        return None
+    prev_label = PD.previous_season_with_data(int(pitcher_id), season)
+    if not prev_label:
+        return None
+    prev_df = PD.season_movement(int(pitcher_id), prev_label)
+    cur_df = PD.season_movement(int(pitcher_id), season)
+    if prev_df.empty and cur_df.empty:
+        return None
+    x_range = _union_range([prev_df, cur_df], "horz_break")
+    y_range = _union_range([prev_df, cur_df], "induced_vert_break")
+    return html.Div([
+        section("Year Over Year Movement"),
+        html.Div([
+            _yoy_panel(str(prev_label), prev_df, x_range, y_range),
+            _yoy_panel(str(season), cur_df, x_range, y_range),
+        ], className="paw-chart-row", style={"display": "flex", "gap": "16px"}),
+    ])
+
+
+def render(df: pd.DataFrame, pitcher_id=None, season=None) -> html.Div:
+    """`pitcher_id` / `season` come from the `selection` store via
+    `callbacks._render_tab` (the same way the Outing Overview tab is handed its
+    pitcher). They are optional so a bare `render(df)` -- tests, and any caller
+    that only has a dataframe -- still works, just without the year-over-year
+    panel, which cannot be built from one selection's pitches alone."""
     if df.empty:
         return html.Div("No pitch data.")
-    return html.Div([chip_row(df, "lm"), _filter_row(df),
-                     html.Div(id="lm-body", children=body(df))])
+    children = [chip_row(df, "lm"), _filter_row(df),
+                html.Div(id="lm-body", children=body(df))]
+    yoy = yoy_movement(pitcher_id, season)
+    if yoy is not None:
+        children.append(yoy)
+    return html.Div(children)

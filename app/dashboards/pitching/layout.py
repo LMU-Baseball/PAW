@@ -6,7 +6,7 @@ from datetime import date
 from dash import dcc, html
 from flask_login import current_user
 
-from app.data import pitching_caps, seasons, parallel
+from app.data import pitcher_development, pitching_caps, seasons, parallel
 from app.data import video as videodata
 from app.dashboards import date_range as dr, notes_ui
 from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header
@@ -21,14 +21,143 @@ def _tile(label, value):
               "backgroundColor": "rgba(255,255,255,0.8)", "borderRadius": "8px"})
 
 
-def sidebar(pitcher_id, start=None, end=None) -> html.Div:
+# ---------------------------------------------------------------------------
+# Development-trend callout (season over season), under the KPI tiles.
+# ---------------------------------------------------------------------------
+
+# WHICH WAY IS BETTER, PER METRIC. The raw sign of `current - previous` says
+# nothing about whether the pitcher improved, so colour is driven by
+# `delta * _GOOD_DIRECTION[metric]` and NEVER by the sign of the delta alone.
+# +1 = higher is better, -1 = lower is better. A pitcher whose BB% or Barrel%
+# went UP has got worse and must render red, not green -- that inversion is the
+# single most important line in this file.
+_GOOD_DIRECTION = {
+    "avg_velo": +1,     # throwing harder is better
+    "max_velo": +1,     # throwing harder is better
+    "k_pct": +1,        # more strikeouts is better
+    "bb_pct": -1,       # more walks allowed is WORSE
+    "barrel_pct": -1,   # more barrels allowed is WORSE
+}
+
+_DEV_LABELS = {"avg_velo": "Avg Velo", "max_velo": "Max Velo", "k_pct": "K%",
+               "bb_pct": "BB%", "barrel_pct": "Barrel%"}
+# The three rate stats print with a trailing '%'; the velo pair is bare mph.
+_DEV_SUFFIX = {"k_pct": "%", "bb_pct": "%", "barrel_pct": "%"}
+
+# Improvement / regression / no-meaningful-change. Deliberately NOT the brand
+# crimson for "worse": crimson is this app's neutral accent (every KPI tile
+# above uses it), so reusing it here would read as "normal", not "down".
+_BETTER, _WORSE, _FLAT = "#1B7A3F", "#B00020", "#666"
+# className mirrors the colour so a test (and a future stylesheet) can assert on
+# the SEMANTICS -- better/worse -- rather than on a hex string.
+_BETTER_CLASS, _WORSE_CLASS, _FLAT_CLASS = ("paw-delta-better", "paw-delta-worse",
+                                            "paw-delta-flat")
+
+
+def _short_season(label) -> str:
+    """'2024/2025' -> "'25" -- the spring year, which is how coaches name a
+    season, and short enough for a 260px sidebar. Anything not in YYYY/YYYY
+    form passes through untouched."""
+    text = str(label or "")
+    tail = text.split("/")[-1]
+    return f"'{tail[-2:]}" if len(tail) == 4 and tail.isdigit() else text
+
+
+def _delta_badge(metric, delta) -> html.Div:
+    """The coloured arrow row: direction from the sign, COLOUR from whether
+    that direction is an improvement for this particular metric."""
+    suffix = _DEV_SUFFIX.get(metric, "")
+    if round(float(delta), 1) == 0:
+        # Rounds to nothing at display precision -- render it flat rather than
+        # an arrow pointing at "+0.0", which reads as a change that isn't one.
+        return html.Div(f"± 0.0{suffix}", className=_FLAT_CLASS,
+                        style={"fontSize": "13px", "color": _FLAT})
+    improved = float(delta) * _GOOD_DIRECTION[metric] > 0
+    arrow = "▲" if delta > 0 else "▼"
+    return html.Div(f"{arrow} {delta:+.1f}{suffix}",
+                    className=_BETTER_CLASS if improved else _WORSE_CLASS,
+                    style={"fontSize": "13px", "fontWeight": "bold",
+                           "color": _BETTER if improved else _WORSE})
+
+
+def _dev_card(metric, current, previous, deltas):
+    """One metric: small-caps label, the big current number, then (only when
+    there IS a comparison) the delta badge and last season's value.
+
+    Returns None -- so the caller drops it -- when the metric is missing this
+    season; a blank card is worse than one fewer card.
+    """
+    value = current.get(metric)
+    if value is None:
+        return None
+    suffix = _DEV_SUFFIX.get(metric, "")
+    kids = [
+        html.Div(_DEV_LABELS[metric],
+                 style={"fontSize": "11px", "letterSpacing": "1px",
+                        "textTransform": "uppercase", "color": "#555"}),
+        html.Div(f"{value:.1f}{suffix}",
+                 style={"fontSize": "22px", "fontWeight": "bold", "color": CRIMSON,
+                        "lineHeight": "1.1"}),
+    ]
+    # `metric in deltas` is the render guard the data layer is built around: a
+    # metric missing on EITHER side is absent from the dict (not present-as-
+    # None), and `deltas` is empty outright for a first-year pitcher -- so this
+    # one test covers both "no previous season" and "no previous value".
+    if metric in deltas:
+        kids.append(_delta_badge(metric, deltas[metric]))
+        kids.append(html.Div(
+            f"{_short_season(previous['label'])} {previous[metric]:.1f}{suffix}",
+            style={"fontSize": "11px", "color": "#777"}))
+    return html.Div(kids, style={"textAlign": "center", "padding": "6px 8px",
+                                 "backgroundColor": "rgba(255,255,255,0.8)",
+                                 "borderRadius": "8px"})
+
+
+def development_callout(pitcher_id, season=None) -> html.Div:
+    """Season-over-season development block for the sidebar.
+
+    Season-scoped, NOT date-range-scoped -- unlike the KPI tiles above it --
+    because "did he add a tick this year?" is only meaningful against whole
+    seasons. Hence the explicit season caption: two blocks of numbers stacked
+    in one sidebar under different scopes would otherwise be a trap.
+
+    Renders the current values with no arrows and no previous row when there is
+    no prior season with data; no "N/A", no apology text.
+    """
+    comp = pitcher_development.season_comparison(int(pitcher_id), season)
+    current, previous = comp["current"], comp["previous"]
+    deltas = comp["deltas"] or {}
+    cards = [c for c in (_dev_card(m, current, previous, deltas)
+                         for m in pitcher_development.DELTA_METRICS) if c is not None]
+    if not cards:
+        return html.Div()   # nothing measurable this season -- show nothing
+    caption = f"Development · {_short_season(current['label'])}"
+    if previous:
+        caption += f" vs {_short_season(previous['label'])}"
+    return html.Div([
+        html.Div(caption, style={"fontSize": "13px", "fontWeight": "bold",
+                                 "color": CRIMSON, "marginTop": "12px"}),
+        html.Div(cards, style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
+                               "gap": "6px", "marginTop": "4px"}),
+        html.Div("Season totals, not the date range above.",
+                 style={"fontSize": "11px", "color": "#777", "marginTop": "4px"}),
+    ])
+
+
+def sidebar(pitcher_id, start=None, end=None, season=None) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style={"padding": "12px"})
-    # Warm the two independent sidebar reads concurrently (helps the cold
+    # The development callout is season-over-season, so it needs the SELECTED
+    # season (threaded down from the `pit-season` dropdown) rather than the
+    # date range that scopes the tiles above it. Defaulting keeps the older
+    # 3-arg call signature working.
+    season = season or seasons.current_season()
+    # Warm the three independent sidebar reads concurrently (helps the cold
     # player-selection callback path, not just first paint).
     parallel.prefetch(
         lambda: pitching_caps.pitcher_profile(int(pitcher_id)),
         lambda: pitching_caps.range_summary(int(pitcher_id), start, end),
+        lambda: pitcher_development.season_comparison(int(pitcher_id), season),
     )
     prof = pitching_caps.pitcher_profile(int(pitcher_id))
     summ = pitching_caps.range_summary(int(pitcher_id), start, end)
@@ -50,6 +179,7 @@ def sidebar(pitcher_id, start=None, end=None) -> html.Div:
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Stats reflect the selected date range · Barrel = 95+ mph EV (provisional).",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
+        development_callout(pitcher_id, season),
     ], style={"padding": "8px"})
 
 
@@ -119,6 +249,7 @@ def serve_layout() -> html.Div:
                 pitcher_id=default_pitcher),
             lambda: pitching_caps.pitcher_profile(int(default_pitcher)),
             lambda: pitching_caps.range_summary(int(default_pitcher), start_d, end_d),
+            lambda: pitcher_development.season_comparison(int(default_pitcher), season),
         )
 
     games_df = (pitching_caps.games_for_pitcher(default_pitcher, s_bound, e_bound)
@@ -179,7 +310,7 @@ def serve_layout() -> html.Div:
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div([
             html.Div([
-                html.Div(id="sidebar", children=sidebar(default_pitcher, start_d, end_d)),
+                html.Div(id="sidebar", children=sidebar(default_pitcher, start_d, end_d, season)),
                 notes_ui.note_card("pitching"),
             ], className="paw-dash-sidebar", style={"width": "260px", "flexShrink": "0"}),
             html.Div([selector_row, tabs,

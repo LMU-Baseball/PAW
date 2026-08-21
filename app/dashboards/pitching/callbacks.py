@@ -135,19 +135,23 @@ def register_callbacks(dash_app) -> None:
                 lambda: pitching_caps.range_pitches_for(int(pid), start, end))
         return opts, value
 
-    # Pitcher/date-range -> sidebar (range_summary is date-range-driven, so the
-    # season's bounds rescope it automatically; no season Input needed).
+    # Pitcher/date-range -> sidebar. The KPI tiles are date-range-driven (the
+    # season's bounds rescope them automatically), but the development callout
+    # below them is season-over-season, so the season IS an Input here: it has
+    # to agree with the `pit-season` dropdown, not with whatever range happens
+    # to be selected inside it.
     @dash_app.callback(
         Output("sidebar", "children"),
         Input("pitcher-dd", "value"),
         Input("pit-daterange", "start_date"), Input("pit-daterange", "end_date"),
+        Input("pit-season", "value"),
         prevent_initial_call=True,
     )
-    def _on_sidebar(pitcher_id, start, end):
+    def _on_sidebar(pitcher_id, start, end, season):
         is_coach = bool(getattr(current_user, "is_coach", False))
         own = getattr(current_user, "trackman_id", None)
         pid = selectors.resolve_pitcher(pitcher_id, is_coach=is_coach, own_trackman_id=own)
-        return layout.sidebar(pid, start, end)
+        return layout.sidebar(pid, start, end, season)
 
     # Selection -> selection store + scoreboard (fresh season/dates as Inputs).
     @dash_app.callback(
@@ -217,7 +221,13 @@ def register_callbacks(dash_app) -> None:
         if tab == "breakdown":
             return pitch_breakdown.render(df)
         if tab == "location":
-            return location_movement.render(df)
+            # The year-over-year panel needs more than this selection's pitches:
+            # hand the tab the pitcher and the selected season so it can pull
+            # the two full seasons itself (same shape as the Outing Overview
+            # dispatch above, which is also handed ids rather than a frame).
+            sel = sel or {}
+            return location_movement.render(df, sel.get("pitcher_id"),
+                                            sel.get("season"))
         if tab == "counts":
             return counts.render(df)
         if tab == "heatmaps":
