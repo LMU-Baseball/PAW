@@ -81,13 +81,34 @@ All of Part A is application code and config, so it moves unchanged to AWS.
 2. Else, if production — raise `RuntimeError` at boot.
 3. Else — the dev default, with a logged warning.
 
-**Production is signalled by `PAW_ENV=production`**, an explicit host-agnostic
-variable, with Render's auto-set `RENDER` as a fallback so the current
-deployment stays correct if the variable is forgotten. Keying off `RENDER`
-alone would silently disable every production behavior after the AWS move.
+**Production is signalled ONLY by an explicit `PAW_ENV=production`.**
 
-**Deployment order matters:** `SECRET_KEY` must be set in Render's environment
-*before* this merges, or the next deploy fails to boot.
+*Revised 2026-08-24 for zero-downtime.* The original design also treated
+Render's auto-set `RENDER` variable as a production signal. That is unsafe
+here: `RENDER` is already set on the live host, so merging would immediately
+activate the boot guard, and if `SECRET_KEY` were not yet configured the site
+would go down on the next deploy. Requiring an explicit opt-in makes the merge
+a no-op in production and gives the user a one-variable rollback switch.
+
+An explicit variable is also the portable choice — `RENDER` does not exist on
+Lightsail, so keying off it would silently disable every production behavior
+after the AWS move.
+
+### A-gating: what is always on vs. production-only
+
+To keep the merge risk-free, only the three behaviors that genuinely require
+HTTPS are gated behind `PAW_ENV=production`:
+
+| Production-only (`PAW_ENV=production`) | Always on (safe on HTTP and in dev) |
+|---|---|
+| `SESSION_COOKIE_SECURE` | `HTTPONLY`, `SAMESITE=Lax`, 30-day sliding sessions |
+| `Strict-Transport-Security` | `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, CSP Report-Only |
+| `SECRET_KEY` boot guard | `ProxyFix`, login rate limiting, POST-only logout |
+
+**Two-phase rollout.** Phase 1 is the merge, which changes nothing in
+production because `PAW_ENV` is unset. Phase 2 is the user setting
+`SECRET_KEY` and `PAW_ENV=production` in Render, which activates the rest.
+Unsetting `PAW_ENV` reverts instantly without a code change.
 
 ### A2. `ProxyFix`
 
@@ -131,6 +152,15 @@ about 3× the configured value. That still removes ~99% of brute-force
 throughput. An exact limit needs Redis, which costs money. This matters *more*
 after the AWS move, since a bare VM has none of Render's edge protection.
 
+**Must be disabled under test.** Seventeen test files POST to `/login`, many
+repeatedly. `RATELIMIT_ENABLED` is set to `False` whenever `TESTING` is true,
+or the existing suite breaks.
+
+**Dependency lesson (memory §3):** `Flask-Compress` once shipped as a
+`compress=True` kwarg without the package, and every dashboard test errored.
+The `Flask-Limiter` import and its `requirements.txt` entry must land in the
+same commit.
+
 ### A6. CSP as Report-Only first
 
 Dash injects inline scripts and Plotly writes inline styles, so an enforced
@@ -143,6 +173,17 @@ down.
 
 Currently a GET, so any page can log a user out with an `<img>` tag. Becomes a
 small POST form.
+
+**Sequenced last, and separable.** There are two logout link sites —
+`app/templates/base.html:121` (Jinja `<a>`) and `app/dashboards/shell.py:120`
+(Dash `html.A`, rendered inside all seven dashboard headers). Turning both into
+buttons carries the only visual-regression risk in Part A, against the lowest
+severity item on the list: the impact of logout CSRF is an annoyance, not a
+breach. It is therefore the final Part A task and can be dropped without
+affecting anything else. Three tests currently `GET /logout`
+(`tests/test_auth.py:192,240,266`) and must move to POST;
+`tests/test_hitting_dash.py:408` asserts `"/logout" in tree`, which a form
+`action` still satisfies.
 
 ### Deliberately NOT done: global CSRF
 
