@@ -118,3 +118,89 @@ def test_wsgi_app_is_wrapped_in_proxyfix(monkeypatch):
 
     server = create_app(T)
     assert isinstance(server.wsgi_app, ProxyFix)
+
+
+# --------------------------------------------------------------------------
+# Behavioral coverage: the tests above only assert Config constants, which
+# would still pass even if the before_request hook that sets
+# `session.permanent = True` silently stopped firing (the config values are
+# source-code literals, not proof the running app applies them). These tests
+# issue a real request through a test client, log a user in so a session
+# cookie is actually written, and inspect the real Set-Cookie header.
+# --------------------------------------------------------------------------
+
+def _set_cookie_header(resp, name="session"):
+    for h in resp.headers.getlist("Set-Cookie"):
+        if h.startswith(f"{name}="):
+            return h
+    raise AssertionError(f"No Set-Cookie header found for cookie {name!r}")
+
+
+def _make_login_app(monkeypatch, **env):
+    """Build a real app (DB-free w.r.t. MySQL -- app DB is a throwaway sqlite
+    file) and seed one user, mirroring tests/test_auth.py's `app` fixture, so
+    a session cookie can be issued by actually POSTing to /login."""
+    import os
+    import tempfile
+
+    cfg = _reload_config(monkeypatch, SECRET_KEY="test-secret", **env)
+    from app import create_app
+    from app.auth.models import User
+    from app.extensions import db
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+
+    class T(cfg.Config):
+        TESTING = True
+        WTF_CSRF_ENABLED = False
+        SECRET_KEY = "test-secret"
+        SQLALCHEMY_DATABASE_URI = "sqlite:///" + path.replace("\\", "/")
+
+    application = create_app(T)
+    with application.app_context():
+        user = User(email="cookie@lmu.edu", name="Cookie Test", role="coach")
+        user.set_password("pw")
+        db.session.add(user)
+        db.session.commit()
+    return application, path
+
+
+def _dispose_login_app(application, path):
+    import os
+    from app.extensions import db
+
+    with application.app_context():
+        db.session.remove()
+        db.engine.dispose()
+    try:
+        os.remove(path)
+    except PermissionError:
+        pass  # Windows may still hold the handle briefly; temp file is harmless
+
+
+def test_session_set_cookie_header_is_httponly_lax_and_permanent(monkeypatch):
+    """Proves the before_request hook actually fires: a non-permanent session
+    emits no Expires/Max-Age at all, so their presence here is the signal."""
+    application, path = _make_login_app(monkeypatch, PAW_ENV=None)
+    try:
+        client = application.test_client()
+        resp = client.post("/login", data={"email": "cookie@lmu.edu", "password": "pw"})
+        cookie = _set_cookie_header(resp)
+        assert "HttpOnly" in cookie
+        assert "SameSite=Lax" in cookie
+        assert ("Expires=" in cookie) or ("Max-Age=" in cookie)
+        assert "Secure" not in cookie
+    finally:
+        _dispose_login_app(application, path)
+
+
+def test_session_set_cookie_header_is_secure_in_production(monkeypatch):
+    application, path = _make_login_app(monkeypatch, PAW_ENV="production")
+    try:
+        client = application.test_client()
+        resp = client.post("/login", data={"email": "cookie@lmu.edu", "password": "pw"})
+        cookie = _set_cookie_header(resp)
+        assert "Secure" in cookie
+    finally:
+        _dispose_login_app(application, path)
