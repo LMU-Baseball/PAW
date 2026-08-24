@@ -230,11 +230,11 @@ def _velo_rows(pitcher_id, start=None, end=None) -> pd.DataFrame:
     params = dict(idp)
     if start is not None:
         g_clause += " AND Date >= :s"
-        b_clause += " AND DATE(Date) >= :s"
+        b_clause += " AND `Date` >= :s"
         params["s"] = str(start)
     if end is not None:
         g_clause += " AND Date <= :e"
-        b_clause += " AND DATE(Date) <= :e"
+        b_clause += " AND `Date` <= :e"
         params["e"] = str(end)
     games = query_df(f"SELECT RelSpeed AS rel_speed, Date AS dt FROM GAMES WHERE {g_clause}", params)
     bullpen = query_df(f"SELECT RelSpeed AS rel_speed, DATE(Date) AS dt FROM BULLPEN WHERE {b_clause}", params)
