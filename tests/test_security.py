@@ -13,6 +13,23 @@ def _reload_config(monkeypatch, **env):
     return importlib.reload(config)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_config_after_module():
+    """importlib.reload() mutates the config module in place. When a reload
+    raises partway through (e.g. the missing-SECRET_KEY-in-production test),
+    names defined before the raise get rebound but later ones (like Config)
+    keep their value from the previous successful reload, leaving `config`
+    in a state that never actually existed. Nothing today reads config.*
+    dynamically so that's safe by absence of coupling, not by design -- so
+    reload once more after all tests in this module have run. By then every
+    function-scoped monkeypatch has already torn down and restored the real
+    environment, so this reload puts `config` back to matching reality for
+    whatever test file runs next."""
+    yield
+    import config
+    importlib.reload(config)
+
+
 @pytest.fixture(autouse=True)
 def _dummy_db_env(monkeypatch):
     for k in ("MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST", "MYSQL_DB"):
@@ -27,6 +44,22 @@ def test_is_production_false_when_paw_env_unset(monkeypatch):
 def test_is_production_true_only_for_exact_production_value(monkeypatch):
     cfg = _reload_config(monkeypatch, PAW_ENV="production", SECRET_KEY="x")
     assert cfg.is_production() is True
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("Production", True),   # normalization is intentional -- fails secure
+        ("PRODUCTION", True),
+        (" production ", True),
+        ("prod", False),        # near-miss: must NOT count as production
+        ("development", False),
+        ("", False),
+    ],
+)
+def test_is_production_boundary(monkeypatch, value, expected):
+    cfg = _reload_config(monkeypatch, PAW_ENV=value, SECRET_KEY="x")
+    assert cfg.is_production() is expected
 
 
 def test_render_env_var_alone_does_not_mean_production(monkeypatch):
