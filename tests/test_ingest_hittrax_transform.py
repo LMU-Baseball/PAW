@@ -444,7 +444,16 @@ def test_transform_uses_delete_not_truncate_for_rebuild(monkeypatch):
     executed_upper = [s.upper() for s in engine.executed]
     assert any("DELETE FROM PRACTICE_PLAYS" in s for s in executed_upper)
     assert any("DELETE FROM PRACTICE_SESSIONS" in s for s in executed_upper)
-    assert any("DELETE FROM PLAYER_STATS_SUMMARY" in s for s in executed_upper)
+    # transform() must NOT touch `player_stats_summary`. That table belongs to
+    # the separate Streamlit practice-analytics app, whose scheduled ETL drops
+    # and recreates it; PAW never reads it (app.data.practice.load_player_stats
+    # aggregates PRACTICE_SESSIONS + PRACTICE_PLAYS instead). While PAW did
+    # write it, every live transform() died on `Table doesn't exist` whenever
+    # that other ETL had just dropped it.
+    assert not any("PLAYER_STATS_SUMMARY" in s for s in executed_upper), (
+        "transform() must not read or write player_stats_summary -- it is owned "
+        "by the Streamlit app, not PAW"
+    )
     assert not any("TRUNCATE" in s for s in executed_upper), (
         "transform() must never issue TRUNCATE -- it's DDL with an implicit "
         "commit in MySQL, breaking this transaction's atomic rebuild guarantee"
@@ -474,7 +483,11 @@ def test_transform_reenables_fk_checks_after_failed_rebuild(monkeypatch):
     class _BoomConn(_FakeConn):
         def execute(self, sql, params=None):
             s = str(sql)
-            if "INSERT INTO player_stats_summary" in s:
+            # Fail on the last DB step of the rebuild (the total_plays
+            # back-fill), so the happy-path `SET FOREIGN_KEY_CHECKS = 1`
+            # immediately after it never runs and only the `finally`'s safety
+            # net can account for the re-enable asserted below.
+            if "SET ps.total_plays" in s:
                 # Record it (as the real connection would, having received
                 # the statement) before raising, so the test can still
                 # assert on ordering relative to the failure.
@@ -503,7 +516,7 @@ def test_transform_reenables_fk_checks_after_failed_rebuild(monkeypatch):
     # The FK-checks reset must come after the rollback, and the rollback
     # must come after the failing statement -- i.e. cleanup order is
     # (fail) -> rollback -> re-enable FK checks.
-    fail_idx = next(i for i, s in enumerate(engine.executed) if "INSERT INTO player_stats_summary" in s)
+    fail_idx = next(i for i, s in enumerate(engine.executed) if "SET ps.total_plays" in s)
     rollback_idx = engine.executed.index("TRANS_ROLLBACK")
     fk_reenable_idx = executed_upper.index("SET FOREIGN_KEY_CHECKS = 1")
     assert fail_idx < rollback_idx < fk_reenable_idx

@@ -1,6 +1,15 @@
 """HitTrax raw ELT: FTPS -> `RAW_PRACTICE_CSV` staging table, PLUS the
 transform step from that raw layer into the clean analytics tables
-(`PRACTICE_SESSIONS` / `PRACTICE_PLAYS` / `player_stats_summary`).
+(`PRACTICE_SESSIONS` / `PRACTICE_PLAYS`).
+
+Note on `player_stats_summary`: the original pipeline maintained a third table
+by that name, and this module used to rebuild it. It does not any more. That
+table belongs to the separate Streamlit practice-analytics app, whose scheduled
+ETL drops and recreates it (lowercase) on its own timetable, and PAW never read
+it -- `app.data.practice.load_player_stats` aggregates the same shape from
+PRACTICE_SESSIONS + PRACTICE_PLAYS instead. Writing it from here meant two apps
+fighting over one table, and left `transform()` failing outright whenever the
+other app's ETL had dropped it.
 
 Reproduces the "Extract & Load Phase" of the original pipeline (see
 ``docs/reference/hittrax-practice-analytics/pipeline-architecture.md`` §1):
@@ -188,8 +197,7 @@ def extract_load_raw(
 
 
 # ===========================================================================
-# TRANSFORM: RAW_PRACTICE_CSV -> PRACTICE_SESSIONS / PRACTICE_PLAYS /
-# player_stats_summary
+# TRANSFORM: RAW_PRACTICE_CSV -> PRACTICE_SESSIONS / PRACTICE_PLAYS
 #
 # Column-by-column mapping source of truth:
 # docs/reference/hittrax-practice-analytics/transformed_schema.sql
@@ -489,8 +497,8 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
       convention used elsewhere in this schema (e.g. `BatId`) -- stored as-is,
       not coerced to NULL, since the schema gives no override rule for them.
     - ``player_name``/``first_name``/``last_name`` have no PlaysExport field
-      at all (only ids/uuids) and are left NULL; `player_stats_summary`
-      later fills in name info from `PRACTICE_SESSIONS`.
+      at all (only ids/uuids) and are left NULL; name info is resolved at read
+      time by joining `PRACTICE_SESSIONS`.
     - ``play_timestamp`` <- `TS` (parsed datetime); the play's `session_date`
       (for the merge key only, not a `PRACTICE_PLAYS` column) is `TS`'s date
       part, per pipeline-architecture.md's "Session-to-Play Mapping Logic".
@@ -540,137 +548,6 @@ def transform_plays(raw_df: pd.DataFrame, sessions_with_ids: pd.DataFrame) -> pd
     return merged.reset_index(drop=True)
 
 
-# ---------------------------------------------------------------------------
-# player_stats_summary aggregation (transform()'s DB-only step)
-# ---------------------------------------------------------------------------
-
-# INSERT ... SELECT ... ON DUPLICATE KEY UPDATE per pipeline-architecture.md
-# §2.3, extended to cover the full player_stats_summary schema (the
-# reference's code sample is illustrative/truncated with "..."). Traditional
-# batting totals (AB/hits/BA/SLG) come from PRACTICE_SESSIONS (career
-# per-session aggregates, per the schema's "career totals from sessions"
-# comments); exit-velocity/distance/hit-type/swing-rate stats come from
-# PRACTICE_PLAYS. `NULLIF(..., 0)` denominators keep missing data as NULL
-# rather than skewing rates to 0, per the "NULL Handling" data-quality rule.
-_PLAYER_STATS_SQL = """
-INSERT INTO player_stats_summary
-    (player_id, player_name, player_uuid, first_name, last_name,
-     total_plays, total_sessions, last_practice_date,
-     avg_exit_velocity, max_exit_velocity,
-     avg_distance, max_distance,
-     avg_launch_angle,
-     total_at_bats, total_hits, total_singles, total_doubles,
-     total_triples, total_home_runs,
-     career_batting_avg, career_slugging_pct,
-     hard_hit_count, hard_hit_rate,
-     fly_ball_rate, line_drive_rate,
-     total_swings, swing_rate)
-SELECT
-    ap.player_id,
-    ps.player_name,
-    COALESCE(ps.player_uuid, pp.player_uuid) AS player_uuid,
-    ps.first_name,
-    ps.last_name,
-    COALESCE(pp.total_plays, 0) AS total_plays,
-    COALESCE(ps.total_sessions, 0) AS total_sessions,
-    ps.last_practice_date,
-    pp.avg_exit_velocity,
-    pp.max_exit_velocity,
-    pp.avg_distance,
-    pp.max_distance,
-    pp.avg_launch_angle,
-    COALESCE(ps.total_at_bats, 0) AS total_at_bats,
-    COALESCE(ps.total_hits, 0) AS total_hits,
-    COALESCE(ps.total_singles, 0) AS total_singles,
-    COALESCE(ps.total_doubles, 0) AS total_doubles,
-    COALESCE(ps.total_triples, 0) AS total_triples,
-    COALESCE(ps.total_home_runs, 0) AS total_home_runs,
-    CASE WHEN ps.total_at_bats > 0 THEN ps.total_hits / ps.total_at_bats ELSE NULL END AS career_batting_avg,
-    CASE WHEN ps.total_at_bats > 0
-        THEN (ps.total_singles + 2 * ps.total_doubles + 3 * ps.total_triples + 4 * ps.total_home_runs) / ps.total_at_bats
-        ELSE NULL END AS career_slugging_pct,
-    COALESCE(ps.hard_hit_count, 0) AS hard_hit_count,
-    pp.hard_hit_rate,
-    pp.fly_ball_rate,
-    pp.line_drive_rate,
-    COALESCE(pp.total_swings, 0) AS total_swings,
-    pp.swing_rate
-FROM (
-    SELECT player_id FROM PRACTICE_SESSIONS WHERE player_id IS NOT NULL
-    UNION
-    SELECT player_id FROM PRACTICE_PLAYS WHERE player_id IS NOT NULL
-) ap
-LEFT JOIN (
-    SELECT
-        player_id,
-        MAX(user_name) AS player_name,
-        MAX(player_uuid) AS player_uuid,
-        MAX(first_name) AS first_name,
-        MAX(last_name) AS last_name,
-        COUNT(*) AS total_sessions,
-        MAX(session_date) AS last_practice_date,
-        SUM(at_bats) AS total_at_bats,
-        SUM(singles) AS total_singles,
-        SUM(doubles) AS total_doubles,
-        SUM(triples) AS total_triples,
-        SUM(home_runs) AS total_home_runs,
-        SUM(COALESCE(singles, 0) + COALESCE(doubles, 0) + COALESCE(triples, 0) + COALESCE(home_runs, 0)) AS total_hits,
-        SUM(hard_hit_count) AS hard_hit_count
-    FROM PRACTICE_SESSIONS
-    WHERE player_id IS NOT NULL
-    GROUP BY player_id
-) ps ON ps.player_id = ap.player_id
-LEFT JOIN (
-    SELECT
-        player_id,
-        MAX(player_uuid) AS player_uuid,
-        COUNT(*) AS total_plays,
-        AVG(exit_velocity) AS avg_exit_velocity,
-        MAX(exit_velocity) AS max_exit_velocity,
-        AVG(distance_feet) AS avg_distance,
-        MAX(distance_feet) AS max_distance,
-        AVG(CASE WHEN launch_angle BETWEEN -10 AND 50 THEN launch_angle END) AS avg_launch_angle,
-        SUM(CASE WHEN exit_velocity >= 95 THEN 1 ELSE 0 END) * 100.0
-            / NULLIF(COUNT(exit_velocity), 0) AS hard_hit_rate,
-        SUM(CASE WHEN hit_type = 3 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) AS fly_ball_rate,
-        SUM(CASE WHEN hit_type = 2 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) AS line_drive_rate,
-        SUM(CASE WHEN result IN (-5, -3, -8, -1, 0, 1, 2, 3, 4) THEN 1 ELSE 0 END) AS total_swings,
-        SUM(CASE WHEN result IN (-5, -3, -8, -1, 0, 1, 2, 3, 4) THEN 1 ELSE 0 END) * 100.0
-            / NULLIF(COUNT(*), 0) AS swing_rate
-    FROM PRACTICE_PLAYS
-    WHERE player_id IS NOT NULL
-    GROUP BY player_id
-) pp ON pp.player_id = ap.player_id
-ON DUPLICATE KEY UPDATE
-    player_name = VALUES(player_name),
-    player_uuid = VALUES(player_uuid),
-    first_name = VALUES(first_name),
-    last_name = VALUES(last_name),
-    total_plays = VALUES(total_plays),
-    total_sessions = VALUES(total_sessions),
-    last_practice_date = VALUES(last_practice_date),
-    avg_exit_velocity = VALUES(avg_exit_velocity),
-    max_exit_velocity = VALUES(max_exit_velocity),
-    avg_distance = VALUES(avg_distance),
-    max_distance = VALUES(max_distance),
-    avg_launch_angle = VALUES(avg_launch_angle),
-    total_at_bats = VALUES(total_at_bats),
-    total_hits = VALUES(total_hits),
-    total_singles = VALUES(total_singles),
-    total_doubles = VALUES(total_doubles),
-    total_triples = VALUES(total_triples),
-    total_home_runs = VALUES(total_home_runs),
-    career_batting_avg = VALUES(career_batting_avg),
-    career_slugging_pct = VALUES(career_slugging_pct),
-    hard_hit_count = VALUES(hard_hit_count),
-    hard_hit_rate = VALUES(hard_hit_rate),
-    fly_ball_rate = VALUES(fly_ball_rate),
-    line_drive_rate = VALUES(line_drive_rate),
-    total_swings = VALUES(total_swings),
-    swing_rate = VALUES(swing_rate)
-"""
-
-
 def _load_raw(engine, prefix: str) -> pd.DataFrame:
     """SELECT `source_file, ingested_at_utc, payload` from `RAW_PRACTICE_CSV`
     for every row whose `source_file` starts with `prefix` (e.g.
@@ -712,18 +589,17 @@ def _insert_rows(conn, table: str, rows: list[dict], chunksize: int = 500) -> No
 
 
 def transform(engine, *, dry_run: bool = True) -> dict:
-    """Rebuild `PRACTICE_SESSIONS`, `PRACTICE_PLAYS`, and
-    `player_stats_summary` from `RAW_PRACTICE_CSV`.
+    """Rebuild `PRACTICE_SESSIONS` and `PRACTICE_PLAYS` from `RAW_PRACTICE_CSV`.
 
     Reads every SessionExport/PlaysExport row currently in
-    `RAW_PRACTICE_CSV`, builds the three clean tables with
+    `RAW_PRACTICE_CSV`, builds the two clean tables with
     `transform_sessions`/`transform_plays`, and -- inside ONE transaction --
-    `SET FOREIGN_KEY_CHECKS=0`, DELETEs all rows from the three tables, loads
+    `SET FOREIGN_KEY_CHECKS=0`, DELETEs all rows from both tables, loads
     sessions, re-queries `PRACTICE_SESSIONS` for its auto-generated
     `session_id`s, loads plays (with `session_id` attached via the merge),
-    fills in each session's `total_plays` from its linked plays, aggregates
-    `player_stats_summary` via `_PLAYER_STATS_SQL`, then re-enables FK
-    checks. This is the ONLY destructive operation this module performs --
+    fills in each session's `total_plays` from its linked plays, then
+    re-enables FK checks. This is the ONLY destructive operation this module
+    performs --
     safe because the raw layer is immutable/append-only and complete, so a
     full rebuild is always reproducible.
 
@@ -784,14 +660,13 @@ def transform(engine, *, dry_run: bool = True) -> dict:
             # DELETE, not TRUNCATE: TRUNCATE is DDL in MySQL and causes an
             # implicit commit (not rollback-able), which would defeat this
             # transaction's all-or-nothing guarantee -- a failure in a later
-            # statement (e.g. the player_stats aggregation, a dropped
-            # connection, a deadlock) would leave these tables permanently
+            # statement (e.g. the play insert, a dropped connection, a
+            # deadlock) would leave these tables permanently
             # empty instead of rolling back to their pre-transform state.
             # DELETE is transactional DML in InnoDB, so the whole rebuild is
             # genuinely atomic. Child-first order kept for clarity even though
             # FK checks are off (order doesn't matter functionally here).
             conn.execute(text("DELETE FROM PRACTICE_PLAYS"))
-            conn.execute(text("DELETE FROM player_stats_summary"))
             conn.execute(text("DELETE FROM PRACTICE_SESSIONS"))
 
             session_rows = _rows(sessions_df)
@@ -815,11 +690,17 @@ def transform(engine, *, dry_run: bool = True) -> dict:
                 "SET ps.total_plays = COALESCE(c.n, 0)"
             ))
 
-            conn.execute(text(_PLAYER_STATS_SQL))
-
             conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
 
-            players = conn.execute(text("SELECT COUNT(*) FROM player_stats_summary")).scalar()
+            # Counted from what we just loaded, not from `player_stats_summary`.
+            # That table belongs to the separate Streamlit practice-analytics app,
+            # whose scheduled ETL drops and rebuilds it; PAW neither reads it
+            # (app.data.practice.load_player_stats aggregates PRACTICE_SESSIONS +
+            # PRACTICE_PLAYS directly) nor should write it. Mirrors the dry-run
+            # branch's player count so both paths report the same thing.
+            players = len(
+                set(sessions_df["player_id"].dropna()) | set(plays_df["player_id"].dropna())
+            )
 
             trans.commit()
         except Exception:

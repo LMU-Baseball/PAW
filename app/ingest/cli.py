@@ -143,7 +143,7 @@ def hittrax_raw_command(dry_run: bool, limit: int | None):
     help="Preview only, write nothing (default). Use --no-dry-run to actually rebuild.",
 )
 def hittrax_transform_command(dry_run: bool):
-    """Rebuild PRACTICE_SESSIONS/PRACTICE_PLAYS/player_stats_summary from RAW_PRACTICE_CSV."""
+    """Rebuild PRACTICE_SESSIONS/PRACTICE_PLAYS from RAW_PRACTICE_CSV."""
     engine = get_engine()
     result = transform(engine, dry_run=dry_run)
     click.echo(
