@@ -77,3 +77,44 @@ def test_missing_secret_key_in_production_raises(monkeypatch):
 def test_missing_secret_key_outside_production_uses_dev_default(monkeypatch):
     cfg = _reload_config(monkeypatch, PAW_ENV=None, SECRET_KEY=None)
     assert cfg.Config.SECRET_KEY == "dev-only-change-me"
+
+
+from datetime import timedelta
+
+
+def test_session_cookie_is_httponly_and_lax(monkeypatch):
+    cfg = _reload_config(monkeypatch, PAW_ENV=None, SECRET_KEY="x")
+    assert cfg.Config.SESSION_COOKIE_HTTPONLY is True
+    assert cfg.Config.SESSION_COOKIE_SAMESITE == "Lax"
+
+
+def test_session_cookie_not_secure_outside_production(monkeypatch):
+    """Secure cookies over plain HTTP are silently dropped by the browser,
+    which would make local dev and a pre-certificate Lightsail box unloggable."""
+    cfg = _reload_config(monkeypatch, PAW_ENV=None, SECRET_KEY="x")
+    assert cfg.Config.SESSION_COOKIE_SECURE is False
+
+
+def test_session_cookie_secure_in_production(monkeypatch):
+    cfg = _reload_config(monkeypatch, PAW_ENV="production", SECRET_KEY="x")
+    assert cfg.Config.SESSION_COOKIE_SECURE is True
+
+
+def test_session_lifetime_is_thirty_days_sliding(monkeypatch):
+    cfg = _reload_config(monkeypatch, PAW_ENV=None, SECRET_KEY="x")
+    assert cfg.Config.PERMANENT_SESSION_LIFETIME == timedelta(days=30)
+    assert cfg.Config.SESSION_REFRESH_EACH_REQUEST is True
+
+
+def test_wsgi_app_is_wrapped_in_proxyfix(monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "x")
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    from app import create_app
+    from config import Config
+
+    class T(Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+
+    server = create_app(T)
+    assert isinstance(server.wsgi_app, ProxyFix)

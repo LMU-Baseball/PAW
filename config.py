@@ -1,5 +1,6 @@
 """Central configuration. Loads secrets from .env (never hard-coded)."""
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -83,3 +84,25 @@ class Config:
     # App DB (Flask-SQLAlchemy ORM) — user accounts / roles / notes / dev plans.
     SQLALCHEMY_DATABASE_URI = _resolve_app_db_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # --- session cookie hardening ---
+    # HTTPONLY + SameSite=Lax are safe on plain HTTP, so they are always on.
+    # SameSite=Lax is also what protects Dash's callback POSTs: a global
+    # CSRFProtect would break every Dash callback (Dash sends no CSRF token),
+    # so do NOT add one -- see the spec's "Deliberately NOT done" section.
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    # A browser silently DROPS a Secure cookie sent over plain HTTP, which
+    # makes login appear to do nothing. Production-gated for that reason.
+    SESSION_COOKIE_SECURE = is_production()
+
+    # 30-day sliding window: refreshed on every request, so anyone using PAW
+    # regularly is never logged out, while an abandoned or stolen cookie still
+    # expires on its own.
+    PERMANENT_SESSION_LIFETIME = timedelta(days=30)
+    SESSION_REFRESH_EACH_REQUEST = True
+
+    REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = "Lax"
+    REMEMBER_COOKIE_SECURE = is_production()
+    REMEMBER_COOKIE_DURATION = timedelta(days=30)

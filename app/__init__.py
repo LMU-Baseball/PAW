@@ -6,6 +6,7 @@ dashboards, and CLI commands.
 import os
 
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 
@@ -13,6 +14,22 @@ from config import Config
 def create_app(config_object=Config) -> Flask:
     server = Flask(__name__, instance_relative_config=True)
     server.config.from_object(config_object)
+
+    # Render terminates TLS at its edge and nginx does the same on Lightsail;
+    # both forward plain HTTP with X-Forwarded-* headers. Without this, Flask
+    # believes every request is insecure -- which silently disables Secure
+    # cookies and hands the rate limiter the proxy's IP instead of the client's.
+    # Safe with no proxy in front: ProxyFix only overrides when the header
+    # is actually present.
+    server.wsgi_app = ProxyFix(server.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+    @server.before_request
+    def _make_session_permanent():
+        # Opts every session into PERMANENT_SESSION_LIFETIME. Without this the
+        # cookie is a browser-session cookie and the 30-day sliding window
+        # never applies.
+        from flask import session
+        session.permanent = True
 
     # Ensure the instance folder exists (for the default SQLite app DB).
     os.makedirs(server.instance_path, exist_ok=True)
