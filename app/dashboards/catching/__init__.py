@@ -13,6 +13,7 @@ def build_catching_dash(server) -> Dash:
         server=server,
         url_base_pathname="/dash/catching/",
         suppress_callback_exceptions=True,
+        compress=True,
         title="Catching — The PAW",
     )
     dash_app.index_string = INDEX_STRING

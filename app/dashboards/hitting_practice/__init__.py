@@ -13,6 +13,7 @@ def build_hitting_practice_dash(server) -> Dash:
         server=server,
         url_base_pathname="/dash/hitting-practice/",
         suppress_callback_exceptions=True,
+        compress=True,
         title="Practice (HitTrax) — The PAW",
     )
     dash_app.index_string = INDEX_STRING

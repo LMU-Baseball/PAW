@@ -22,6 +22,7 @@ def build_hitting_dash(server) -> Dash:
         server=server,
         url_base_pathname="/dash/hitting/",
         suppress_callback_exceptions=True,
+        compress=True,
         title="Hitting — The PAW",
     )
     dash_app.index_string = INDEX_STRING
