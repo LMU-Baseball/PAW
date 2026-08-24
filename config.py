@@ -16,6 +16,32 @@ def _require(key: str) -> str:
     return val
 
 
+def is_production() -> bool:
+    """True only when PAW_ENV is explicitly "production".
+
+    Deliberately NOT inferred from Render's auto-set RENDER variable: RENDER is
+    already set on the live host, so inferring from it would activate the
+    SECRET_KEY boot guard the moment this merges. It also does not exist on
+    Lightsail, so it would silently disable production behavior after the AWS
+    move. An explicit variable is both safe to merge and portable.
+    """
+    return os.getenv("PAW_ENV", "").strip().lower() == "production"
+
+
+def _resolve_secret_key() -> str:
+    key = os.getenv("SECRET_KEY")
+    if key:
+        return key
+    if is_production():
+        raise RuntimeError(
+            "SECRET_KEY must be set when PAW_ENV=production. Without it Flask "
+            "would sign session cookies with a value published in this public "
+            "repo, letting anyone forge a login. Set SECRET_KEY in the host's "
+            "environment (Render dashboard / the .env on Lightsail)."
+        )
+    return "dev-only-change-me"
+
+
 # Built with URL.create so special characters in the password ($, #, etc.)
 # are escaped correctly.
 ANALYTICS_DB_URL = URL.create(
@@ -49,7 +75,7 @@ def _resolve_app_db_uri():
 
 
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-change-me")
+    SECRET_KEY = _resolve_secret_key()
 
     # Analytics DB (raw SQLAlchemy engine in app/db.py) — the Trackman warehouse.
     ANALYTICS_DB_URL = ANALYTICS_DB_URL
