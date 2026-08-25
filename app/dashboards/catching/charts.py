@@ -14,6 +14,7 @@ from plotly.subplots import make_subplots
 
 from app.data import catching as C
 from app.data import called_strike as cs
+from app.data import catching_caps
 from app.dashboards.shell import CRIMSON
 
 CALLTYPE_COLORS = {
@@ -171,23 +172,37 @@ def slaa_location_figure(df: pd.DataFrame, *, lookup=None) -> go.Figure:
     """Heat map of (actual - expected) called strikes by zone region.
 
     Diverging around zero: positive = strikes gained, negative = lost. Every
-    taken pitch clamps into one of the 7x7 display cells (see
-    `_display_cell`), so the grid total reconciles exactly with
-    `catching_caps.slaa_summary`'s SLAA figure.
+    taken pitch (with a placeable location) clamps into one of the 7x7
+    display cells (see `_display_cell`), so the grid total reconciles
+    exactly with a LOCAL `catching_caps.slaa_summary` computed on this same
+    `df` -- surfaced as the figure's subtitle. `df` is scoped by whatever the
+    caller passed (e.g. the Framing tab's own Game dropdown), which is not
+    necessarily the same scope as the sidebar's season-wide SLAA tile, so the
+    subtitle deliberately labels its number "this selection" rather than
+    implying it always matches the sidebar.
     """
     z = np.zeros((_N, _N), dtype=float)
-    if df is not None and not df.empty:
+    if df is None:
+        taken = pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    else:
         taken = df[cs.is_taken(df)]
         taken = taken[taken["plate_loc_side"].notna()
                       & taken["plate_loc_height"].notna()]
-        if not taken.empty:
-            exp = cs.expected_called_strikes(taken, lookup=lookup)
-            act = cs.is_called_strike(taken).astype(float)
-            diff = act - exp
-            for s, h, d in zip(taken["plate_loc_side"],
-                               taken["plate_loc_height"], diff):
-                c, r = _display_cell(s, h)
-                z[r][c] += float(d)
+    if not taken.empty:
+        exp = cs.expected_called_strikes(taken, lookup=lookup)
+        act = cs.is_called_strike(taken).astype(float)
+        diff = act - exp
+        for s, h, d in zip(taken["plate_loc_side"],
+                           taken["plate_loc_height"], diff):
+            c, r = _display_cell(s, h)
+            z[r][c] += float(d)
+
+    # LOCAL summary on the same (already taken+location-filtered) population
+    # feeding the grid above -- not the sidebar's season-wide tile, which can
+    # be scoped differently (see docstring).
+    summary = catching_caps.slaa_summary(taken, lookup=lookup)
+    caption = (f"SLAA {summary['slaa']:+.1f} over {summary['taken']} "
+               f"taken pitches, this selection")
 
     lim = float(max(1.0, np.abs(z).max()))
     fig = go.Figure(go.Heatmap(
@@ -201,7 +216,8 @@ def slaa_location_figure(df: pd.DataFrame, *, lookup=None) -> go.Figure:
     fig.add_shape(type="rect", x0=0.5, x1=5.5, y0=0.5, y1=5.5,
                   line=dict(color="#1a1a1a", width=2))
     fig.update_layout(
-        title="Strikes Gained vs Expected, by Location (Catcher's View)",
+        title=dict(text="Strikes Gained vs Expected, by Location (Catcher's View)",
+                   subtitle=dict(text=caption)),
         showlegend=False,
         xaxis=dict(showticklabels=False, title=None),
         yaxis=dict(showticklabels=False, title=None, scaleanchor="x", scaleratio=1),

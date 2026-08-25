@@ -643,3 +643,28 @@ def test_slaa_location_figure_on_empty_frame_does_not_raise():
     df = pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
     fig = charts.slaa_location_figure(df)
     assert fig is not None
+
+
+def test_slaa_location_figure_caption_matches_local_slaa_summary():
+    """Finding 2 fix: the heat map's own df (whatever scope the caller passed
+    -- e.g. a single selected game) may not match the sidebar's season-wide
+    SLAA tile, so the figure must caption itself with a LOCAL slaa_summary
+    on the SAME df, never implying the (possibly different) sidebar number."""
+    import pandas as pd
+    from app.dashboards.catching import charts
+    from app.data import called_strike as cs
+    from app.data import catching_caps
+
+    rows = [(0.0, 2.5, "StrikeCalled")] * 60 + [(0.0, 2.5, "BallCalled")] * 60
+    rows += [(9.0, 9.0, "BallCalled")] * 10  # far outside, must still count
+    rows += [(None, 2.5, "StrikeCalled")] * 5  # missing location, must NOT count
+    df = pd.DataFrame(rows, columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    lk = cs._build_lookup_from_df(df)
+
+    fig = charts.slaa_location_figure(df, lookup=lk)
+    expected = catching_caps.slaa_summary(df, lookup=lk)
+
+    caption = fig.layout.title.subtitle.text
+    assert f"{expected['slaa']:+.1f}" in caption
+    assert str(expected["taken"]) in caption
+    assert expected["taken"] == 130, "the 5 missing-location rows must be excluded"
