@@ -21,7 +21,7 @@ jobs:
           cache: pip
 
       - run: pip install -r requirements.txt
-      - run: pip install ruff
+      - run: pip install ruff pytest
 
       # Catches real bugs (undefined names, unused imports) without drowning a
       # first-time contributor in style nits.
