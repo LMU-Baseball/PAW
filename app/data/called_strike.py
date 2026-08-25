@@ -20,16 +20,32 @@ balls in the dirt and systematically deflates SLAA for good receivers.
 Instead, coordinates are CLIPPED into the modelling window before binning,
 so a wild pitch maps to an edge cell whose empirical rate is near zero.
 
-Smoothing (two-level empirical-Bayes, mirroring xba.py)
--------------------------------------------------------
-    cell_rate = (cell_strikes + k * band_marginal) / (cell_n + k)
+Smoothing (two-level empirical-Bayes, LOCAL anchor -- fix round 1)
+-------------------------------------------------------------------
+    cell_rate = (cell_strikes + k * local_anchor) / (cell_n + k)
 
-where `band_marginal` is that height band's own rate, itself first smoothed
-toward the global called-strike rate so a sparse one-sided band cannot
-anchor a cell at exactly 0 or 1. This matters more here than for xBA: the
-zone edge is simultaneously where framing is decided and where cells are
-thinnest, so an unsmoothed 1-for-1 cell reading as a literal 100% would
-corrupt precisely the pitches the metric exists to measure.
+`local_anchor` is a pooled rate over the cell's 8 grid neighbours (pooled
+sum/count of adjacent (side_bin, height_bin) cells), itself first smoothed
+toward the global called-strike rate so a sparse or one-sided neighbourhood
+cannot anchor a cell at exactly 0 or 1.
+
+Fix round 1 replaced the original anchor -- an entire height band's marginal
+rate -- with this local 8-neighbour pool. A height band is NOT a local
+neighbourhood: within one band, side runs the full -2.0..+2.0 window and the
+true rate runs ~0.99 down to ~0.00, so the band marginal (e.g. ~0.61 at a
+mid height) dragged every cell in that row toward it regardless of how far
+off the plate the cell actually was. That reintroduced, in miniature, the
+exact bug the clipping exists to prevent: well-sampled off-plate cells
+(n=55-115, plenty of data) were pulled up by 0.10-0.16 absolute, and summed
+over the season the model over-predicted total called strikes by +2.15%
+versus the raw, unsmoothed cell rates (which reproduce the actual count
+exactly -- 100% of that surplus was shrinkage bias). An 8-neighbour pool is
+local: adjacent cells are close in both side and height, so pooling them
+does not smuggle in the zone's opposite edge.
+
+`k = MIN_SAMPLE = 5` (dropped from 20, inherited from xba.py's much thinner
+cells -- here the median cell is n=56 and only 7% are below n=10, so k=20
+bought smoothness this data doesn't need and paid for it in bias).
 
 Cell keys are TUPLES so a batter-side dimension can be added later (see the
 spec's "Accepted limitation") without restructuring this module.
@@ -56,9 +72,10 @@ HEIGHT_BIN_SIZE = 0.15
 SIDE_MIN, SIDE_MAX = -2.0, 2.0
 HEIGHT_MIN, HEIGHT_MAX = 0.0, 5.0
 
-# Cell shrinkage weight k, and the weight used to smooth a band marginal
-# toward the global rate. Same roles as xba.py's MIN_SAMPLE / MARGINAL_SHRINK_K.
-MIN_SAMPLE = 20
+# Cell shrinkage weight k, and the weight used to smooth the local 8-neighbour
+# anchor toward the global rate. Same roles as xba.py's MIN_SAMPLE /
+# MARGINAL_SHRINK_K. Fix round 1: dropped from 20 -- see module docstring.
+MIN_SAMPLE = 5
 MARGINAL_SHRINK_K = MIN_SAMPLE
 
 # Used only when an anchor would otherwise be exactly 0.0/1.0 (an empty or
@@ -80,8 +97,24 @@ class _Lookup:
 
 def _bin_start(value: float, size: float) -> float:
     """Bin-start edge for `value` in a `size`-wide grid, giving half-open
-    [start, start+size) cells."""
-    return float(np.floor(float(value) / size) * size)
+    [start, start+size) cells.
+
+    Rounded to 6 decimals so a bin-start computed via floor-division always
+    equals the same value computed by stepping from a neighbouring bin by
+    +-size (needed for the local 8-neighbour anchor's dict lookups below to
+    hit, despite 0.15 not being exactly representable in binary floats).
+    """
+    return round(float(np.floor(float(value) / size) * size), 6)
+
+
+# The 8 grid-adjacent (side, height) offsets around a cell, used to pool a
+# local anchor for smoothing (see module docstring, "fix round 1").
+_NEIGHBOR_OFFSETS = tuple(
+    (round(ds, 6), round(dh, 6))
+    for ds in (-SIDE_BIN_SIZE, 0.0, SIDE_BIN_SIZE)
+    for dh in (-HEIGHT_BIN_SIZE, 0.0, HEIGHT_BIN_SIZE)
+    if not (ds == 0.0 and dh == 0.0)
+)
 
 
 def _cell_key(side: float, height: float) -> tuple:
@@ -138,23 +171,34 @@ def _build_lookup_from_df(df: pd.DataFrame) -> _Lookup:
     global_rate = float(d["_cs"].mean())
     anchor = global_rate if 0.0 < global_rate < 1.0 else DEFAULT_FALLBACK_RATE
 
-    # Level 1: smooth each height band's marginal toward the global anchor.
-    band = d.groupby("_height_bin")["_cs"].agg(["sum", "count"])
-    band_marginal = {
-        hb: (row["sum"] + MARGINAL_SHRINK_K * anchor) / (row["count"] + MARGINAL_SHRINK_K)
-        for hb, row in band.iterrows()
-    }
-
-    # Level 2: smooth each cell toward its already-smoothed band marginal.
-    # Because that marginal is strictly in (0,1) and k > 0, no cell can land
-    # on exactly 0.0/1.0 for any n, including n=1.
     grouped = d.groupby(["_side_bin", "_height_bin"])["_cs"].agg(["sum", "count"])
+    cell_sums = {key: float(row["sum"]) for key, row in grouped.iterrows()}
+    cell_counts = {key: float(row["count"]) for key, row in grouped.iterrows()}
+
+    # Level 1: for each populated cell, pool the (sum, count) of its 8 grid
+    # neighbours and smooth that pooled rate toward the global anchor. A
+    # neighbourhood is LOCAL (adjacent in both side and height), unlike an
+    # entire height band -- see module docstring for why that distinction is
+    # the whole fix.
+    def _local_anchor(sb: float, hb: float) -> float:
+        pooled_sum = 0.0
+        pooled_n = 0.0
+        for ds, dh in _NEIGHBOR_OFFSETS:
+            nk = (round(sb + ds, 6), round(hb + dh, 6))
+            if nk in cell_counts:
+                pooled_sum += cell_sums[nk]
+                pooled_n += cell_counts[nk]
+        return (pooled_sum + MARGINAL_SHRINK_K * anchor) / (pooled_n + MARGINAL_SHRINK_K)
+
+    # Level 2: smooth each cell toward its own (already-smoothed) local
+    # anchor. Because that anchor is strictly in (0,1) and k > 0, no cell can
+    # land on exactly 0.0/1.0 for any n, including n=1.
     cell_rates: dict = {}
-    for (sb, hb), row in grouped.iterrows():
-        n = float(row["count"])
-        strikes = float(row["sum"])
-        marginal = band_marginal.get(hb, anchor)
-        smoothed = (strikes + MIN_SAMPLE * marginal) / (n + MIN_SAMPLE)
+    for (sb, hb) in cell_counts:
+        n = cell_counts[(sb, hb)]
+        strikes = cell_sums[(sb, hb)]
+        local_anchor = _local_anchor(sb, hb)
+        smoothed = (strikes + MIN_SAMPLE * local_anchor) / (n + MIN_SAMPLE)
         cell_rates[(sb, hb)] = float(min(1.0, max(0.0, smoothed)))
 
     # NOTE: returned from inside a @cached singleton, which only deep-copies
@@ -179,15 +223,35 @@ def p_called_strike(side, height, *, lookup: _Lookup | None = None) -> float:
         lookup = _get_lookup()
     if pd.isna(side) or pd.isna(height):
         return float(min(1.0, max(0.0, lookup.fallback)))
-    p = lookup.cell_rates.get(_cell_key(side, height), None)
+    key = _cell_key(side, height)
+    p = lookup.cell_rates.get(key)
     if p is None:
-        # Cell never observed. Fall back to the same height band's average
-        # rather than the global rate -- a never-seen cell at the extreme
-        # edge should not inherit the (much higher) whole-zone average.
-        hb = _cell_key(side, height)[1]
-        same_band = [v for (s, h), v in lookup.cell_rates.items() if h == hb]
-        p = float(np.mean(same_band)) if same_band else lookup.fallback
+        p = _nearest_neighbor_rate(key, lookup)
     return float(min(1.0, max(0.0, p)))
+
+
+def _nearest_neighbor_rate(key: tuple, lookup: "_Lookup") -> float:
+    """Fallback for a cell key never observed in training: the rate of the
+    nearest populated cell by grid distance -- not a whole-row/whole-band
+    average. A coarse row average would reintroduce exactly the bias the
+    local 8-neighbour anchor (see module docstring) exists to avoid: an
+    unpopulated cell deep off the plate should inherit its immediate
+    neighbours' near-zero rate, not an average spanning all the way back to
+    the heart of the zone. In practice this path is close to unreachable --
+    the live grid is fully populated (952/952 cells) -- but it matters for
+    any sparser or filtered training population. Falls back to the lookup's
+    global rate only when there are no populated cells at all."""
+    if not lookup.cell_rates:
+        return lookup.fallback
+    sb, hb = key
+    best_rate = lookup.fallback
+    best_dist = None
+    for (s, h), rate in lookup.cell_rates.items():
+        dist = ((s - sb) / SIDE_BIN_SIZE) ** 2 + ((h - hb) / HEIGHT_BIN_SIZE) ** 2
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_rate = rate
+    return best_rate
 
 
 def expected_called_strikes(df: pd.DataFrame, *, lookup: _Lookup | None = None) -> pd.Series:

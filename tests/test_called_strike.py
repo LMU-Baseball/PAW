@@ -11,7 +11,7 @@ def _frame(rows):
     return pd.DataFrame(rows, columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
 
 
-def _uniform_lookup(rate=0.5):
+def _uniform_lookup():
     """A lookup where every populated cell has the same rate."""
     df = _frame([(0.0, 2.5, "StrikeCalled"), (0.0, 2.5, "BallCalled")])
     lk = cs._build_lookup_from_df(df)
@@ -45,10 +45,12 @@ def test_far_outside_pitch_gets_near_zero_not_global_rate():
 
 
 def test_clipping_maps_out_of_window_to_the_same_cell_as_the_edge():
-    lk = cs._build_lookup_from_df(_frame([
-        (0.0, 2.5, "StrikeCalled"), (1.9, 0.1, "BallCalled")]))
-    assert cs.p_called_strike(50.0, 99.0, lookup=lk) == cs.p_called_strike(
-        cs.SIDE_MAX, cs.HEIGHT_MAX, lookup=lk)
+    """Assert on the key directly, not on p_called_strike's output: if both
+    sides fell through to the same unobserved-cell fallback, the two
+    p_called_strike calls would still be equal even with broken clipping
+    (they'd both just be the same fallback value), making that comparison
+    vacuous."""
+    assert cs._cell_key(50.0, 99.0) == cs._cell_key(cs.SIDE_MAX, cs.HEIGHT_MAX)
 
 
 def test_empty_frame_builds_a_lookup_and_does_not_raise():
