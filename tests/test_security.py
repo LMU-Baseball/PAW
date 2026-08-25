@@ -204,3 +204,51 @@ def test_session_set_cookie_header_is_secure_in_production(monkeypatch):
         assert "Secure" in cookie
     finally:
         _dispose_login_app(application, path)
+
+
+# --------------------------------------------------------------------------
+# Response security headers (app/security.py)
+# --------------------------------------------------------------------------
+
+def _client(monkeypatch, paw_env=None):
+    if paw_env:
+        monkeypatch.setenv("PAW_ENV", paw_env)
+    else:
+        monkeypatch.delenv("PAW_ENV", raising=False)
+    monkeypatch.setenv("SECRET_KEY", "x")
+    import config
+    importlib.reload(config)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+
+    class T(config.Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+
+    return app_pkg.create_app(T).test_client()
+
+
+def test_baseline_headers_present_on_login_page(monkeypatch):
+    resp = _client(monkeypatch).get("/login")
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["X-Frame-Options"] == "DENY"
+    assert resp.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "Permissions-Policy" in resp.headers
+
+
+def test_csp_is_report_only_never_enforced(monkeypatch):
+    """An enforced CSP breaks all seven Dash dashboards (inline scripts from
+    dash_renderer, inline styles from Plotly)."""
+    resp = _client(monkeypatch).get("/login")
+    assert "Content-Security-Policy-Report-Only" in resp.headers
+    assert "Content-Security-Policy" not in resp.headers
+
+
+def test_hsts_absent_outside_production(monkeypatch):
+    resp = _client(monkeypatch).get("/login")
+    assert "Strict-Transport-Security" not in resp.headers
+
+
+def test_hsts_present_in_production(monkeypatch):
+    resp = _client(monkeypatch, paw_env="production").get("/login")
+    assert "max-age=" in resp.headers["Strict-Transport-Security"]
