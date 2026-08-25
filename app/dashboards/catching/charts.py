@@ -5,11 +5,15 @@ strike-zone frame (home-plate pentagon + nested rulebook/Heart/Shadow rectangles
 """
 from __future__ import annotations
 
+import math
+
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from app.data import catching as C
+from app.data import called_strike as cs
 from app.dashboards.shell import CRIMSON
 
 CALLTYPE_COLORS = {
@@ -138,6 +142,70 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
     fig.update_layout(
         title=title, showlegend=False, height=360 * nrows, margin=dict(l=10, r=10, t=60, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"),
+    )
+    return fig
+
+
+# Display grid: 5x5 over the nominal zone plus a one-cell shadow ring (7x7).
+# Deliberately coarser than called_strike's 0.15 ft model bins -- one catcher
+# cannot fill 952 cells, so rendering them would be noise, not information.
+ZONE_SIDE_HALF = 0.83
+ZONE_H_LO, ZONE_H_HI = 1.5, 3.5
+_CELL_W = (2 * ZONE_SIDE_HALF) / 5.0     # 0.332 ft
+_CELL_H = (ZONE_H_HI - ZONE_H_LO) / 5.0  # 0.4 ft
+_N = 7                                   # 5 zone cells + 1 ring each side
+
+
+def _display_cell(side, height) -> tuple:
+    """(col, row) in the 7x7 display grid. Out-of-grid pitches clamp into the
+    outer ring so every taken pitch is counted exactly once and the grid
+    reconciles with SLAA."""
+    col = int(math.floor((float(side) - (-ZONE_SIDE_HALF - _CELL_W)) / _CELL_W))
+    row = int(math.floor((float(height) - (ZONE_H_LO - _CELL_H)) / _CELL_H))
+    return (min(_N - 1, max(0, col)), min(_N - 1, max(0, row)))
+
+
+def slaa_location_figure(df: pd.DataFrame, *, lookup=None) -> go.Figure:
+    """Heat map of (actual - expected) called strikes by zone region.
+
+    Diverging around zero: positive = strikes gained, negative = lost. Every
+    taken pitch clamps into one of the 7x7 display cells (see
+    `_display_cell`), so the grid total reconciles exactly with
+    `catching_caps.slaa_summary`'s SLAA figure.
+    """
+    z = np.zeros((_N, _N), dtype=float)
+    if df is not None and not df.empty:
+        taken = df[cs.is_taken(df)]
+        taken = taken[taken["plate_loc_side"].notna()
+                      & taken["plate_loc_height"].notna()]
+        if not taken.empty:
+            exp = cs.expected_called_strikes(taken, lookup=lookup)
+            act = cs.is_called_strike(taken).astype(float)
+            diff = act - exp
+            for s, h, d in zip(taken["plate_loc_side"],
+                               taken["plate_loc_height"], diff):
+                c, r = _display_cell(s, h)
+                z[r][c] += float(d)
+
+    lim = float(max(1.0, np.abs(z).max()))
+    fig = go.Figure(go.Heatmap(
+        z=z, zmid=0, zmin=-lim, zmax=lim,
+        colorscale="RdBu", reversescale=True,
+        hovertemplate="strikes gained: %{z:.1f}<extra></extra>",
+        colorbar=dict(title="+/- strikes"),
+    ))
+    # Outline the nominal strike zone: it spans display cells 1..5 inclusive,
+    # so its edges sit at 0.5 and 5.5 in cell coordinates.
+    fig.add_shape(type="rect", x0=0.5, x1=5.5, y0=0.5, y1=5.5,
+                  line=dict(color="#1a1a1a", width=2))
+    fig.update_layout(
+        title="Strikes Gained vs Expected, by Location (Catcher's View)",
+        showlegend=False,
+        xaxis=dict(showticklabels=False, title=None),
+        yaxis=dict(showticklabels=False, title=None, scaleanchor="x", scaleratio=1),
+        height=420, margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
     )

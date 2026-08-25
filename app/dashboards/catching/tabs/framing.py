@@ -60,6 +60,8 @@ def body(df: pd.DataFrame, *, bat_side="All", pitcher_throws="All",
         dcc.Graph(figure=charts.framing_scatter(scatter_df)),
         section("Framing Summary"),
         tables.df_table(table_df, id_="fr-summary"),
+        section("Strikes Gained by Location"),
+        dcc.Graph(figure=charts.slaa_location_figure(df)),
     ])
 
 

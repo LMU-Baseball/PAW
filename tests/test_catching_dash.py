@@ -614,3 +614,32 @@ def test_catching_sidebar_callback_lists_daterange_inputs(server):
     inputs = {i["id"] + "." + i["property"] for i in app.callback_map[key]["inputs"]}
     assert "cat-daterange.start_date" in inputs
     assert "cat-daterange.end_date" in inputs
+
+
+def test_slaa_location_figure_totals_reconcile_with_slaa():
+    """Every taken pitch must land in exactly one display cell, so the grid
+    sums to the same number the SLAA tile shows."""
+    import pandas as pd
+    from app.dashboards.catching import charts
+    from app.data import called_strike as cs
+    from app.data import catching_caps
+
+    rows = [(0.0, 2.5, "StrikeCalled")] * 60 + [(0.0, 2.5, "BallCalled")] * 60
+    rows += [(9.0, 9.0, "BallCalled")] * 10          # far outside, must still count
+    df = pd.DataFrame(rows, columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    lk = cs._build_lookup_from_df(df)
+
+    fig = charts.slaa_location_figure(df, lookup=lk)
+    grid_total = float(pd.DataFrame(fig.data[0].z).fillna(0).values.sum())
+    slaa = catching_caps.slaa_summary(df, lookup=lk)["slaa"]
+    assert abs(grid_total - slaa) < 0.05, (
+        f"grid sums to {grid_total} but SLAA is {slaa} -- pitches are being "
+        "dropped or double-counted")
+
+
+def test_slaa_location_figure_on_empty_frame_does_not_raise():
+    import pandas as pd
+    from app.dashboards.catching import charts
+    df = pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    fig = charts.slaa_location_figure(df)
+    assert fig is not None
