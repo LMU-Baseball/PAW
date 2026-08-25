@@ -35,5 +35,5 @@ beautifulsoup4>=4.12
 # was just installed or updated". Bump this and the browser install together.
 playwright==1.61.0   # headless Chromium for PDF rendering
 kaleido>=0.2         # Plotly static image export
-matplotlib>=3.8      # one-pager chart rendering (Agg backend, no browser)
+matplotlib>=3.11.1      # one-pager chart rendering (Agg backend, no browser)
 Pillow>=10.0         # report logo/image assets (also scripts/make_lion_white.py)
