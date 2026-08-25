@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Monthly, not weekly: this is a small team and a flood of PRs gets ignored.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels: ["dependencies"]
