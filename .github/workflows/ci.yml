@@ -1,0 +1,45 @@
+name: ci
+
+# Runs on every PR into main, plus pushes to main so the badge stays honest.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+      - run: pip install ruff
+
+      # Catches real bugs (undefined names, unused imports) without drowning a
+      # first-time contributor in style nits.
+      - run: ruff check .
+
+      # Every module must at least import cleanly.
+      - run: python -m compileall -q app config.py run.py wsgi.py
+
+      # DB-free tests only. This repo is PUBLIC: putting MYSQL_* secrets in a
+      # PR workflow would let any pull request exfiltrate the database
+      # credentials. Dummy values satisfy config.py's _require() at import;
+      # no connection is ever opened. Splitting the full suite into
+      # offline/live is tracked separately -- see the spec's "Out of scope".
+      - run: python -m pytest tests/test_security.py -q
+        env:
+          MYSQL_USER: ci
+          MYSQL_PASSWORD: ci
+          MYSQL_HOST: localhost
+          MYSQL_DB: ci
+          SECRET_KEY: ci-not-a-real-key
+          PYTHONIOENCODING: utf-8
