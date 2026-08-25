@@ -46,7 +46,13 @@ def create_app(config_object=Config) -> Flask:
     # inherited from Config), which is how
     # tests/test_security.py::test_repeated_failed_logins_are_blocked
     # exercises the limiter under TESTING.
-    if server.config.get("TESTING") and "RATELIMIT_ENABLED" not in vars(config_object):
+    #
+    # `Config` itself carries RATELIMIT_ENABLED in its own class body, so a bare
+    # `vars(config_object)` check would treat the default as an opt-in and leave
+    # the limiter live under TESTING. Only a real subclass can opt back in.
+    explicit_opt_in = (config_object is not Config
+                       and "RATELIMIT_ENABLED" in vars(config_object))
+    if server.config.get("TESTING") and not explicit_opt_in:
         server.config["RATELIMIT_ENABLED"] = False
     limiter.init_app(server)
 

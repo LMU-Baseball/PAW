@@ -296,9 +296,14 @@ def test_rate_limiting_disabled_under_test(monkeypatch):
     assert server.config["RATELIMIT_ENABLED"] is False
 
 
-def test_login_route_carries_a_rate_limit():
-    from app.auth import routes
-    assert hasattr(routes.login, "__wrapped__") or routes.login.__name__ == "login"
+# NOTE: the brief's `test_login_route_carries_a_rate_limit` was deleted here.
+# It asserted `hasattr(routes.login, "__wrapped__") or routes.login.__name__
+# == "login"` -- the second half of that `or` is true for any plain
+# `def login():`, so the assertion holds identically whether or not
+# `@limiter.limit(...)` is even applied. A test that cannot fail is worse
+# than no test in a security file. test_repeated_failed_logins_are_blocked
+# below is the real, behavioral coverage that the decorator is applied and
+# actually enforces the limit (fix round 1, finding 2).
 
 
 def test_repeated_failed_logins_are_blocked(monkeypatch):
@@ -320,3 +325,28 @@ def test_repeated_failed_logins_are_blocked(monkeypatch):
     codes = [client.post("/login", data={"email": "a@b.c", "password": "wrong"}).status_code
              for _ in range(12)]
     assert 429 in codes
+
+
+def test_bare_config_class_still_disables_limiter_under_testing(monkeypatch):
+    """Fix round 1, finding 1 regression.
+
+    config.Config sets RATELIMIT_ENABLED=True in its own class body, so the
+    original guard (`"RATELIMIT_ENABLED" not in vars(config_object)`) treated
+    that default as an explicit opt-in: if TESTING were ever set directly on
+    Config itself -- e.g. `monkeypatch.setattr(config.Config, "TESTING",
+    True)` followed by `create_app(config.Config)`, both idiomatic -- the
+    override never fired and the limiter stayed live under TESTING. Every
+    test file today instead subclasses Config, which is why nothing caught
+    this empirically before review. Confirm create_app forces the limiter off
+    even when config_object IS Config."""
+    monkeypatch.setenv("SECRET_KEY", "x")
+    monkeypatch.delenv("PAW_ENV", raising=False)
+    import config
+    importlib.reload(config)
+    monkeypatch.setattr(config.Config, "TESTING", True, raising=False)
+    monkeypatch.setattr(config.Config, "SQLALCHEMY_DATABASE_URI", "sqlite://", raising=False)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+
+    server = app_pkg.create_app(config.Config)
+    assert server.config["RATELIMIT_ENABLED"] is False
