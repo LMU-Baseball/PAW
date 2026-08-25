@@ -575,6 +575,30 @@ def test_catching_preset_callback_writes_range(server):
     assert any("cat-date-preset" in str(v) for v in app.callback_map.values())
 
 
+def test_sidebar_shows_slaa_and_sl_plus_tiles(monkeypatch):
+    """The two new tiles render alongside the existing STRIKES tiles, which
+    must survive unchanged."""
+    from app.dashboards.catching import layout as cl
+    from app.data import catching_caps
+
+    monkeypatch.setattr(catching_caps, "catcher_profile", lambda cid: {
+        "photo": None, "jersey": "12", "name": "Test Catcher",
+        "class_year": "SR", "position": "C"})
+    monkeypatch.setattr(catching_caps, "framing_season_tiles",
+                        lambda *a, **k: {"games": "10", "strikes": "40",
+                                         "strikes_lost": "12", "cs_pct": "30%"})
+    monkeypatch.setattr(catching_caps, "slaa_season_tiles",
+                        lambda *a, **k: {"slaa": "+8.4", "sl_plus": "112",
+                                         "taken": "640"})
+    tree = str(cl.sidebar(1, None, None, None))
+    assert "SLAA" in tree
+    assert "+8.4" in tree
+    assert "SL+" in tree
+    assert "112" in tree
+    # the pre-existing tiles are untouched
+    assert "STRIKES" in tree and "40" in tree
+
+
 def test_catching_sidebar_callback_lists_daterange_inputs(server):
     """The sidebar callback must rescope on the date range, not just catcher/
     season -- mirrors the hitting/pitching sidebars (hit-daterange/

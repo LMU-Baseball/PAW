@@ -29,9 +29,11 @@ def sidebar(catcher_id, season=None, start=None, end=None) -> html.Div:
     parallel.prefetch(
         lambda: catching_caps.catcher_profile(int(catcher_id)),
         lambda: catching_caps.framing_season_tiles(int(catcher_id), season, start, end),
+        lambda: catching_caps.slaa_season_tiles(int(catcher_id), season, start, end),
     )
     prof = catching_caps.catcher_profile(int(catcher_id))
     summ = catching_caps.framing_season_tiles(int(catcher_id), season, start, end)
+    slaa = catching_caps.slaa_season_tiles(int(catcher_id), season, start, end)
     photo = prof["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
     meta = " · ".join([x for x in (prof["class_year"], prof["position"]) if x])
@@ -44,7 +46,8 @@ def sidebar(catcher_id, season=None, start=None, end=None) -> html.Div:
         html.Div(meta, style={"fontSize": "16px", "color": "#555"}),
         html.Div([_tile("GAMES", summ["games"]), _tile("STRIKES", summ["strikes"]),
                   _tile("STRIKES LOST", summ["strikes_lost"]),
-                  _tile("STEAL%", summ["cs_pct"])],
+                  _tile("STEAL%", summ["cs_pct"]),
+                  _tile("SLAA", slaa["slaa"]), _tile("SL+", slaa["sl_plus"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Stats reflect the selected date range.",
