@@ -8,7 +8,7 @@ from wtforms import PasswordField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length
 
 from app.auth.models import User
-from app.extensions import db
+from app.extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -39,6 +39,7 @@ def _safe_next(target: str | None) -> str | None:
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))

@@ -40,6 +40,16 @@ def create_app(config_object=Config) -> Flask:
     db.init_app(server)
     login_manager.init_app(server)
 
+    from app.extensions import limiter
+    # Never throttle the test suite -- unless a config subclass explicitly
+    # opts back in (RATELIMIT_ENABLED set in its own class body, not just
+    # inherited from Config), which is how
+    # tests/test_security.py::test_repeated_failed_logins_are_blocked
+    # exercises the limiter under TESTING.
+    if server.config.get("TESTING") and "RATELIMIT_ENABLED" not in vars(config_object):
+        server.config["RATELIMIT_ENABLED"] = False
+    limiter.init_app(server)
+
     # Import models so they register with SQLAlchemy + the login user_loader.
     from app.auth import models  # noqa: F401
     from app.data import notes  # noqa: F401  (registers GameNote for create_all)

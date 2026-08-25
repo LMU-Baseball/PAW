@@ -106,3 +106,7 @@ class Config:
     REMEMBER_COOKIE_SAMESITE = "Lax"
     REMEMBER_COOKIE_SECURE = is_production()
     REMEMBER_COOKIE_DURATION = timedelta(days=30)
+
+    # Flask-Limiter reads this. Off under test so the 17 test files that POST
+    # to /login are unaffected; app/__init__.py re-derives it from TESTING.
+    RATELIMIT_ENABLED = True

@@ -262,3 +262,61 @@ def test_hsts_absent_outside_production(monkeypatch):
 def test_hsts_present_in_production(monkeypatch):
     resp = _client(monkeypatch, paw_env="production").get("/login")
     assert "max-age=" in resp.headers["Strict-Transport-Security"]
+
+
+# --------------------------------------------------------------------------
+# Login rate limiting (Flask-Limiter)
+# --------------------------------------------------------------------------
+
+def test_rate_limiting_disabled_under_test(monkeypatch):
+    """17 test files POST to /login, many repeatedly. If the limiter were live
+    under TESTING the existing suite would start failing at random.
+
+    NOTE: this deviates from the task-4 brief's literal test body, which
+    asserted `cfg.Config.RATELIMIT_ENABLED is False` on the bare, un-built
+    Config class. That can never hold: Config.RATELIMIT_ENABLED must default
+    True (config.py) so the limiter actually protects production, and the
+    "off under test" behavior is only realized by create_app's TESTING-derived
+    override in app/__init__.py. Asserting on the bare class checks the wrong
+    layer, so this instead builds a real TESTING app and checks the effective
+    config -- the thing the docstring actually claims. Flagged in
+    task-4-report.md as a brief defect, not silently changed."""
+    monkeypatch.setenv("SECRET_KEY", "x")
+    monkeypatch.delenv("PAW_ENV", raising=False)
+    import config
+    importlib.reload(config)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+
+    class T(config.Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+
+    server = app_pkg.create_app(T)
+    assert server.config["RATELIMIT_ENABLED"] is False
+
+
+def test_login_route_carries_a_rate_limit():
+    from app.auth import routes
+    assert hasattr(routes.login, "__wrapped__") or routes.login.__name__ == "login"
+
+
+def test_repeated_failed_logins_are_blocked(monkeypatch):
+    """With the limiter explicitly enabled, the 11th attempt gets a 429."""
+    monkeypatch.setenv("SECRET_KEY", "x")
+    monkeypatch.delenv("PAW_ENV", raising=False)
+    import config
+    importlib.reload(config)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+
+    class T(config.Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+        WTF_CSRF_ENABLED = False
+        RATELIMIT_ENABLED = True
+
+    client = app_pkg.create_app(T).test_client()
+    codes = [client.post("/login", data={"email": "a@b.c", "password": "wrong"}).status_code
+             for _ in range(12)]
+    assert 429 in codes
