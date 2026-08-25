@@ -361,11 +361,17 @@ def slaa_summary(df, *, lookup=None) -> dict:
 
     `df` needs `plate_loc_side`, `plate_loc_height`, `pitch_call` -- i.e. the
     shape `range_pitches_for` already returns.
+
+    Taken pitches with a missing `plate_loc_side`/`plate_loc_height` are
+    excluded from `taken`, mirroring `called_strike._raw_taken_pitches()`'s
+    own training-data convention -- a pitch that can't be placed on the plate
+    can't be meaningfully scored by a location-conditioned model either.
     """
     empty = {"taken": 0, "actual": 0, "expected": 0.0, "slaa": 0.0, "sl_plus": None}
     if df is None or df.empty:
         return empty
     taken = df[_cs.is_taken(df)]
+    taken = taken[taken["plate_loc_side"].notna() & taken["plate_loc_height"].notna()]
     if taken.empty:
         return empty
 

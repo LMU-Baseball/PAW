@@ -61,6 +61,21 @@ def test_non_taken_pitches_are_excluded():
     assert out["taken"] == 10
 
 
+def test_taken_pitches_with_missing_location_are_excluded():
+    """A taken pitch that can't be placed on the plate can't be scored by a
+    location-conditioned model -- it must not silently count via the
+    fallback rate (mirrors called_strike._raw_taken_pitches()'s own
+    NOT NULL convention on the model's training data)."""
+    lk = _lookup_half()
+    rows = [(0.0, 2.5, "StrikeCalled")] * 50 + [(0.0, 2.5, "BallCalled")] * 50
+    rows += [(None, 2.5, "StrikeCalled")] * 5
+    rows += [(0.0, None, "BallCalled")] * 5
+    rows += [(None, None, "StrikeCalled")] * 5
+    out = catching_caps.slaa_summary(_frame(rows), lookup=lk)
+    assert out["taken"] == 100
+    assert out["actual"] == 50
+
+
 def test_empty_frame_returns_zeroed_summary_without_raising():
     out = catching_caps.slaa_summary(_frame([]), lookup=_lookup_half())
     assert out["taken"] == 0
