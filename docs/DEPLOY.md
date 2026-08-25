@@ -133,6 +133,13 @@ MYSQL_DB=lmubaseball
 # --- Flask session signing: MUST be a strong random value in production ---
 SECRET_KEY=<paste the output of the openssl command below>
 
+# --- Activates production security: Secure session cookies, HSTS, and a boot
+#     guard that refuses to start if SECRET_KEY is unset. Leave this UNSET
+#     until HTTPS is working (see section 8 below) -- a browser will not
+#     return a Secure cookie over plain http://, so login will appear to do
+#     nothing.
+PAW_ENV=production
+
 # APP_DATABASE_URL is optional; omit to use the local SQLite user-account DB
 # at instance/paw_app.db (fine for this scale). Set it to a MySQL URL later if
 # you want user accounts on RDS too.
@@ -238,9 +245,101 @@ sudo certbot --nginx -d paw.lmulions.com      # auto-edits nginx, installs the c
 certbot adds the `listen 443 ssl` block and an 80→443 redirect. Renewal is
 automatic (systemd timer). Done — `https://paw.lmulions.com` is live.
 
-> No domain yet? You can launch on `http://LIGHTSAIL_IP` for internal testing,
-> but **do HTTPS before sharing with players** — login passwords over plain HTTP
-> are exposed. A subdomain + certbot is ~15 minutes.
+> **No domain yet?** You can launch on `http://LIGHTSAIL_IP` for internal
+> testing, but you MUST leave `PAW_ENV` unset until the certificate is
+> installed. **This is observed behaviour, verified on a live host — not a
+> caution:** with `PAW_ENV=production` set on a plain-HTTP server, login
+> fails. A browser will not send back a `Secure` cookie over `http://`, so
+> submitting the sign-in form just bounces back to the login page with no
+> error message. It looks exactly like the login button does nothing; the
+> actual cause is the `Secure` cookie flag being dropped in transit. Get the
+> cert first (below), THEN set `PAW_ENV=production` and restart:
+>
+> ```bash
+> sudo systemctl restart paw
+> ```
+>
+> And **do HTTPS before sharing with players** either way — login passwords
+> over plain HTTP are exposed. A subdomain + certbot is ~15 minutes.
+
+---
+
+## 8b. Security checklist (post-certificate)
+
+Everything in `app/security.py` and `config.py` moves from Render to Lightsail
+unchanged — headers, cookie flags, the CSRF-by-`SameSite` design, and the login
+rate limit all work the same way regardless of host. What's host-specific to
+Lightsail is below.
+
+- [ ] `SECRET_KEY` is set to a strong random value (`openssl rand -hex 32`) —
+      NOT whatever value Render used, and never the `dev-only-change-me`-style
+      default. `config.py`'s boot guard raises `RuntimeError` at startup if
+      `PAW_ENV=production` and `SECRET_KEY` is unset, so a missing key fails
+      loudly rather than shipping forgeable sessions.
+- [ ] `PAW_ENV=production` is set, and only after the certificate (section 8)
+      is installed and confirmed working over HTTPS. See the warning in
+      section 8 above — this was verified on a live host: setting it before
+      HTTPS is up makes login fail silently.
+- [ ] Verify HSTS took effect:
+      ```bash
+      curl -sI https://paw.lmulions.com/login | grep -i strict-transport
+      ```
+      should print a `Strict-Transport-Security` header. If it's missing,
+      either `PAW_ENV` isn't set to `production` or the service wasn't
+      restarted after setting it (`sudo systemctl restart paw`).
+- [ ] Verify the session cookie flags:
+      ```bash
+      curl -sI https://paw.lmulions.com/login | grep -i set-cookie
+      ```
+      should show `Secure`, `HttpOnly`, and `SameSite=Lax` on the session
+      cookie.
+- [ ] Confirm nginx forwards the proto header. Section 7's
+      `/etc/nginx/sites-available/paw` already includes
+      `proxy_set_header X-Forwarded-Proto $scheme;` — `ProxyFix`
+      (`app/__init__.py`) reads this to know the original request was HTTPS.
+      Without it, `SESSION_COOKIE_SECURE` never sees a request it considers
+      secure, and the `Secure` cookie / HSTS effectively never activate behind
+      the proxy. If you changed the nginx config from what's in section 7,
+      re-check that line is still present:
+      ```bash
+      grep -i x-forwarded-proto /etc/nginx/sites-available/paw
+      ```
+- [ ] **Rate limiting matters more here than on Render.** A bare Lightsail VM
+      has none of Render's edge DDoS protection, so the app-level login limiter
+      (`@limiter.limit("10 per hour", ...)` in `app/auth/routes.py`) is the only
+      thing standing between the internet and repeated login attempts. It's
+      also weaker in practice than "10 per hour" suggests: the limiter's
+      storage is in-memory and scoped **per worker process**, and
+      `gunicorn.conf.py` sets `workers = int(os.getenv("WEB_CONCURRENCY", "3"))`
+      — 3 workers by default. So the real-world ceiling is roughly **3 x 10 =
+      30 attempts/hour** spread across whichever worker each request happens to
+      land on, not a clean global 10/hour. If brute force is a real concern on
+      this box, either run `WEB_CONCURRENCY=1` (fewer workers, tighter limit,
+      less report-build concurrency) or move the limiter to a shared backend
+      (Redis) so all workers share one counter.
+- [ ] **Lock down RDS.** `docs/deploy-aws.md:158` calls for restricting inbound
+      `3306` to the app's security group and removing any `0.0.0.0/0` rule.
+      This repo's Lightsail path (section 2 above) already narrows the RDS
+      inbound rule to `LIGHTSAIL_IP/32` — confirm no wider rule (e.g. a
+      leftover `0.0.0.0/0`) still exists alongside it. Either way, doing this
+      **requires console access to the AWS account that owns the RDS
+      instance** — the `MYSQL_*` credentials in `.env` do not grant that
+      access. If you don't have console access, this is a request to whoever
+      administers that account, not a step you can complete with what's in
+      this runbook.
+- [ ] Rotate the RDS master password (standing item — it is plaintext in the
+      legacy `src/` R files).
+- [ ] **Coordinate the RDS lockdown with the GitHub Actions cron.**
+      `.github/workflows/pipeline-cron.yml` connects straight to RDS
+      (`MYSQL_HOST`/`MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DB` as job-level env
+      vars, across its `games`, `bullpen`, and `hittrax` jobs) from
+      GitHub-hosted `ubuntu-latest` runners, which use rotating IPs with no
+      fixed range to allow-list. If you lock the RDS security group down to a
+      single server IP (Lightsail's `/32` rule, or the EC2 SG in
+      `deploy-aws.md:158`), **that cron will start failing to connect.** Move
+      it onto the Lightsail box itself (a systemd timer running the same
+      `flask ingest` / `pipeline-load` commands) at the same time you lock the
+      firewall down — not before, not after.
 
 ---
 
