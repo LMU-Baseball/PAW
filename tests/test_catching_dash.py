@@ -599,6 +599,46 @@ def test_sidebar_shows_slaa_and_sl_plus_tiles(monkeypatch):
     assert "STRIKES" in tree and "40" in tree
 
 
+def test_sidebar_shows_taken_pitch_count_caption(monkeypatch):
+    """Finding 2 fix: spec Sec.5 requires the taken-pitch count be surfaced
+    alongside SLAA/SL+ so a coach can judge the metric's weight. It must NOT
+    be added as a 7th tile (that was explicitly rejected) -- it's a caption
+    line, matching the file's existing "Stats reflect..." caption style."""
+    from app.dashboards.catching import layout as cl
+    from app.data import catching_caps
+
+    monkeypatch.setattr(catching_caps, "catcher_profile", lambda cid: {
+        "photo": None, "jersey": "12", "name": "Test Catcher",
+        "class_year": "SR", "position": "C"})
+    monkeypatch.setattr(catching_caps, "framing_season_tiles",
+                        lambda *a, **k: {"games": "10", "strikes": "40",
+                                         "strikes_lost": "12", "cs_pct": "30%"})
+    monkeypatch.setattr(catching_caps, "slaa_season_tiles",
+                        lambda *a, **k: {"slaa": "+8.4", "sl_plus": "112",
+                                         "taken": "640"})
+    tree = str(cl.sidebar(1, None, None, None))
+    assert "640" in tree and "taken pitches" in tree
+    # still exactly 6 tiles in the grid (no 7th tile added for the count)
+    from dash import html
+    grid = None
+    def walk(c):
+        nonlocal grid
+        if grid is not None:
+            return
+        if isinstance(c, html.Div) and isinstance(c.style, dict) and \
+                c.style.get("display") == "grid":
+            grid = c
+            return
+        ch = getattr(c, "children", None)
+        if ch is None:
+            return
+        for k in (ch if isinstance(ch, (list, tuple)) else [ch]):
+            walk(k)
+    walk(cl.sidebar(1, None, None, None))
+    assert grid is not None
+    assert len(grid.children) == 6
+
+
 def test_catching_sidebar_callback_lists_daterange_inputs(server):
     """The sidebar callback must rescope on the date range, not just catcher/
     season -- mirrors the hitting/pitching sidebars (hit-daterange/

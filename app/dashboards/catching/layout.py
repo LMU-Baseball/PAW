@@ -52,6 +52,8 @@ def sidebar(catcher_id, season=None, start=None, end=None) -> html.Div:
                         "gap": "6px", "marginTop": "10px"}),
         html.Div("Stats reflect the selected date range.",
                  style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
+        html.Div(f"SLAA/SL+ based on {slaa['taken']} taken pitches.",
+                 style={"fontSize": "12px", "color": "#888", "marginTop": "4px"}),
     ], style={"padding": "8px"})
 
 
