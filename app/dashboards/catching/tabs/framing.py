@@ -61,7 +61,12 @@ def body(df: pd.DataFrame, *, bat_side="All", pitcher_throws="All",
         section("Framing Summary"),
         tables.df_table(table_df, id_="fr-summary"),
         section("Strikes Gained by Location"),
-        dcc.Graph(figure=charts.slaa_location_figure(df)),
+        # `f` (post apply_framing_filters, pre-active_calls narrowing) -- the
+        # heat map's caption says "this selection", so it must move when the
+        # tab's Batter Hand / Pitcher Throws / etc dropdowns change, same as
+        # the scatter+table above. NOT scatter_df: the per-chip call-type
+        # narrowing is scatter-only and shouldn't also gate the heat map.
+        dcc.Graph(figure=charts.slaa_location_figure(f)),
     ])
 
 

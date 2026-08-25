@@ -390,6 +390,54 @@ def test_framing_body_call_filter_scatter_only():
     assert find_table(full)[0].data == find_table(filtered)[0].data
 
 
+def test_framing_body_feeds_heat_map_the_filtered_frame():
+    """Finding 3 fix: slaa_location_figure must receive the tab's filtered
+    frame (post apply_framing_filters), not the raw unfiltered df -- else the
+    heat map (captioned "...this selection") doesn't move when a coach
+    changes the Batter Hand / Pitcher Throws / etc dropdowns, even though the
+    scatter and summary table above it do."""
+    import re
+    from app.dashboards.catching.tabs import framing
+    from app.data import catching as C
+    from app.data import catching_caps
+    from dash import dcc
+
+    df = pd.DataFrame([
+        {"plate_loc_side": 0.0, "plate_loc_height": 2.5, "pitch_call": "StrikeCalled",
+         "batter_side": "Right", "pitcher_throws": "Right", "tagged_pitch_type": "Fastball"},
+        {"plate_loc_side": 0.0, "plate_loc_height": 2.5, "pitch_call": "BallCalled",
+         "batter_side": "Left", "pitcher_throws": "Right", "tagged_pitch_type": "Fastball"},
+    ])
+    right_only = framing.body(df, bat_side="Right", pitcher_throws="All",
+                              pitch_speed="All", zone="All")
+
+    def _graphs(comp):
+        out = []
+        def walk(x):
+            if isinstance(x, dcc.Graph):
+                out.append(x)
+            ch = getattr(x, "children", None)
+            if ch and not isinstance(ch, str):
+                for k in (ch if isinstance(ch, (list, tuple)) else [ch]):
+                    walk(k)
+        walk(comp)
+        return out
+
+    heat_graph = _graphs(right_only)[-1]  # heat map is the last Graph in body()
+    caption = heat_graph.figure.layout.title.subtitle.text
+    m = re.search(r"over (\d+) taken pitches", caption)
+    assert m is not None, caption
+    rendered_taken = int(m.group(1))
+
+    filtered = C.apply_framing_filters(C.add_framing_cols(df), bat_side="Right")
+    expected = catching_caps.slaa_summary(filtered)
+    assert expected["taken"] == 1, "filtering to Right batters must drop the Left-batter pitch"
+    assert rendered_taken == expected["taken"], (
+        f"heat map caption shows {rendered_taken} taken pitches but the "
+        f"Batter Hand=Right filtered frame has {expected['taken']} -- the "
+        "heat map is still reading the tab's raw, unfiltered df")
+
+
 def test_caught_stealing_no_note_when_multi_game():
     """Verify the 'widen the date range' note is absent when df spans multiple games."""
     from app.dashboards.catching.tabs import caught_stealing
