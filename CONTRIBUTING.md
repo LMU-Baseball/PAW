@@ -3,30 +3,26 @@
 Welcome! This guide is everything you need. If you get stuck, ask Brad —
 that is faster than guessing.
 
-> New to all this? See `README.md` first — it's the full from-scratch setup
-> guide (installing Git, Python, Cursor, etc.). This file assumes that's done
-> and covers the day-to-day workflow for making a change.
+## Before you start
+
+**Do `README.md`'s Steps 1–11 first** — GitHub access, installing Git and
+Python, cloning the repo, creating your `.venv`, and getting your `.env` file
+from Brad. Come back here once `python run.py` works and you can log in
+locally. This file does not repeat that setup — it covers the day-to-day
+workflow for making a change, and repeating those commands here is exactly
+how they'd drift out of sync with README (it already happened once).
+
+One reminder because it matters every time you open a new terminal: activate
+your `.venv` before running anything —
+`source .venv/Scripts/activate` (Windows Git Bash) or
+`source .venv/bin/activate` (Mac/Linux). You'll know it worked when your
+prompt shows `(.venv)`.
 
 ## The one rule
 
 **Never push to `main`.** All work goes through a pull request. `main` is what
 the team actually uses, so a bug there breaks the site for real coaches and
 players.
-
-## First-time setup
-
-```bash
-git clone https://github.com/LMU-Baseball/PAW.git
-cd PAW
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-source .venv/bin/activate     # Mac/Linux
-pip install -r requirements.txt
-```
-
-Ask Brad for the `.env` file. **Never commit it** — it holds the database
-password. It is already in `.gitignore`, so git will ignore it automatically.
-(There's a `.env.example` in the repo showing which values it needs.)
 
 ## Making a change
 
@@ -73,9 +69,9 @@ GitHub prints a link. Open it, fill in the three questions, and click
    it re-runs automatically.
 2. Brad reviews it. He may leave comments asking for changes — that is normal
    and happens to everyone.
-3. Once approved, it gets merged (squashed into one clean commit on `main`).
-   You can delete your branch after that — GitHub shows a **Delete branch**
-   button on the merged PR page.
+3. Once approved, it gets merged into `main`. You can delete your branch
+   after that — GitHub shows a **Delete branch** button on the merged PR
+   page.
 
 ## Running the app
 

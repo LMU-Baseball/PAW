@@ -69,14 +69,19 @@ Rough time: **30–60 minutes** the first time.
 
 ## Step 1 — GitHub account + repo access
 
-The code lives in a **private GitHub repository**. You need a GitHub account, and
-Brad needs to add that account to the repo.
+The code lives in a **public GitHub repository** — anyone on the internet can
+read it, which is exactly why you must never commit a password or `.env` file
+(more on that in Step 9). Pushing your own branches still needs write access,
+though, so you need a GitHub account and Brad needs to add that account to the
+repo as a collaborator.
 
 1. If you don't have one, create a free account at <https://github.com>.
 2. Send Brad (**bradley.haskell@newrange.com**) your **GitHub username**.
 3. Wait for the email invite from GitHub and click **Accept**.
 
-You can't clone the code until you've accepted the invite, so do this first.
+You can clone the code (it's public) before the invite arrives, but you won't
+be able to push your own branches until you've accepted it — so do this
+first.
 
 ---
 
@@ -227,9 +232,10 @@ git clone https://github.com/LMU-Baseball/PAW.git
 cd PAW
 ```
 
-> This is a **private** repo, so the first time you clone, GitHub will ask you to
-> log in / authorize in your browser — that's expected. (Make sure you've accepted
-> the repo invite from Step 1 first, or the clone will fail with "not found".)
+> This is a **public** repo, so cloning it doesn't require logging in — anyone
+> can read the code, no invite needed. Pushing your own branches later is what
+> actually needs write access, which is why Step 1 has you get added as a
+> collaborator first.
 
 From now on, **all commands assume you are inside the `PAW` folder** (`cd ~/code/PAW`).
 
