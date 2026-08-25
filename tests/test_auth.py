@@ -189,7 +189,7 @@ def test_login_bad_password(client):
 
 def test_logout(client):
     _login(client, "coach@lmu.edu", "pw-coach")
-    resp = client.get("/logout", follow_redirects=True)
+    resp = client.post("/logout", follow_redirects=True)
     assert resp.status_code == 200
     assert b"Sign in" in resp.data
 
@@ -237,7 +237,7 @@ def test_change_password_player_forbidden(client):
         "current_password": "pw-player", "new_password": "sneaky-new-pw",
         "confirm": "sneaky-new-pw"}, follow_redirects=True)
     assert b"coach-only" in resp.data
-    client.get("/logout")
+    client.post("/logout")
     assert b"Devan O" in _login(client, "player@lmu.edu", "pw-player").data  # unchanged
 
 
@@ -263,7 +263,7 @@ def test_change_password_success_updates_login(client):
         "current_password": "pw-coach", "new_password": "brand-new-pw",
         "confirm": "brand-new-pw"}, follow_redirects=True)
     assert b"Password changed." in resp.data
-    client.get("/logout")
+    client.post("/logout")
     # old password no longer works; the new one does
     assert b"Invalid email or password." in _login(client, "coach@lmu.edu", "pw-coach").data
     assert b"Coach K" in _login(client, "coach@lmu.edu", "brand-new-pw").data

@@ -117,8 +117,15 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
         right = html.Span([
             f"{current_user.name} · {current_user.role} · ",
             *pw_link,
-            html.A("Log out", href="/logout",
-                   style={"color": "#fff", "textDecoration": "underline"}),
+            html.Form(
+                [html.Button("Log out", type="submit", style={
+                    "textDecoration": "underline",
+                    "background": "none", "border": "none", "padding": "0",
+                    "cursor": "pointer", "font": "inherit", "color": "inherit",
+                })],
+                action="/logout", method="POST",
+                style={"display": "inline"},
+            ),
         ], className="paw-header-user", style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
     return html.Div([html.Div(left, style={"display": "flex", "alignItems": "center"}),
                      right], className="paw-header", style={

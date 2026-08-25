@@ -71,6 +71,11 @@
     }
     .user { font-size: 14px; color: rgba(255,255,255,.85); }
     .user a { text-decoration: underline; }
+    .logout-form { display: inline; }
+    .logout-btn {
+      background: none; border: none; padding: 0; cursor: pointer;
+      font: inherit; color: inherit; text-decoration: underline;
+    }
     main.wrap { max-width: 900px; margin: 32px auto; padding: 0 20px; }
     h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: .5px; }
     .flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; font-size: 14px; }
@@ -118,7 +123,9 @@
     {% if current_user.is_authenticated %}
       <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
         {% if current_user.is_coach %}<a href="{{ url_for('auth.change_password') }}">Change password</a> ·{% endif %}
-        <a href="{{ url_for('auth.logout') }}">Log out</a></span>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="logout-form">
+          <button type="submit" class="logout-btn">Log out</button>
+        </form></span>
     {% endif %}
   </header>
   <main class="wrap">

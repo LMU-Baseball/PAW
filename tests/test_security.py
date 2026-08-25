@@ -350,3 +350,10 @@ def test_bare_config_class_still_disables_limiter_under_testing(monkeypatch):
 
     server = app_pkg.create_app(config.Config)
     assert server.config["RATELIMIT_ENABLED"] is False
+
+
+def test_logout_rejects_get(monkeypatch):
+    """A GET logout lets any third-party page sign your users out with an
+    <img src="https://paw.../logout"> tag."""
+    resp = _client(monkeypatch).get("/logout")
+    assert resp.status_code == 405
