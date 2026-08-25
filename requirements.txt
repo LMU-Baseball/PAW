@@ -14,7 +14,7 @@ dash>=2.17
 plotly>=5.22
 
 # Data layer
-pandas>=2.2,<3   # unpinned <3 let CI resolve a newer major than local dev pins, causing a real hittrax crash (2026-08-19)
+pandas>=3.0.5,<4   # unpinned <3 let CI resolve a newer major than local dev pins, causing a real hittrax crash (2026-08-19)
 SQLAlchemy>=2.0
 PyMySQL>=1.1
 
