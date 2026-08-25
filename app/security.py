@@ -13,11 +13,18 @@ import config
 # dash_renderer and Plotly writes inline styles, so an enforced policy blanks
 # all seven dashboards. This observes what a future enforced policy would
 # block; tighten only after reviewing real reports.
+#
+# media-src is deliberately as permissive as img-src: pitch video
+# (app/dashboards/video/component.py's html.Video/html.Source) is served from
+# a cross-origin public S3 bucket (see app/data/video.py), not from this app's
+# own origin. A 'self'-only media policy would fall back to default-src and
+# report -- and, if this is ever enforced, break -- every single video load.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data: https:; "
+    "media-src 'self' https:; "
     "font-src 'self' data:; "
     "connect-src 'self'; "
     "frame-ancestors 'none'; "

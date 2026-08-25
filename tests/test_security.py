@@ -244,6 +244,16 @@ def test_csp_is_report_only_never_enforced(monkeypatch):
     assert "Content-Security-Policy" not in resp.headers
 
 
+def test_csp_allows_cross_origin_media_for_pitch_video(monkeypatch):
+    """Pitch video (app/dashboards/video/component.py) is served from a
+    cross-origin public S3 bucket (app/data/video.py), not this app's own
+    origin. Without media-src, media falls back to default-src 'self' and
+    every video load would be a reported violation -- and, if this policy is
+    ever enforced, would break the video tab outright."""
+    resp = _client(monkeypatch).get("/login")
+    assert "media-src 'self' https:" in resp.headers["Content-Security-Policy-Report-Only"]
+
+
 def test_hsts_absent_outside_production(monkeypatch):
     resp = _client(monkeypatch).get("/login")
     assert "Strict-Transport-Security" not in resp.headers
