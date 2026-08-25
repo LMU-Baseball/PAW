@@ -1,7 +1,6 @@
 """Called-strike probability model. DB-free: every test injects a lookup."""
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.data import called_strike as cs
 

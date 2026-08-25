@@ -188,6 +188,11 @@ def _build_lookup_from_df(df: pd.DataFrame) -> _Lookup:
             if nk in cell_counts:
                 pooled_sum += cell_sums[nk]
                 pooled_n += cell_counts[nk]
+        # pooled_n == 0 (all 8 neighbours unpopulated) falls straight through
+        # to the global `anchor` -- unreachable against the current, fully
+        # populated live grid (952/952 cells, verified), but would matter if
+        # a future batter-side split (planned v2, see spec Sec.3) increases
+        # sparsity enough to leave a cell with no populated neighbours.
         return (pooled_sum + MARGINAL_SHRINK_K * anchor) / (pooled_n + MARGINAL_SHRINK_K)
 
     # Level 2: smooth each cell toward its own (already-smoothed) local

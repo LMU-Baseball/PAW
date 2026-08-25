@@ -371,6 +371,12 @@ def slaa_summary(df, *, lookup=None) -> dict:
     higher is better), suppressed to None below SL_PLUS_MIN_TAKEN because a
     ratio on a small denominator will be believed and should not be.
 
+    Note: LMU's pitches are ~40% of `called_strike`'s training population
+    (spec Sec.2: 22,577 of 56,537 taken pitches), so an LMU catcher is
+    partly benchmarked against his own team's pitches rather than a fully
+    independent baseline -- SLAA/SL+ magnitudes are somewhat attenuated
+    toward the neutral average as a result.
+
     `df` needs `plate_loc_side`, `plate_loc_height`, `pitch_call` -- i.e. the
     shape `range_pitches_for` already returns.
 
