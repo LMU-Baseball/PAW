@@ -228,6 +228,24 @@ def games_for_catcher(catcher_id, start=None, end=None) -> pd.DataFrame:
 
 # ============================ SEASON TILES ===================================
 
+def _resolve_season_window(season, start, end) -> tuple[str, str]:
+    """Resolve a (season, start, end) triple to a concrete [start, end] date
+    window: `season`'s bounds by default, or the caller's `start`/`end`
+    sub-range when both are given and differ from the season's own bounds.
+
+    Extracted from `framing_season_tiles` and `slaa_season_tiles`, which
+    used to duplicate this branch verbatim -- a duplication that already
+    caused one real bug (`slaa_season_tiles` originally shipped without it
+    and returned all-dashes on default page load, since `range_pitches_for`
+    got the literal string 'None' for start/end). Both now share this
+    helper instead."""
+    from app.data import seasons
+    season = season or seasons.current_season()
+    if start and end:
+        s_b, e_b = seasons.season_bounds(season)
+        return (str(start), str(end)) if (str(start) != s_b or str(end) != e_b) else (s_b, e_b)
+    return seasons.season_bounds(season)
+
 def _rollup_over(catcher_id, start, end) -> dict:
     """The catching framing rollup (games, pitches, net strikes, steal%) for one
     catcher over an arbitrary [start, end] date window, as a single SQL
@@ -317,14 +335,8 @@ def framing_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     from before this task and remain in use only by `flask rebuild-precalc`.
     Empty-pull semantics match the existing "—" no-data convention used
     everywhere else in this dict."""
-    from app.data import seasons
     from app.data.catching import add_framing_cols, caught_stealing_summary
-    season = season or seasons.current_season()
-    if start and end:
-        s_b, e_b = seasons.season_bounds(season)
-        window = (str(start), str(end)) if (str(start) != s_b or str(end) != e_b) else (s_b, e_b)
-    else:
-        window = seasons.season_bounds(season)
+    window = _resolve_season_window(season, start, end)
     df = range_pitches_for(catcher_id, *window)
     if df.empty:
         games = strikes = strikes_lost = "—"
@@ -399,13 +411,7 @@ def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     tiles = {"slaa": "—", "sl_plus": "—", "taken": "—"}
     if catcher_id is None:
         return tiles
-    from app.data import seasons
-    season = season or seasons.current_season()
-    if start and end:
-        s_b, e_b = seasons.season_bounds(season)
-        window = (str(start), str(end)) if (str(start) != s_b or str(end) != e_b) else (s_b, e_b)
-    else:
-        window = seasons.season_bounds(season)
+    window = _resolve_season_window(season, start, end)
     df = range_pitches_for(int(catcher_id), *window)
     if df is None or df.empty:
         return tiles
