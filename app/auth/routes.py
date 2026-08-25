@@ -39,7 +39,14 @@ def _safe_next(target: str | None) -> str | None:
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
-@limiter.limit("10 per hour", methods=["POST"])
+# deduct_when: only count a POST against the budget when it did NOT redirect.
+# A successful login returns 302 (redirect to `next`/home); a failed one
+# re-renders the form with 200. Without this, correct passwords burn the same
+# budget as wrong ones -- so 10 successful logins from the whole shared-account
+# team lock everyone out for an hour. Do not simplify this away: the whole
+# point is that only failures should ever cost budget.
+@limiter.limit("10 per hour", methods=["POST"],
+                deduct_when=lambda resp: resp.status_code != 302)
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))

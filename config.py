@@ -102,6 +102,11 @@ class Config:
     PERMANENT_SESSION_LIFETIME = timedelta(days=30)
     SESSION_REFRESH_EACH_REQUEST = True
 
+    # Future-proofing, currently inert: login_user(user) in app/auth/routes.py
+    # never passes remember=True, so Flask-Login never issues a remember
+    # cookie and these settings have nothing to apply to yet. Left configured
+    # so a future remember-me feature is secure by default from the moment
+    # it's turned on, instead of needing someone to remember these too.
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
     REMEMBER_COOKIE_SECURE = is_production()

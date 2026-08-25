@@ -105,10 +105,29 @@ HTTPS are gated behind `PAW_ENV=production`:
 | `Strict-Transport-Security` | `nosniff`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, CSP Report-Only |
 | `SECRET_KEY` boot guard | `ProxyFix`, login rate limiting, POST-only logout |
 
-**Two-phase rollout.** Phase 1 is the merge, which changes nothing in
-production because `PAW_ENV` is unset. Phase 2 is the user setting
+**Two-phase rollout.** Phase 1 is the merge, which causes no user-visible
+change **except the login rate limiter** -- the three gated behaviours above
+stay inert because `PAW_ENV` is unset. Phase 2 is the user setting
 `SECRET_KEY` and `PAW_ENV=production` in Render, which activates the rest.
 Unsetting `PAW_ENV` reverts instantly without a code change.
+
+Several ungated changes do ship at merge, even though none require a code
+rollback and only one (the limiter) is user-visible in the sense of changing
+what a person can do:
+
+- A session cookie is now set on every response, including for anonymous
+  visitors, static-file requests, and Dash callback POSTs -- `before_request`
+  calls `session.permanent = True` unconditionally, which marks the session
+  modified and makes Flask emit a `Set-Cookie` even for a visitor who never
+  logs in.
+- Five new response headers on every response (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`,
+  `Content-Security-Policy-Report-Only`).
+- The login rate limiter (A5) is live immediately, not gated on `PAW_ENV` --
+  this is the one genuinely user-visible change at merge.
+- `GET /logout` now returns 405 (A7). A browser tab left open from before the
+  deploy, with the old GET logout link still rendered, will hit a 405 page
+  when clicked until the tab is reloaded and picks up the new POST form.
 
 ### A2. `ProxyFix`
 

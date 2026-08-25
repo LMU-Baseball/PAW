@@ -69,8 +69,9 @@ def create_app(config_object=Config) -> Flask:
     from app.reports.routes import report_bp
     server.register_blueprint(report_bp)
 
-    from app.security import register_security_headers
+    from app.security import register_rate_limit_handler, register_security_headers
     register_security_headers(server)
+    register_rate_limit_handler(server)
 
     from app.dashboards import register_dashboards
     register_dashboards(server)

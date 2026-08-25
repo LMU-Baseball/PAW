@@ -138,7 +138,7 @@ SECRET_KEY=<paste the output of the openssl command below>
 #     until HTTPS is working (see section 8 below) -- a browser will not
 #     return a Secure cookie over plain http://, so login will appear to do
 #     nothing.
-PAW_ENV=production
+# PAW_ENV=production   # uncomment only AFTER section 8's certificate step
 
 # APP_DATABASE_URL is optional; omit to use the local SQLite user-account DB
 # at instance/paw_app.db (fine for this scale). Set it to a MySQL URL later if

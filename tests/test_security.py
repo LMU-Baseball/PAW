@@ -357,3 +357,75 @@ def test_logout_rejects_get(monkeypatch):
     <img src="https://paw.../logout"> tag."""
     resp = _client(monkeypatch).get("/logout")
     assert resp.status_code == 405
+
+
+def test_successful_logins_do_not_consume_rate_limit_budget(monkeypatch):
+    """Fix-wave finding 1 (CRITICAL). The limiter must only spend budget on
+    FAILED logins (deduct_when=resp.status_code != 302), not on successful
+    ones -- otherwise the whole shared-account team (30-50 people on a
+    handful of campus NAT IPs) locks itself out just by logging in normally.
+    A successful login redirects (302); prove well over the 10/hour budget of
+    successful logins all still succeed, each from its own fresh client (so
+    Flask-Login's own-session short-circuit doesn't mask the limiter)."""
+    monkeypatch.setenv("SECRET_KEY", "x")
+    monkeypatch.delenv("PAW_ENV", raising=False)
+    import config
+    importlib.reload(config)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+    from app.auth.models import User
+    from app.extensions import db
+
+    class T(config.Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+        WTF_CSRF_ENABLED = False
+        RATELIMIT_ENABLED = True
+
+    application = app_pkg.create_app(T)
+    with application.app_context():
+        user = User(email="ok@lmu.edu", name="OK Test", role="player")
+        user.set_password("correct-horse")
+        db.session.add(user)
+        db.session.commit()
+
+    codes = []
+    for _ in range(15):
+        # A fresh client per attempt: each is its own logged-out visitor
+        # POSTing valid credentials, mirroring 15 different teammates
+        # signing in from the same shared IP.
+        client = application.test_client()
+        resp = client.post(
+            "/login", data={"email": "ok@lmu.edu", "password": "correct-horse"})
+        codes.append(resp.status_code)
+    assert codes == [302] * 15
+    assert 429 not in codes
+
+
+def test_rate_limited_login_returns_friendly_429_page(monkeypatch):
+    """The 429 must be the branded login page with a flashed message, not
+    Werkzeug's bare default error page -- and it must still report 429, not
+    200, so the client (and any monitoring) can tell it was throttled."""
+    monkeypatch.setenv("SECRET_KEY", "x")
+    monkeypatch.delenv("PAW_ENV", raising=False)
+    import config
+    importlib.reload(config)
+    import app as app_pkg
+    importlib.reload(app_pkg)
+
+    class T(config.Config):
+        TESTING = True
+        SQLALCHEMY_DATABASE_URI = "sqlite://"
+        WTF_CSRF_ENABLED = False
+        RATELIMIT_ENABLED = True
+
+    client = app_pkg.create_app(T).test_client()
+    last = None
+    for _ in range(11):
+        last = client.post("/login", data={"email": "a@b.c", "password": "wrong"})
+    assert last.status_code == 429
+    body = last.get_data(as_text=True)
+    assert "Too many sign-in attempts" in body
+    assert "Sign in" in body  # the actual login form, not Werkzeug's default page
+    assert "<title>429" not in body
+    assert "Too Many Requests</h1>" not in body  # Werkzeug's default 429 body

@@ -13,27 +13,38 @@ extend-exclude = ["docs"]
 select = ["F", "E9", "B"]
 ignore = [
     "B008",
-    # Pre-existing across app/ and tests/ (~30 call sites) predating this CI
-    # task; enforcing strict= on every zip() would bloat this diff far beyond
-    # its scope. Revisit as a follow-up cleanup, not part of security-hardening.
+    # Pre-existing across 17 files in app/ and tests/ (~30 call sites),
+    # predating this CI task -- too widely spread to enumerate sensibly as
+    # per-file-ignores without them amounting to a repo-wide ignore anyway.
+    # Enforcing strict= on every zip() would bloat this diff far beyond its
+    # scope. Revisit as a follow-up cleanup, not part of security-hardening.
+    # (Everything else pre-existing below IS narrowed to specific files, per
+    # fix-round-4 code review, so new code stays checked for those rules.)
     "B905",
-    # Pre-existing, handful of call sites in files this task didn't touch
-    # (app/dashboards/bullpen/charts.py, tests/test_bullpen_dash.py). Fixing
-    # them means editing files outside this task's scope.
-    "F841",
-    # Pre-existing f-strings with no placeholders in app/data/*_caps.py.
-    # Cosmetic, not a bug; out of scope to touch those files here.
-    "F541",
-    # Pre-existing unused loop variables in app/dashboards/hitting/charts.py,
-    # app/reports/plots.py, tests/test_hitting_caps.py. Out of scope.
-    "B007",
-    # Verified false positive: app/data/velo_board.py:572 defines a closure
-    # over the loop var `lbr` (two refs on one line -> two B023 hits) but
-    # calls it synchronously within the same iteration -- the result is
-    # consumed immediately into a dict literal, never stored or deferred.
-    # B023 only matters when a closure escapes the iteration; this one can't.
-    "B023",
 ]
 
 [lint.per-file-ignores]
 "tests/*" = ["F811", "F401"]
+
+# Pre-existing, handful of call sites in files this task didn't touch. Fixing
+# them means editing files outside this task's scope.
+"app/dashboards/bullpen/charts.py" = ["F841"]
+"tests/test_bullpen_dash.py" = ["F841"]
+
+# Pre-existing f-strings with no placeholders in app/data/*_caps.py.
+# Cosmetic, not a bug; out of scope to touch those files here.
+"app/data/catching_caps.py" = ["F541"]
+"app/data/hitting_caps.py" = ["F541"]
+"app/data/pitching_caps.py" = ["F541"]
+
+# Pre-existing unused loop variables. Out of scope.
+"app/dashboards/hitting/charts.py" = ["B007"]
+"app/reports/plots.py" = ["B007"]
+"tests/test_hitting_caps.py" = ["B007"]
+
+# Verified false positive: app/data/velo_board.py:572 defines a closure over
+# the loop var `lbr` (two refs on one line -> two B023 hits) but calls it
+# synchronously within the same iteration -- the result is consumed
+# immediately into a dict literal, never stored or deferred. B023 only
+# matters when a closure escapes the iteration; this one can't.
+"app/data/velo_board.py" = ["B023"]
