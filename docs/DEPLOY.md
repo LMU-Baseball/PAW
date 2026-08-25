@@ -250,9 +250,11 @@ automatic (systemd timer). Done — `https://paw.lmulions.com` is live.
 > installed. **This is observed behaviour, verified on a live host — not a
 > caution:** with `PAW_ENV=production` set on a plain-HTTP server, login
 > fails. A browser will not send back a `Secure` cookie over `http://`, so
-> submitting the sign-in form just bounces back to the login page with no
-> error message. It looks exactly like the login button does nothing; the
-> actual cause is the `Secure` cookie flag being dropped in transit. Get the
+> submitting the sign-in form comes back with a session/CSRF error on the
+> re-rendered form — which is misleading. The error looks like a CSRF
+> misconfiguration, but the real cause is not CSRF at all: the browser
+> withheld the `Secure` session cookie, so the server never had a session to
+> validate the token against. Don't go hunting for a CSRF fix here. Get the
 > cert first (below), THEN set `PAW_ENV=production` and restart:
 >
 > ```bash
