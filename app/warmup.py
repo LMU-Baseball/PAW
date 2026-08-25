@@ -76,6 +76,11 @@ def warm_caches() -> None:
         g = _safe(lambda: C.games_for_catcher(cid, s_b, e_b))
         _safe(lambda: C.catcher_profile(cid))
         _safe(lambda: C.framing_season_tiles(cid, season))
+        # Also warms called_strike._get_lookup() (a ~56,537-row GAMES scan)
+        # inline the first time it's built -- otherwise it gets built lazily
+        # on whatever coach opens the catching dashboard first after a
+        # restart, since sidebar() now reads slaa_season_tiles too.
+        _safe(lambda: C.slaa_season_tiles(cid, season))
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
             gid = str(g.iloc[0]["game_id"])

@@ -125,6 +125,8 @@ def serve_layout() -> html.Div:
             lambda: catching_caps.catcher_profile(int(default_catcher)),
             lambda: catching_caps.framing_season_tiles(int(default_catcher), season,
                                                        start_d, end_d),
+            lambda: catching_caps.slaa_season_tiles(int(default_catcher), season,
+                                                    start_d, end_d),
         )
 
     games_df = (catching_caps.games_for_catcher(default_catcher, s_bound, e_bound)
