@@ -393,7 +393,14 @@ def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     tiles = {"slaa": "—", "sl_plus": "—", "taken": "—"}
     if catcher_id is None:
         return tiles
-    df = range_pitches_for(int(catcher_id), start, end)
+    from app.data import seasons
+    season = season or seasons.current_season()
+    if start and end:
+        s_b, e_b = seasons.season_bounds(season)
+        window = (str(start), str(end)) if (str(start) != s_b or str(end) != e_b) else (s_b, e_b)
+    else:
+        window = seasons.season_bounds(season)
+    df = range_pitches_for(int(catcher_id), *window)
     if df is None or df.empty:
         return tiles
     s = slaa_summary(df)

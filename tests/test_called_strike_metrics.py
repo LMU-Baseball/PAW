@@ -65,3 +65,27 @@ def test_empty_frame_returns_zeroed_summary_without_raising():
     out = catching_caps.slaa_summary(_frame([]), lookup=_lookup_half())
     assert out["taken"] == 0
     assert out["sl_plus"] is None
+
+
+def test_slaa_season_tiles_with_no_range_defaults_to_current_season_window(monkeypatch):
+    """Fix-round-1: with season/start/end all None (the dashboard's initial
+    paint), slaa_season_tiles must resolve the window via
+    seasons.current_season()/season_bounds() -- same as framing_season_tiles
+    -- NOT pass start=None, end=None straight through to range_pitches_for
+    (which used to bind literal 'None' strings into the SQL BETWEEN clause
+    and silently match zero rows)."""
+    from app.data import seasons
+    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    calls = []
+
+    def _fake_range_pitches_for(c, s, e):
+        calls.append((c, s, e))
+        return pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+
+    monkeypatch.setattr(catching_caps, "range_pitches_for", _fake_range_pitches_for)
+    catching_caps.slaa_season_tiles(1)
+    assert len(calls) == 1
+    cid, start, end = calls[0]
+    assert cid == 1
+    assert (start, end) == seasons.season_bounds(seasons.current_season())
+    assert "None" not in (str(start), str(end))
