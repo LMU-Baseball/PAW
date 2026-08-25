@@ -115,6 +115,17 @@ where framing is decided and where cells are thinnest, so an unsmoothed 1-for-1
 cell reading as a literal 100% would corrupt precisely the pitches the metric
 exists to measure.
 
+**Amendment 2026-08-25 (fix round):** the height-band-marginal anchor
+described above shipped in Task 1 and was then replaced by a fix round after
+calibration testing showed it over-predicted total called strikes by +2.15%
+(a height band spans the full side window, so it isn't actually "local" and
+drags well-sampled off-plate cells toward the band average). The shipped
+smoothing instead anchors each cell to a pooled rate over its 8 grid-adjacent
+neighbours, itself smoothed toward the global rate. Calibration bias with the
+shipped anchor is +0.17%. See `app/data/called_strike.py`'s module docstring
+("Smoothing (two-level empirical-Bayes, LOCAL anchor -- fix round 1)") for
+the full mechanism and the measured numbers.
+
 **Entry points.**
 
 - `p_called_strike(side, height, *, lookup=None) -> float`
@@ -170,6 +181,19 @@ difference, not a ratio, so it degrades gracefully and is shown at any n.
   reconcile exactly with the SLAA tile. Cells are diverging-coloured around
   zero (gained vs lost strikes) and must be readable in both light and dark
   themes.
+
+  **Amendment 2026-08-25 (fix round):** "reconcile exactly with the SLAA
+  tile" above described the original design, where the heat map read the
+  same season-wide scope as the sidebar tile. What shipped instead
+  reconciles exactly with a LOCAL `slaa_summary` computed on the same
+  (filtered) `df` already feeding the grid, surfaced as the figure's own
+  caption/subtitle — not necessarily the sidebar's season-wide number, since
+  the heat map is scoped by the Framing tab's own filters (Game dropdown,
+  Batter Hand, Pitcher Throws, etc.), which the sidebar tile is not. This
+  keeps the chart honest about its own scope rather than implying agreement
+  with a tile that may be scoped differently. See
+  `app/dashboards/catching/charts.py`'s `slaa_location_figure` docstring for
+  the full rationale.
 
 ## 7. Testing
 
