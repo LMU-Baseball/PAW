@@ -162,8 +162,18 @@ _N = 7                                   # 5 zone cells + 1 ring each side
 def _display_cell(side, height) -> tuple:
     """(col, row) in the 7x7 display grid. Out-of-grid pitches clamp into the
     outer ring so every taken pitch is counted exactly once and the grid
-    reconciles with SLAA."""
-    col = int(math.floor((float(side) - (-ZONE_SIDE_HALF - _CELL_W)) / _CELL_W))
+    reconciles with SLAA.
+
+    `side` is NEGATED before binning to match this codebase's catcher-view
+    convention, established by the framing scatter directly above this heat
+    map on the same tab (`catching.add_framing_cols`'s
+    `_x = plate_loc_side * -12`): a positive `plate_loc_side` must draw on
+    the LEFT (negative x), not the right. Binning the raw, unnegated side
+    here previously left the heat map mirrored relative to the scatter even
+    though both are titled "Catcher's View" / "Catcher View".
+    """
+    s = -float(side)
+    col = int(math.floor((s - (-ZONE_SIDE_HALF - _CELL_W)) / _CELL_W))
     row = int(math.floor((float(height) - (ZONE_H_LO - _CELL_H)) / _CELL_H))
     return (min(_N - 1, max(0, col)), min(_N - 1, max(0, row)))
 

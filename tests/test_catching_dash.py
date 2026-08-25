@@ -637,6 +637,56 @@ def test_slaa_location_figure_totals_reconcile_with_slaa():
         "dropped or double-counted")
 
 
+def test_display_cell_side_orientation_matches_scatter_catcher_view():
+    """Finding 1 (CRITICAL) regression guard: `_display_cell` must match the
+    framing scatter's catcher-view convention (`catching.add_framing_cols`'s
+    `_x = plate_loc_side * -12`), where a positive plate_loc_side draws on
+    the LEFT (negative _x), not the right. Before the fix, `_display_cell`
+    binned the raw, unnegated side, so the heat map was left-right mirrored
+    relative to the scatter directly above it on the same tab despite both
+    being titled "Catcher's View" / "Catcher View"."""
+    from app.dashboards.catching import charts
+    positive_side_col, _ = charts._display_cell(0.7, 2.5)
+    negative_side_col, _ = charts._display_cell(-0.7, 2.5)
+    # Scatter: _x = side * -12, so positive side -> negative _x -> LEFT (a
+    # LOWER column index in the heat map's left-to-right z-matrix layout).
+    assert positive_side_col < negative_side_col, (
+        "a positive plate_loc_side must map to a LOWER column (further "
+        "left, matching the scatter's negated _x) than a negative one -- "
+        f"got positive={positive_side_col}, negative={negative_side_col}")
+    # Pin the exact columns too, not just the relative ordering (catches a
+    # future change to the binning math that preserves ordering but not
+    # magnitude).
+    assert (positive_side_col, negative_side_col) == (1, 5)
+
+
+def test_slaa_location_figure_orientation_matches_scatter():
+    """Finding 1 (CRITICAL) regression guard, end to end: a block of strikes
+    gained concentrated at a known, real plate_loc_side must land in the
+    grid cell `_display_cell` itself computes for that side, and that cell
+    must sit on the scatter-matching (left) half of the grid for a positive
+    side. Fails against the pre-fix code because `_display_cell(0.7, 2.5)`
+    used to compute column 5 (the right half), not column 1."""
+    import pandas as pd
+    from app.dashboards.catching import charts
+    from app.data import called_strike as cs
+
+    rows = [(0.7, 2.5, "StrikeCalled")] * 60          # concentrated signal
+    rows += [(-0.9, 0.3, "BallCalled")] * 20           # sparse background
+    df = pd.DataFrame(rows, columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    lk = cs._build_lookup_from_df(df)
+
+    fig = charts.slaa_location_figure(df, lookup=lk)
+    z = pd.DataFrame(fig.data[0].z).fillna(0).values
+    expected_col, expected_row = charts._display_cell(0.7, 2.5)
+    assert z[expected_row][expected_col] > 0, (
+        "the strikes-gained signal at side=0.7 must land in the cell "
+        "_display_cell computes for that same side")
+    assert expected_col < charts._N // 2, (
+        "a positive plate_loc_side must land in the LEFT half of the grid "
+        "(low column), matching the scatter's negated _x convention")
+
+
 def test_slaa_location_figure_on_empty_frame_does_not_raise():
     import pandas as pd
     from app.dashboards.catching import charts
