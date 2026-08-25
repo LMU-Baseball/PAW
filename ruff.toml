@@ -27,9 +27,11 @@ ignore = [
     # Pre-existing unused loop variables in app/dashboards/hitting/charts.py,
     # app/reports/plots.py, tests/test_hitting_caps.py. Out of scope.
     "B007",
-    # Pre-existing loop-variable-in-closure pattern in app/data/velo_board.py.
-    # Worth a follow-up look, but out of scope for this task -- see task-7
-    # report for the concern flagged to the repo owner.
+    # Verified false positive: app/data/velo_board.py:572 defines a closure
+    # over the loop var `lbr` (two refs on one line -> two B023 hits) but
+    # calls it synchronously within the same iteration -- the result is
+    # consumed immediately into a dict literal, never stored or deferred.
+    # B023 only matters when a closure escapes the iteration; this one can't.
     "B023",
 ]
 
