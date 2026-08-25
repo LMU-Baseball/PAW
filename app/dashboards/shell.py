@@ -117,11 +117,14 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
         right = html.Span([
             f"{current_user.name} · {current_user.role} · ",
             *pw_link,
+            # Unlike base.html's .logout-btn (which uses color: inherit because
+            # its sibling links also inherit), this header sets literal #fff
+            # on both "Change password" and "Log out" -- keep them matching.
             html.Form(
                 [html.Button("Log out", type="submit", style={
                     "textDecoration": "underline",
                     "background": "none", "border": "none", "padding": "0",
-                    "cursor": "pointer", "font": "inherit", "color": "inherit",
+                    "cursor": "pointer", "font": "inherit", "color": "#fff",
                 })],
                 action="/logout", method="POST",
                 style={"display": "inline"},
