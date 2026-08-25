@@ -415,21 +415,10 @@ failure and ask it what's going on.
 Don't work directly on `main`. Make a branch, commit your work, and push it so
 others can review.
 
-```bash
-# start fresh from the latest main
-git checkout main
-git pull
-
-# make a branch for your task
-git checkout -b my-feature-name
-
-# ... make changes, then ...
-git add -A
-git commit -m "short description of what you changed"
-
-# push your branch to GitHub
-git push -u origin my-feature-name
-```
+**`CONTRIBUTING.md` (in the project root) is the canonical guide for this** —
+branch naming, exactly which `git add` commands to run (and which to avoid),
+running tests, and what happens after you open a PR. Read that for the full
+workflow.
 
 Then open a **Pull Request** on GitHub so your work can be reviewed and merged.
 If any of this is fuzzy, ask your AI assistant to walk you through it — describing

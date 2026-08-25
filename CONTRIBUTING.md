@@ -42,10 +42,17 @@ Make your edits, then:
 
 ```bash
 python -m pytest -q                       # make sure nothing broke
-git add .
+git status                                 # look at what changed
+git add path/to/the/file.py                # stage only YOUR files, one by one
 git commit -m "fix: velo chart showed the wrong season"
 git push -u origin your-name/what-you-are-doing
 ```
+
+> **Don't use `git add .` or `git add -A`.** This repo has scratch folders
+> and local notes that are never meant to be committed. Those "stage
+> everything" commands sweep them in anyway, and once something is committed
+> it's in the project's history for good. `git status` shows you exactly
+> what changed — stage only the files you meant to touch.
 
 > **The full test suite takes about 16 minutes** and needs the real `.env` to
 > reach the database — it has not hung if it looks quiet for a while. If you
@@ -67,7 +74,8 @@ GitHub prints a link. Open it, fill in the three questions, and click
 2. Brad reviews it. He may leave comments asking for changes — that is normal
    and happens to everyone.
 3. Once approved, it gets merged (squashed into one clean commit on `main`).
-   Your branch is deleted automatically.
+   You can delete your branch after that — GitHub shows a **Delete branch**
+   button on the merged PR page.
 
 ## Running the app
 
