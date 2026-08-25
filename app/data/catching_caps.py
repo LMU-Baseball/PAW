@@ -17,6 +17,7 @@ from app.data import pitching_caps
 from app.data.pitching_caps import _NUMERIC_GAME_ID_CLAUSE
 from app.data.cache import cached
 from app.db import query_df
+from app.data import called_strike as _cs
 
 LMU_TEAM_ID = 78  # GAMES.HomeTeamForeignID/AwayTeamForeignID for LMU.
 LMU_PITCHER_TEAM = "LOY_LIO"  # GAMES.PitcherTeam code for LMU (catcher is on the pitching team).
@@ -340,3 +341,65 @@ def framing_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
         "strikes_lost": strikes_lost,
         "cs_pct": "—" if cs_pct is None else f"{cs_pct}%",
     }
+
+
+# SL+ is a ratio and is meaningless on a small denominator. Measured against
+# the live data: LMU has 22,577 taken pitches across 24 catchers, so regular
+# starters clear 100 within a handful of games while one-game cameo lines --
+# exactly the noise this floor suppresses -- do not.
+SL_PLUS_MIN_TAKEN = 100
+
+
+def slaa_summary(df, *, lookup=None) -> dict:
+    """SLAA / SL+ over a catcher's pitches.
+
+    SLAA = actual called strikes - expected, in units of strikes: 0 is
+    average, +12 means twelve strikes gained beyond what an average receiver
+    gets on those same pitches. SL+ = 100 * actual / expected (100 = average,
+    higher is better), suppressed to None below SL_PLUS_MIN_TAKEN because a
+    ratio on a small denominator will be believed and should not be.
+
+    `df` needs `plate_loc_side`, `plate_loc_height`, `pitch_call` -- i.e. the
+    shape `range_pitches_for` already returns.
+    """
+    empty = {"taken": 0, "actual": 0, "expected": 0.0, "slaa": 0.0, "sl_plus": None}
+    if df is None or df.empty:
+        return empty
+    taken = df[_cs.is_taken(df)]
+    if taken.empty:
+        return empty
+
+    actual = int(_cs.is_called_strike(taken).sum())
+    expected = float(_cs.expected_called_strikes(taken, lookup=lookup).sum())
+    n = int(len(taken))
+    sl_plus = None
+    if n >= SL_PLUS_MIN_TAKEN and expected > 0:
+        sl_plus = round(100.0 * actual / expected, 1)
+    return {
+        "taken": n,
+        "actual": actual,
+        "expected": round(expected, 1),
+        "slaa": round(actual - expected, 1),
+        "sl_plus": sl_plus,
+    }
+
+
+def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
+    """Display-ready SLAA / SL+ / taken-pitch count for the sidebar.
+
+    Mirrors `framing_season_tiles`' scoping so date-range selection behaves
+    identically. Returns strings; "—" where a value is unavailable.
+    """
+    tiles = {"slaa": "—", "sl_plus": "—", "taken": "—"}
+    if catcher_id is None:
+        return tiles
+    df = range_pitches_for(int(catcher_id), start, end)
+    if df is None or df.empty:
+        return tiles
+    s = slaa_summary(df)
+    tiles["taken"] = str(s["taken"])
+    # Signed, because "+8" and "-8" mean opposite things and a bare "8" is
+    # ambiguous at a glance on a tile.
+    tiles["slaa"] = f"{s['slaa']:+.1f}"
+    tiles["sl_plus"] = "—" if s["sl_plus"] is None else f"{s['sl_plus']:.0f}"
+    return tiles
