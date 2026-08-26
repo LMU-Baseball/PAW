@@ -158,6 +158,13 @@ _CELL_W = (2 * ZONE_SIDE_HALF) / 5.0     # 0.332 ft
 _CELL_H = (ZONE_H_HI - ZONE_H_LO) / 5.0  # 0.4 ft
 _N = 7                                   # 5 zone cells + 1 ring each side
 
+# Real-feet bin centers for the 7 display columns/rows, so the heatmap plots
+# in physical space instead of abstract cell indices -- this is what lets
+# scaleanchor="x", scaleratio=1 below render the zone's TRUE (non-square)
+# aspect ratio instead of an artificial square.
+_COL_CENTERS_FT = [(-ZONE_SIDE_HALF - _CELL_W) + (c + 0.5) * _CELL_W for c in range(_N)]
+_ROW_CENTERS_FT = [(ZONE_H_LO - _CELL_H) + (r + 0.5) * _CELL_H for r in range(_N)]
+
 
 def _display_cell(side, height) -> tuple:
     """(col, row) in the 7x7 display grid. Out-of-grid pitches clamp into the
@@ -216,15 +223,17 @@ def slaa_location_figure(df: pd.DataFrame, *, lookup=None) -> go.Figure:
 
     lim = float(max(1.0, np.abs(z).max()))
     fig = go.Figure(go.Heatmap(
+        x=_COL_CENTERS_FT, y=_ROW_CENTERS_FT,
         z=z, zmid=0, zmin=-lim, zmax=lim,
         colorscale="RdBu", reversescale=True,
         hovertemplate="strikes gained: %{z:.1f}<extra></extra>",
         colorbar=dict(title="+/- strikes"),
     ))
-    # Outline the nominal strike zone: it spans display cells 1..5 inclusive,
-    # so its edges sit at 0.5 and 5.5 in cell coordinates.
-    fig.add_shape(type="rect", x0=0.5, x1=5.5, y0=0.5, y1=5.5,
-                  line=dict(color="#1a1a1a", width=2))
+    # Outline the nominal strike zone at its real bounds (matches pitching.py's
+    # _SZ / bullpen/charts.py's _ZONE) -- now that the heatmap plots in real
+    # feet, this box's aspect ratio is finally the TRUE, non-square shape.
+    fig.add_shape(type="rect", x0=-ZONE_SIDE_HALF, x1=ZONE_SIDE_HALF,
+                  y0=ZONE_H_LO, y1=ZONE_H_HI, line=dict(color="#1a1a1a", width=2))
     fig.update_layout(
         title=dict(text="Strikes Gained vs Expected, by Location (Catcher's View)",
                    subtitle=dict(text=caption)),

@@ -30,8 +30,14 @@ SWING_DECISION_LABEL = "Swing Decision"
 SWING_DECISION_START = pd.Timestamp("2026-03-31")
 SWING_DECISION_END = pd.Timestamp("2026-06-01")
 
-# College strike zone (feet) — catcher's view
-SZ_X0, SZ_X1 = -0.708, 0.708
+# Strike zone (feet) — catcher's view. Unified 2026-08-25 to the same 0.83 ft
+# half-width every other zone chart in the app uses (pitching.py's _SZ,
+# bullpen/charts.py's _ZONE, catching/charts.py's slaa_location_figure) --
+# previously 0.708 ft here only, a pre-existing inconsistency. NOTE: this
+# constant is not purely cosmetic -- practice.py's in_zone classification
+# (used for swing-decision statistics, not just this chart) uses it too, so
+# this change also widens what counts as "in zone" for practice reports.
+SZ_X0, SZ_X1 = -0.83, 0.83
 SZ_Y0, SZ_Y1 = 1.5, 3.5
 
 # Batted-ball distribution fan geometry (provisional; coach-confirmable).

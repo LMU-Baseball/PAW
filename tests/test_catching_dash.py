@@ -806,3 +806,34 @@ def test_slaa_location_figure_caption_matches_local_slaa_summary():
     assert f"{expected['slaa']:+.1f}" in caption
     assert str(expected["taken"]) in caption
     assert expected["taken"] == 130, "the 5 missing-location rows must be excluded"
+
+
+def test_slaa_location_figure_zone_outline_uses_real_feet_bounds():
+    """The zone-outline shape must be drawn at the real strike-zone bounds
+    (matching pitching.py's _SZ / bullpen's _ZONE: x0=-0.83,x1=0.83,
+    y0=1.5,y1=3.5), not at arbitrary cell-index coordinates -- otherwise the
+    box renders as a square regardless of the true (non-square) zone shape."""
+    import pandas as pd
+    from app.dashboards.catching import charts
+
+    df = pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    fig = charts.slaa_location_figure(df)
+    rects = [s for s in fig.layout.shapes if s.type == "rect"]
+    assert len(rects) == 1, "expected exactly one zone-outline rectangle"
+    zone = rects[0]
+    assert (zone.x0, zone.x1, zone.y0, zone.y1) == (-0.83, 0.83, 1.5, 3.5)
+
+
+def test_slaa_location_figure_plots_on_real_feet_not_cell_indices():
+    """The heatmap trace's x/y coordinates must be real feet (bin centers
+    inside/around the +/-0.83 / 1.5-3.5 window), not the default 0..6 index
+    positions Plotly would otherwise fall back to."""
+    import pandas as pd
+    from app.dashboards.catching import charts
+
+    df = pd.DataFrame(columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    fig = charts.slaa_location_figure(df)
+    xs = list(fig.data[0].x)
+    ys = list(fig.data[0].y)
+    assert max(xs) <= 1.3 and min(xs) >= -1.3, f"x coords look like indices, not feet: {xs}"
+    assert max(ys) <= 4.0 and min(ys) >= 1.0, f"y coords look like indices, not feet: {ys}"

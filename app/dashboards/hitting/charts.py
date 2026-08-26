@@ -73,7 +73,7 @@ def _style_axes(fig, *, row=None, col=None):
     fig.update_xaxes(range=list(_XRANGE), showgrid=False, zeroline=False,
                      visible=False, **kw)
     fig.update_yaxes(range=list(_YRANGE), showgrid=False, zeroline=False,
-                     visible=False, scaleanchor=None, **kw)
+                     visible=False, scaleanchor="x", scaleratio=1, **kw)
 
 
 def zone_scatter(df: pd.DataFrame, title: str = "") -> go.Figure:

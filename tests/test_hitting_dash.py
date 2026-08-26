@@ -152,6 +152,15 @@ def test_zone_scatter_empty_df_is_safe():
     assert isinstance(fig, go.Figure)
 
 
+def test_zone_scatter_locks_aspect_ratio():
+    """Without an aspect lock, Plotly can stretch/squish the already-correct
+    20x26-inch zone box to fit whatever container size it's given."""
+    from app.dashboards.hitting import charts
+    fig = charts.zone_scatter(pd.DataFrame(), title="Empty")
+    assert fig.layout.yaxis.scaleanchor == "x"
+    assert fig.layout.yaxis.scaleratio == 1
+
+
 def test_zone_scatter_white_bg_and_trimmed_hover():
     from app.dashboards.hitting import charts
     fig = charts.zone_scatter(_fake_pitches(), title="Test")
