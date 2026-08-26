@@ -179,7 +179,7 @@ def test_lmu_pitchers_season_scoped_and_past_seasons_surface():
     from app.data import seasons
     assert pitching_caps.lmu_pitchers().equals(
         pitching_caps.lmu_pitchers(seasons.current_season()))
-    past = [s for s in seasons.available_seasons() if s != seasons.current_season()]
+    past = [s for s in seasons.available_seasons() if s < seasons.current_season()]
     if not past:
         pytest.skip("no past season in GAMES to exercise the season dropdown")
     roster = pitching_caps.lmu_pitchers(past[0])

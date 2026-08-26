@@ -29,7 +29,7 @@ def test_rebuild_populates_every_lmu_hitter(rebuilt):
 
 def test_rebuild_covers_past_seasons(rebuilt):
     from app.data import seasons
-    past = [s for s in seasons.available_seasons() if s != seasons.current_season()]
+    past = [s for s in seasons.available_seasons() if s < seasons.current_season()]
     assert past, "expected more than one season of data"
     lbl = past[0]
     roster = hitting_caps.lmu_hitters(lbl)
