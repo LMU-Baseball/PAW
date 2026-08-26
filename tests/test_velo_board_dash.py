@@ -112,6 +112,54 @@ def test_edit_unlocks_table_in_place_for_coach(server):
     assert "Editing" in status
 
 
+def _find_component(node, comp_id):
+    """Depth-first search for a Dash component whose id == comp_id."""
+    if getattr(node, "id", None) == comp_id:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for c in children:
+        found = _find_component(c, comp_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_serve_layout_defaults_to_todays_calendar_season(server):
+    """Pin the literal bug the coach reported: the Velo Board must default to
+    TODAY's real calendar season (via seasons.season_label_for), not a stale
+    GAMES-data-driven one (seasons.current_season() -- which can lag months
+    behind for a BULLPEN-backed board). Checked at the serve_layout level via
+    the rendered velo-selection Store, not just seasons.py/default_week_for
+    directly."""
+    from datetime import date
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.data import seasons
+    from app.dashboards.velo_board import layout
+    with server.app_context():
+        coach = User(email="vbdefault@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/velo_board/"):
+            login_user(coach)
+            out = layout.serve_layout()
+
+    todays_season = seasons.season_label_for(date.today().isoformat())
+    store = _find_component(out, "velo-selection")
+    assert store is not None, "expected a velo-selection dcc.Store in the rendered layout"
+    assert store.data["season"] == todays_season
+
+    dropdown = _find_component(out, "velo-season")
+    assert dropdown is not None, "expected the velo-season Dropdown in the rendered layout"
+    assert dropdown.value == todays_season
+
+
 def test_pitching_hub_has_velo_board_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User
