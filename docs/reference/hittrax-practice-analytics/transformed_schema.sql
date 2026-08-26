@@ -1,3 +1,25 @@
+-- =====================================================================
+-- ⚠️  REFERENCE COPY ONLY -- DO NOT RUN THIS AGAINST THE PAW DATABASE.
+--
+-- This file documents the schema of the separate Streamlit practice-
+-- analytics app (BRADhaskell/lmu-baseball-practice-analytics). It is kept
+-- here only as the column-mapping source of truth for
+-- app/ingest/hittrax.py.
+--
+-- On 2026-08-22 this file WAS run against the production RDS. It dropped
+-- `player_stats_summary` (breaking PAW's HitTrax transform until the
+-- dependency was removed) and created an empty lowercase
+-- `practice_sessions` alongside PAW's real ALL-CAPS tables. PAW's
+-- PRACTICE_SESSIONS / PRACTICE_PLAYS survived only because
+-- scripts/rename_practice_tables.py had moved them to upper case and this
+-- RDS is case-sensitive -- otherwise ~20,000 rows of practice data would
+-- have been dropped.
+--
+-- The DROP statements below are therefore COMMENTED OUT. If the Streamlit
+-- app genuinely needs a clean rebuild, run it against ITS OWN schema, not
+-- one shared with PAW.
+-- =====================================================================
+
 -- Transformed Schema for Baseball Practice Analytics
 -- Customized for PlaysExport + SessionExport data structure
 -- This schema contains clean, business-ready tables
@@ -5,9 +27,9 @@
 --   launch angle fix, swing decision fields, and expanded player summary
 
 -- Drop tables if they exist (in reverse dependency order)
-DROP TABLE IF EXISTS player_stats_summary;
-DROP TABLE IF EXISTS practice_plays;
-DROP TABLE IF EXISTS practice_sessions;
+-- DISABLED (see banner above): DROP TABLE IF EXISTS player_stats_summary;
+-- DISABLED (see banner above): DROP TABLE IF EXISTS practice_plays;
+-- DISABLED (see banner above): DROP TABLE IF EXISTS practice_sessions;
 
 -- ========================================
 -- PRACTICE SESSIONS TABLE

@@ -225,7 +225,11 @@ def load_plays(exclude_test: bool = True, player=None,
         where += " AND player_name = :player"
         params["player"] = player
     if start and end:
-        where += " AND DATE(play_timestamp) BETWEEN :start AND :end"
+        # Half-open range instead of DATE(play_timestamp) BETWEEN ...: wrapping the
+        # column in a function makes MySQL ignore `idx_play_timestamp`. `>= start`
+        # with `< end + 1 day` selects exactly the same rows on a DATETIME column.
+        where += (" AND play_timestamp >= :start"
+                  " AND play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
         params["start"], params["end"] = str(start), str(end)
     return query_df(f"""
         SELECT player_name, player_id,
@@ -249,7 +253,10 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         "WHERE pp.pitch_location_x IS NOT NULL AND pp.pitch_location_y IS NOT NULL"
         " AND pp.pitch_location_y BETWEEN 0.5 AND 5.5"
         " AND ABS(pp.pitch_location_x) < 3.0"
-        f" AND DATE(pp.play_timestamp) >= '{sd}'"
+        # Bare column, not DATE(...): keeps `idx_play_timestamp` usable.
+        # On a DATETIME, `>= 'YYYY-MM-DD'` means `>= that day at 00:00:00`,
+        # which is what DATE(ts) >= 'YYYY-MM-DD' selected anyway.
+        f" AND pp.play_timestamp >= '{sd}'"
     )
     where += _test_clause("pp.player_name", exclude_test)
     params: dict = {}
@@ -257,7 +264,8 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         where += " AND pp.player_name = :player"
         params["player"] = player
     if start and end:
-        where += " AND DATE(pp.play_timestamp) BETWEEN :start AND :end"
+        where += (" AND pp.play_timestamp >= :start"
+                  " AND pp.play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
         params["start"], params["end"] = str(start), str(end)
     try:
         df = query_df(f"""

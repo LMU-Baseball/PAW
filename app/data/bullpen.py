@@ -1,8 +1,15 @@
 """Bullpen (Trackman pitching-practice) data access + transforms.
 
 Source = the legacy `BULLPEN` table (raw Trackman practice export, PascalCase
-columns). Stale (ends 2025-04-14; feed dead) — repopulated later from an SFTP
-drop; this module reads whatever the table currently holds. LMU-only.
+columns), repopulated from an SFTP drop; this module reads whatever the table
+currently holds (as of 2026-08-23 it runs through 2026-05-13). LMU-only.
+
+`Date` is stored as TEXT holding ISO `YYYY-MM-DD` — verified uniform across all
+24,581 rows, no blanks and no other format. So WHERE clauses compare it as a
+plain string rather than wrapping it in `DATE(...)`: identical results, but a
+function call around the column would make MySQL ignore
+`ix_bullpen_pitcherid_date`. `DATE(Date)` in a SELECT/GROUP BY list is fine and
+stays — only filters care.
 """
 from __future__ import annotations
 
@@ -44,7 +51,7 @@ def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
     clause, params = _teams_clause()
     where = f"{clause} AND PitcherId IS NOT NULL"
     if start is not None and end is not None:
-        where += " AND DATE(Date) BETWEEN :start AND :end"
+        where += " AND `Date` BETWEEN :start AND :end"
         params = {**params, "start": str(start), "end": str(end)}
     return query_df(
         f"""
@@ -81,7 +88,7 @@ def session_pitches(pitcher_trackman_id: int, date) -> pd.DataFrame:
     df = query_df(
         """
         SELECT * FROM BULLPEN
-         WHERE PitcherId = :pid AND DATE(Date) = :d
+         WHERE PitcherId = :pid AND `Date` = :d
          ORDER BY PitchNo
         """,
         {"pid": int(pitcher_trackman_id), "d": str(date)},
@@ -164,7 +171,7 @@ def session_options(pitcher_id, start, end) -> pd.DataFrame:
         """
         SELECT DATE(Date) AS date, COUNT(*) AS pitches
           FROM BULLPEN
-         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
          GROUP BY DATE(Date)
          ORDER BY date DESC
         """,
@@ -183,7 +190,7 @@ def bullpen_session_summary(pitcher_id, start, end) -> dict:
                RelSpeed AS rel_speed, PlateLocSide AS plate_loc_side,
                PlateLocHeight AS plate_loc_height
           FROM BULLPEN
-         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
         """,
         {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
     )
@@ -221,7 +228,7 @@ def trend_by_session(pitcher_id, start, end) -> pd.DataFrame:
                InducedVertBreak AS ind_vert_break, HorzBreak AS horz_break,
                PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height
           FROM BULLPEN
-         WHERE PitcherId = :pid AND DATE(Date) BETWEEN :start AND :end
+         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
            AND TaggedPitchType IS NOT NULL
         """,
         {"pid": int(pitcher_id), "start": str(start), "end": str(end)},

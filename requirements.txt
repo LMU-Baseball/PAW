@@ -11,6 +11,11 @@ gunicorn>=22.0          # production WSGI server (deploy later)
 
 # Interactive dashboards (mounted on Flask)
 dash>=2.17
+Flask-Compress>=1.14   # gzip/brotli for Dash callback JSON; Dash wires it when
+                       # compress=True (all 7 dashboards pass it). Without this
+                       # package that kwarg is a silent no-op. Render sits behind
+                       # Cloudflare which already compresses at the edge, so this
+                       # only starts mattering on a plain VM (Lightsail/EC2).
 plotly>=5.22
 
 # Data layer

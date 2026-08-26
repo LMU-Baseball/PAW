@@ -13,6 +13,7 @@ def build_pitching_dash(server) -> Dash:
         server=server,
         url_base_pathname="/dash/pitching/",
         suppress_callback_exceptions=True,
+        compress=True,
         title="Pitching — The PAW",
     )
     dash_app.index_string = INDEX_STRING

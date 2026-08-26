@@ -36,3 +36,8 @@ memory/
 Thumbs.db
 .vscode/
 .idea/
+
+# Warehouse backups (scripts/backup_warehouse.py defaults OUTSIDE the repo;
+# this is a safety net in case --out is ever pointed inside it).
+backups/
+*.sql.gz
