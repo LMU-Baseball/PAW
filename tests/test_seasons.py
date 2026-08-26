@@ -28,6 +28,28 @@ def test_available_and_current_live():
     assert S.current_season() <= seasons[0]
 
 
+def test_current_season_stays_games_driven_not_todays_calendar_season(monkeypatch):
+    """Regression guard for the _games_seasons() split: current_season() must
+    return the latest season WITH REAL GAMES DATA, never today's calendar
+    season just because available_seasons() now always includes it.
+
+    Mocks GAMES to have rows for an older season ("2024/2025") only -- today's
+    real calendar season (whatever date.today() actually is) has zero GAMES
+    rows here, matching live reality until real Fall-2026 games are played.
+    This must FAIL against the old `current_season() == available_seasons()[0]`
+    implementation: since available_seasons() always includes today's label and
+    it always sorts newest, that old implementation would incorrectly return
+    today's label instead of the older GAMES-backed season."""
+    cache.clear_all()
+    monkeypatch.setattr(S, "query_df", lambda sql, params=None:
+                         pd.DataFrame({"Date": ["2024-11-01"]}))
+    try:
+        assert S.current_season() == "2024/2025"
+        assert S.current_season() != S.season_label_for(date.today().isoformat())
+    finally:
+        cache.clear_all()
+
+
 def test_available_seasons_always_includes_current_calendar_season(monkeypatch):
     """Even with zero GAMES rows for the current academic year, available_seasons()
     must still include today's calendar season label. Without this, the Season
