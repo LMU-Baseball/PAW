@@ -184,13 +184,16 @@ def _rollup_over(batter_id, start, end) -> dict:
 
 
 def _compute_season_rollup(batter_id, season=None) -> dict:
-    """The hitting season rollup for one batter, computed from raw CAPS.
+    """The hitting season rollup for one batter, computed from raw CAPS --
+    now including HARD-HIT%/POP-UP%/xBA so `rebuild_hitting` can persist
+    them to precalc. Thin wrapper over `_rollup_over` (slash/QAB) plus
+    `_live_batted_ball_kpis` (the three batted-ball KPIs) with the season's
+    date bounds -- the single source of truth for each stays where it
+    already was; this function only combines them for storage.
 
-    Thin wrapper over `_rollup_over` with the season's date bounds -- the single
-    source of truth for the slash/QAB math lives there now. `precalc.
-    rebuild_hitting` writes this dict to `precalc_hitting_player_season`;
-    `sidebar_stats` et al. read it back (with this function as the compute
-    fallback). No metric is redefined here.
+    `precalc.rebuild_hitting` writes this dict to
+    `precalc_hitting_player_season`; `sidebar_stats` reads it back (with
+    this function as the compute fallback). No metric is redefined here.
 
     Scoped to the academic-year `season` (default current_season()); the name is
     read from that season's rows and `season_label` stores the season label.
@@ -198,7 +201,9 @@ def _compute_season_rollup(batter_id, season=None) -> dict:
     from app.data import seasons
     season = season or seasons.current_season()
     s, e = seasons.season_bounds(season)
-    return {**_rollup_over(batter_id, s, e), "season_label": season}
+    rollup = _rollup_over(batter_id, s, e)
+    kpis = _live_batted_ball_kpis(batter_id, s, e, rollup["ab"])
+    return {**rollup, **kpis, "season_label": season}
 
 
 def _fmt_pct(x) -> str:
@@ -277,14 +282,13 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
     When `start`/`end` are omitted, or given but equal to `season`'s bounds
     (the default "This Season" view), read the precalc 1-row rollup as before
     (fixes the profiled 3.2s full-season double-load; compute fallback when the
-    rollup row is absent) -- this fast path is unchanged for qab/BA/SLG/OBP. A
-    genuine sub-range (the coach narrowed the calendar/preset) computes on the
-    fly via `_rollup_over` so the sidebar KPIs track the selected date range.
-
-    HARD-HIT%/POP-UP%/xBA are always computed fresh (mirrors the catcher
-    STEAL% approach) on BOTH paths -- they are not part of the precalc
-    schema, so the season-default view now does one extra live batted-ball
-    pull; the four existing tiles keep their precalc fast path untouched."""
+    rollup row is absent) -- this fast path now covers all 7 tiles: `_season_
+    rollup`'s compute fallback (`_compute_season_rollup`) already produces
+    hard_hit_pct/popup_pct/xba (Task 4), so a real precalc row carries them
+    too and no second live batted-ball pull runs on this path. A genuine
+    sub-range (the coach narrowed the calendar/preset) is the only path left
+    that computes on the fly, via `_rollup_over` + `_live_batted_ball_kpis`,
+    so the sidebar KPIs track the selected date range."""
     from app.data import seasons
     if start and end:
         s_b, e_b = seasons.season_bounds(season or seasons.current_season())
@@ -294,9 +298,8 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
             return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
                     **live}
     r = _season_rollup(batter_id, season)
-    s_b, e_b = seasons.season_bounds(season or seasons.current_season())
-    live = _live_batted_ball_kpis(batter_id, s_b, e_b, r["ab"])
-    return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"], **live}
+    return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
+            "hard_hit_pct": r["hard_hit_pct"], "popup_pct": r["popup_pct"], "xba": r["xba"]}
 
 
 @cached

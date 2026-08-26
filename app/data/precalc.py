@@ -48,6 +48,7 @@ _DDL = {
             qab_pct      DECIMAL(4,3) NULL,
             ba VARCHAR(8), obp VARCHAR(8), slg VARCHAR(8),
             pa INT, ab INT, h INT, doubles INT, triples INT, hr INT, bb INT, so INT,
+            hard_hit_pct VARCHAR(8), popup_pct VARCHAR(8), xba VARCHAR(8),
             season_label VARCHAR(32) NOT NULL,
             built_at     DATETIME,
             PRIMARY KEY (batter_id, season_label)
@@ -110,12 +111,39 @@ def _pk_columns(conn, table: str) -> set[str]:
     return {r[0] for r in rows}
 
 
+def _existing_columns(conn, table: str) -> set[str]:
+    """Current column names of `table` (empty set if it does not exist)."""
+    rows = conn.execute(text(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t"), {"t": table}).fetchall()
+    return {r[0] for r in rows}
+
+
+# Columns added to HITTING_SEASON_TABLE after its initial release (Task 4,
+# 2026-08-25): CREATE TABLE IF NOT EXISTS is a no-op for a table that already
+# exists with the old column set, so a plain column addition -- unlike a PK
+# change -- would silently never reach a live table without this migration.
+# MySQL <8.0.29 doesn't support `ADD COLUMN IF NOT EXISTS`, so this checks
+# INFORMATION_SCHEMA.COLUMNS first (same pattern as `_pk_columns` above) and
+# only ALTERs the columns that are actually missing.
+_HITTING_NEW_COLUMNS = {
+    "hard_hit_pct": "VARCHAR(8)",
+    "popup_pct": "VARCHAR(8)",
+    "xba": "VARCHAR(8)",
+}
+
+
 def ensure_tables(engine=None) -> None:
     """Idempotently create all precalc tables. Also migrates the rollup tables
     off the pre-per-season single-column PK: if a rollup table exists with a PK
     that isn't the (player_id, season_label) composite, DROP it so the CREATE
     below rebuilds it with the new schema. Safe -- these are derived caches, and
-    the very next rebuild_* repopulates them."""
+    the very next rebuild_* repopulates them.
+
+    Additionally migrates HITTING_SEASON_TABLE forward with an ADD COLUMN for
+    any of `_HITTING_NEW_COLUMNS` missing on a table that predates them (a
+    plain column addition doesn't trigger the PK-drift drop-and-recreate
+    above, so it needs its own idempotent, re-runnable ALTER TABLE)."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         for table, expected_pk in _ROLLUP_PK.items():
@@ -124,6 +152,11 @@ def ensure_tables(engine=None) -> None:
                 conn.execute(text(f"DROP TABLE {table}"))
         for ddl in _DDL.values():
             conn.execute(text(ddl))
+        cols = _existing_columns(conn, HITTING_SEASON_TABLE)
+        for col, coltype in _HITTING_NEW_COLUMNS.items():
+            if col not in cols:
+                conn.execute(text(
+                    f"ALTER TABLE {HITTING_SEASON_TABLE} ADD COLUMN {col} {coltype}"))
 
 
 def _now() -> str:

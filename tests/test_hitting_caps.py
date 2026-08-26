@@ -344,40 +344,52 @@ def test_compute_season_rollup_matches_current_compute():
 
 def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
     """When a rollup row exists, sidebar_stats returns it as a pure 1-row read
-    (no season load) mapped to the {qab,BA,SLG,OBP} contract, plus the three
-    HARD-HIT%/POP-UP%/xBA tiles computed fresh (not part of the precalc row)."""
+    (no season load, no live batted-ball pull) mapped to the full 7-key
+    contract -- HARD-HIT%/POP-UP%/xBA now come straight off the precalc row
+    itself (Task 4), not a second live compute, so this also proves the
+    season-default path never touches `_live_batted_ball_kpis`."""
     from app.data import precalc
     sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
                 "qab_pct": 0.512, "ba": ".321", "obp": ".401", "slg": ".540",
                 "pa": 10, "ab": 9, "h": 3, "doubles": 1, "triples": 0,
-                "hr": 1, "bb": 1, "so": 2}
+                "hr": 1, "bb": 1, "so": 2,
+                "hard_hit_pct": "50.0%", "popup_pct": "20.0%", "xba": ".345"}
     monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: sentinel)
+
+    def _boom(*a, **k):
+        raise AssertionError("season-default path must not compute live batted-ball KPIs")
+    monkeypatch.setattr(hitting_caps, "_live_batted_ball_kpis", _boom)
+
     sidebar = hitting_caps.sidebar_stats(WADAS)
-    assert {"qab": sidebar["qab"], "BA": sidebar["BA"], "SLG": sidebar["SLG"],
-            "OBP": sidebar["OBP"]} == {
-        "qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401"}
+    assert sidebar == {"qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401",
+                        "hard_hit_pct": "50.0%", "popup_pct": "20.0%", "xba": ".345"}
     assert set(sidebar) == _SIDEBAR_KEYS
-    _assert_live_kpi_shapes(sidebar)
     assert hitting_caps.season_qab_rate(WADAS) == 0.512
     assert hitting_caps.slash_line(WADAS) == {"BA": ".321", "SLG": ".540", "OBP": ".401"}
 
 
 def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
-    """HARD-HIT%/POP-UP%/xBA are computed from a live batted-ball pull with a
-    known frame, and xBA is derived from a MONKEYPATCHED `xba_hit_prob_sum`
-    seam (per the brief) so the numerator is deterministic and doesn't depend
-    on the real lookup/DB. One ball is a sacrifice fly (an InPlay ball, but
-    never an AB) -- it must still count toward hard-hit%/pop-up%'s
-    denominators (those are batted-ball rates) but must be EXCLUDED from the
-    xBA numerator population (an AB rate), per the final-review fix that
-    aligns xBA's numerator with the same population `_slash_counts` counts
-    into AB."""
-    from app.data import precalc, xba as xba_mod
-    sentinel = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
-                "qab_pct": 0.5, "ba": ".300", "obp": ".400", "slg": ".500",
-                "pa": 10, "ab": 4, "h": 3, "doubles": 0, "triples": 0,
-                "hr": 0, "bb": 1, "so": 2}
-    monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: sentinel)
+    """A genuine SUB-RANGE selection still computes HARD-HIT%/POP-UP%/xBA
+    from a live batted-ball pull with a known frame, and xBA is derived from
+    a MONKEYPATCHED `xba_hit_prob_sum` seam (per the brief) so the numerator
+    is deterministic and doesn't depend on the real lookup/DB. One ball is a
+    sacrifice fly (an InPlay ball, but never an AB) -- it must still count
+    toward hard-hit%/pop-up%'s denominators (those are batted-ball rates) but
+    must be EXCLUDED from the xBA numerator population (an AB rate), per the
+    final-review fix that aligns xBA's numerator with the same population
+    `_slash_counts` counts into AB.
+
+    Task 4 moved the SEASON-DEFAULT path onto the precalc row directly (see
+    test_sidebar_stats_uses_precalc_when_present), so this now exercises the
+    one branch that still computes these live -- a genuine sub-range -- with
+    `_rollup_over` monkeypatched (instead of `precalc.read_hitting_season`,
+    which the sub-range branch never calls) so `ab` is deterministic."""
+    from app.data import xba as xba_mod, seasons
+    rollup = {"batter_id": WADAS, "batter_name": "X",
+              "qab_pct": 0.5, "ba": ".300", "obp": ".400", "slg": ".500",
+              "pa": 10, "ab": 4, "h": 3, "doubles": 0, "triples": 0,
+              "hr": 0, "bb": 1, "so": 2}
+    monkeypatch.setattr(hitting_caps, "_rollup_over", lambda b, s, e: rollup)
     monkeypatch.setattr(hitting_caps, "games_for_batter",
                         lambda b, s, e: pd.DataFrame({"game_id": ["g1"]}))
     # 4 batted balls: EV [96, 94, 110, nan] -> hard-hit = 2/3 known-EV rows;
@@ -397,7 +409,9 @@ def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
     # merely that a constant flowed through untouched.
     monkeypatch.setattr(xba_mod, "xba_hit_prob_sum", lambda df, lookup=None: float(len(df)))
 
-    out = hitting_caps.sidebar_stats(WADAS)
+    season = seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    out = hitting_caps.sidebar_stats(WADAS, season, start=str(s), end=str(s))  # single-day sub-range
     assert out["hard_hit_pct"] == "66.7%"     # the sac ball's EV=110 still counts
     assert out["popup_pct"] == "50.0%"        # the sac ball's Popup still counts
     assert out["xba"] == ".750"               # numerator = 3 AB-qualifying rows / ab(4)
@@ -448,14 +462,42 @@ def test_sidebar_stats_subrange_matches_rollup_over():
 
 
 def test_compute_season_rollup_uses_rollup_over():
-    """_compute_season_rollup is now a thin wrapper over _rollup_over with the
-    season's bounds -- pin down the delegation so the two paths can't drift."""
+    """_compute_season_rollup is now a thin wrapper over _rollup_over
+    (slash/QAB) PLUS `_live_batted_ball_kpis` (the three batted-ball KPIs,
+    Task 4) with the season's bounds -- pin down the delegation so the paths
+    can't drift."""
     from app.data import seasons
     season = seasons.current_season()
     s, e = seasons.season_bounds(season)
     direct = hitting_caps._rollup_over(WADAS, s, e)
+    live = hitting_caps._live_batted_ball_kpis(WADAS, s, e, direct["ab"])
     via_season = hitting_caps._compute_season_rollup(WADAS, season)
-    assert via_season == {**direct, "season_label": season}
+    assert via_season == {**direct, **live, "season_label": season}
+
+
+def test_compute_season_rollup_includes_batted_ball_kpis(monkeypatch):
+    """The precalc rollup dict must carry hard_hit_pct/popup_pct/xba so
+    rebuild_hitting can persist them -- previously these were always
+    recomputed live even on the season-default path."""
+    from app.data import xba as xba_mod
+    # 2 batted balls: EV [96, 80] -> hard-hit = 1/2 known-EV rows;
+    # hit_type [LineDrive, Popup] -> popup = 1/2.
+    bb = pd.DataFrame({
+        "exit_speed": [96.0, 80.0],
+        "la": [10.0, 20.0],
+        "hit_type": ["LineDrive", "Popup"],
+        "PlayResult": ["Single", "Out"],
+    })
+    monkeypatch.setattr(hitting_caps, "games_for_batter",
+                        lambda b, s, e: pd.DataFrame({"game_id": ["g1"]}))
+    monkeypatch.setattr(hitting_caps, "bip_points", lambda b, gids: bb)
+    monkeypatch.setattr(xba_mod, "xba_hit_prob_sum", lambda df, lookup=None: 1.0)
+
+    r = hitting_caps._compute_season_rollup(WADAS)
+    assert {"hard_hit_pct", "popup_pct", "xba"} <= set(r)
+    _assert_live_kpi_shapes(r)
+    assert r["hard_hit_pct"] == "50.0%"
+    assert r["popup_pct"] == "50.0%"
 
 
 def test_sidebar_stats_falls_back_to_compute_when_missing(monkeypatch):

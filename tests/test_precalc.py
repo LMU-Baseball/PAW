@@ -39,7 +39,8 @@ def test_rebuild_covers_past_seasons(rebuilt):
     assert row is not None and row["season_label"] == lbl
     comp = hitting_caps._compute_season_rollup(bid, lbl)  # matches a past-season compute
     for k in ("qab_pct", "ba", "obp", "slg", "pa", "ab", "h",
-              "doubles", "triples", "hr", "bb", "so"):
+              "doubles", "triples", "hr", "bb", "so",
+              "hard_hit_pct", "popup_pct", "xba"):
         assert row[k] == comp[k], k
 
 
@@ -51,7 +52,8 @@ def test_read_matches_compute_for_sample(rebuilt):
     row = precalc.read_hitting_season(WADAS)
     comp = hitting_caps._compute_season_rollup(WADAS)
     for k in ("qab_pct", "ba", "obp", "slg", "pa", "ab", "h",
-              "doubles", "triples", "hr", "bb", "so"):
+              "doubles", "triples", "hr", "bb", "so",
+              "hard_hit_pct", "popup_pct", "xba"):
         assert row[k] == comp[k], k
 
 
