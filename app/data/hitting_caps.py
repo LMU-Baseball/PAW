@@ -288,7 +288,16 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
     too and no second live batted-ball pull runs on this path. A genuine
     sub-range (the coach narrowed the calendar/preset) is the only path left
     that computes on the fly, via `_rollup_over` + `_live_batted_ball_kpis`,
-    so the sidebar KPIs track the selected date range."""
+    so the sidebar KPIs track the selected date range.
+
+    A precalc row being non-None doesn't guarantee hard_hit_pct/popup_pct/xba
+    are actually populated on it -- a DB restore, a fresh environment, or the
+    in-flight window of a rebuild (columns added by `ensure_tables` but not
+    yet repopulated by `_replace_rows`) can all leave a row that exists but is
+    missing/None on these specific columns. Trusting it blindly there would
+    KeyError or silently render blanks, so this path falls back to a live
+    batted-ball pull for just these three KPIs (same shape as the sub-range
+    path above) whenever the precalc row doesn't actually carry them."""
     from app.data import seasons
     if start and end:
         s_b, e_b = seasons.season_bounds(season or seasons.current_season())
@@ -298,6 +307,12 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
             return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
                     **live}
     r = _season_rollup(batter_id, season)
+    kpi_keys = ("hard_hit_pct", "popup_pct", "xba")
+    if any(pd.isna(r.get(k)) for k in kpi_keys):
+        s_b, e_b = seasons.season_bounds(season or seasons.current_season())
+        live = _live_batted_ball_kpis(batter_id, s_b, e_b, r["ab"])
+        return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
+                **live}
     return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
             "hard_hit_pct": r["hard_hit_pct"], "popup_pct": r["popup_pct"], "xba": r["xba"]}
 

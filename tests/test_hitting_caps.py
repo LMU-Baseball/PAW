@@ -368,6 +368,36 @@ def test_sidebar_stats_uses_precalc_when_present(monkeypatch):
     assert hitting_caps.slash_line(WADAS) == {"BA": ".321", "SLG": ".540", "OBP": ".401"}
 
 
+def test_sidebar_stats_falls_back_when_precalc_row_missing_kpi_columns(monkeypatch):
+    """A precalc row being non-None doesn't guarantee hard_hit_pct/popup_pct/
+    xba are actually populated on it -- a DB restore, a fresh environment, or
+    the in-flight window of a rebuild (columns added by `ensure_tables` but
+    not yet repopulated by `_replace_rows`) can leave a row that exists but
+    is missing/None on just these columns. sidebar_stats must detect that and
+    fall back to a live batted-ball pull for the three KPIs (same as the
+    row-absent case), not KeyError or silently return a None value."""
+    from app.data import precalc
+    partial = {"batter_id": WADAS, "batter_name": "X", "season_label": "2026",
+               "qab_pct": 0.512, "ba": ".321", "obp": ".401", "slg": ".540",
+               "pa": 10, "ab": 9, "h": 3, "doubles": 1, "triples": 0,
+               "hr": 1, "bb": 1, "so": 2,
+               "hard_hit_pct": None, "popup_pct": "20.0%", "xba": ".345"}
+    monkeypatch.setattr(precalc, "read_hitting_season", lambda b, season=None: partial)
+
+    live_sentinel = {"hard_hit_pct": "77.0%", "popup_pct": "11.0%", "xba": ".199"}
+    calls = []
+    monkeypatch.setattr(hitting_caps, "_live_batted_ball_kpis",
+                        lambda b, s, e, ab: (calls.append((b, s, e, ab)), live_sentinel)[1])
+
+    out = hitting_caps.sidebar_stats(WADAS)
+    assert len(calls) == 1, "expected the live KPI fallback to fire exactly once"
+    assert calls[0][0] == WADAS and calls[0][3] == partial["ab"]
+    # The slash/QAB numbers still come from the (otherwise-valid) precalc row;
+    # only the three KPIs are replaced by the live fallback's values.
+    assert out == {"qab": 0.512, "BA": ".321", "SLG": ".540", "OBP": ".401",
+                    **live_sentinel}
+
+
 def test_sidebar_stats_live_kpis_use_monkeypatched_seams(monkeypatch):
     """A genuine SUB-RANGE selection still computes HARD-HIT%/POP-UP%/xBA
     from a live batted-ball pull with a known frame, and xBA is derived from

@@ -441,9 +441,14 @@ def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     identically. For the season-default view (no sub-range, or a sub-range
     equal to the season's own bounds), reads the precalc rollup -- falling
     back to a live compute when the row is absent (pre-rebuild, unbuilt
-    catcher, or table not yet created), so correctness never depends on a
-    rebuild having run. A genuine sub-range always computes live. Returns
-    strings; "—" where a value is unavailable.
+    catcher, or table not yet created) OR present but missing `taken`/`slaa`
+    (a DB restore, a fresh environment, or the in-flight window of a rebuild
+    can leave a row that exists but isn't actually populated on these
+    columns yet) -- so correctness never depends on a rebuild having run.
+    `sl_plus` is NOT part of that guard: None is a legitimate value for it
+    (too few taken pitches to trust the ratio, per `slaa_summary`), not a
+    landmine. A genuine sub-range always computes live. Returns strings; "—"
+    where a value is unavailable.
     """
     from app.data import seasons, precalc
     tiles = {"slaa": "—", "sl_plus": "—", "taken": "—"}
@@ -454,7 +459,7 @@ def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     is_season_default = not (start and end) or (str(start) == s_b and str(end) == e_b)
     if is_season_default:
         row = precalc.read_catching_season(int(catcher_id), resolved_season)
-        if row is not None:
+        if row is not None and not pd.isna(row.get("taken")) and not pd.isna(row.get("slaa")):
             tiles["taken"] = str(row["taken"])
             tiles["slaa"] = f"{row['slaa']:+.1f}"
             tiles["sl_plus"] = "—" if row["sl_plus"] is None else f"{row['sl_plus']:.0f}"

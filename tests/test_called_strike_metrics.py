@@ -104,6 +104,38 @@ def test_compute_slaa_season_rollup_shape(monkeypatch):
     assert "slaa" in out and "sl_plus" in out
 
 
+def test_slaa_season_tiles_falls_back_when_precalc_row_missing_slaa(monkeypatch):
+    """A precalc row being non-None doesn't guarantee `taken`/`slaa` are
+    actually populated on it -- a DB restore, a fresh environment, or the
+    in-flight window of a rebuild can leave a row that exists but is
+    missing/None on just these columns. `f"{row['slaa']:+.1f}"` would raise
+    outright on a None `slaa`, so slaa_season_tiles must detect that and fall
+    back to a live compute (same as the row-absent case), not crash.
+
+    `sl_plus` is deliberately left None in the partial row too, since None is
+    ALSO its legitimate value for a small sample -- this proves the guard
+    doesn't accidentally key off `sl_plus`, only `taken`/`slaa`."""
+    from app.data import seasons, precalc
+    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    partial = {"catcher_id": 1, "catcher_name": "Test Catcher",
+               "season_label": "2025/2026", "taken": 100, "slaa": None, "sl_plus": None}
+    monkeypatch.setattr(precalc, "read_catching_season", lambda cid, season=None: partial)
+
+    calls = []
+
+    def _fake_range_pitches_for(c, s, e):
+        calls.append((c, s, e))
+        return pd.DataFrame(
+            [(0.0, 2.5, "StrikeCalled")] * 20,
+            columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+
+    monkeypatch.setattr(catching_caps, "range_pitches_for", _fake_range_pitches_for)
+    out = catching_caps.slaa_season_tiles(1)
+    assert len(calls) == 1, "expected the live-compute fallback to fire exactly once"
+    assert out["taken"] == "20"           # live compute's own count, not the stale precalc "100"
+    assert out["slaa"] != "—"             # a real live value, not the tile's "no data" default
+
+
 def test_slaa_season_tiles_with_no_range_defaults_to_current_season_window(monkeypatch):
     """Fix-round-1: with season/start/end all None (the dashboard's initial
     paint), slaa_season_tiles must resolve the window via
