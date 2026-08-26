@@ -55,7 +55,12 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
 
-    season = seasons.current_season()
+    # Cauldron's whole purpose is "what happened this week": default straight
+    # to today's real calendar season (bypassing current_season()'s GAMES-only
+    # preference) so the board shows the actual current week, even if it's
+    # still empty, rather than a frozen prior-season snapshot. See spec
+    # docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4.
+    season = seasons.season_label_for(date.today().isoformat())
     play_date = _default_play_date()
     week = velo_board.default_week_for(season)
     cycle = _default_cycle(season)

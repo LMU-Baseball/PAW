@@ -31,17 +31,46 @@ def season_bounds(label: str) -> tuple[str, str]:
 
 
 @cached
-def available_seasons() -> list[str]:
-    """Academic-year labels present in GAMES (LMU, numeric GameID), newest first."""
+def _games_seasons() -> set[str]:
+    """Academic-year labels with real GAMES rows (LMU, numeric GameID). Private:
+    the GAMES-only view that current_season() relies on to keep its "latest season
+    WITH real data" behavior, kept separate from available_seasons()'s public list
+    (which additionally always includes today's calendar season -- see below)."""
     df = query_df(
         f"SELECT DISTINCT Date FROM GAMES WHERE BatterTeam = :t AND {_NUMERIC_DATE}",
         {"t": LMU_BATTER_TEAM})
-    labels = {season_label_for(d) for d in df["Date"]} if not df.empty else set()
+    return {season_label_for(d) for d in df["Date"]} if not df.empty else set()
+
+
+@cached
+def available_seasons() -> list[str]:
+    """Academic-year labels present in GAMES (LMU, numeric GameID), newest first, ALWAYS
+    including today's actual calendar academic-year label even if GAMES has zero rows for
+    it yet.
+
+    Without this, a Season dropdown built from this list has a hard ceiling: once the last
+    labeled season ends, no later season is ever selectable until a GAMES row for it exists
+    -- which for Velo Board/Cauldron (backed by BULLPEN, not GAMES) can be months after the
+    data a coach actually needs is already flowing. Purely additive: this can only ADD the
+    current label to what GAMES-derived data already reports, never remove or reorder an
+    existing entry."""
+    labels = set(_games_seasons())
+    labels.add(season_label_for(date.today().isoformat()))
     return sorted(labels, reverse=True)
 
 
 def current_season() -> str:
-    """The latest season that has data (the dropdown's default). Falls back to
-    today's academic year only if GAMES is empty."""
-    seasons = available_seasons()
-    return seasons[0] if seasons else season_label_for(date.today().isoformat())
+    """The latest season that has real GAMES data (the dropdown's default for
+    catching/hitting/pitching). Falls back to today's academic year only if GAMES
+    is entirely empty.
+
+    Deliberately reads _games_seasons() directly rather than available_seasons():
+    the latter always includes today's calendar season label (see above), which --
+    since today's label can never be "older" than any GAMES-derived label -- would
+    otherwise always win the max() and silently make this function track today's
+    calendar date instead of real data. That would regress catching/hitting/pitching
+    dashboards to an empty default view every day until real Fall-2026 GAMES rows
+    land. This function's behavior is intentionally unchanged from before
+    available_seasons() started including today's label."""
+    labels = _games_seasons()
+    return max(labels) if labels else season_label_for(date.today().isoformat())
