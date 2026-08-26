@@ -103,7 +103,7 @@ def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeyp
     with app_ctx.app_context():
         cur = seasons.current_season()
         cur_bounds = seasons.season_bounds(cur)
-        others = [s for s in seasons.available_seasons() if s != cur]
+        others = [s for s in seasons.available_seasons() if s < cur]
 
     # Default (no season param) -> current season's bounds.
     resp = client.get("/reports/bullpen")
