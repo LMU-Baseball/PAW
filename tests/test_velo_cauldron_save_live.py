@@ -59,9 +59,16 @@ CAULDRON_PLAYER_NAME = "Behrens, Adam"
 CAULDRON_METRIC = "mod_command"             # a MANUAL metric: no auto baseline
                                              # to fight with, blank until a
                                              # coach types a value
+CAULDRON_METRIC_LABEL = "Mod Command"       # this metric's cauldron_scoring label --
+                                             # the scoreboard table keys columns by this
+                                             # text, not the `mod_command` id
 
 
 def _server_reachable(url: str, timeout: float = 1.5) -> bool:
+    """Only proves GET /login answers without raising -- NOT a full health
+    check. A server that's up but broken somewhere downstream of that one
+    page (e.g. a DB connection failure on a dashboard route) would still
+    pass this and only get caught later by `_login()`'s own hard assert."""
     try:
         urllib.request.urlopen(url, timeout=timeout)
         return True
@@ -127,6 +134,38 @@ def _edit_cell(page, cell, value) -> None:
     inp.type(str(value))
     page.keyboard.press("Enter")
     page.wait_for_timeout(150)
+
+
+def _scoreboard_metric_text(page, player_name: str, metric_label: str) -> str | None:
+    """Read one player's points cell for one metric out of the Cauldron's
+    `cauldron-scoreboard` table -- the ONLY surface a player account can see
+    (the coach grid, `cauldron-grid`, is entirely absent from a player's
+    component tree; `layout.py` only renders `cauldron-coach-section` when
+    `is_coach`). Not a `dash_table.DataTable` (no `data-dash-column`
+    attributes to key off), so this locates the column by its header text and
+    the row by the player's display name instead. Returns `None` if the
+    player isn't found in the currently-selected week's scoreboard."""
+    table = page.query_selector("#cauldron-scoreboard table")
+    if table is None:
+        return None
+    rows = table.query_selector_all("tr")
+    if not rows:
+        return None
+    header_cells = rows[0].query_selector_all("th, td")
+    header_texts = [c.inner_text().strip().lower() for c in header_cells]
+    if metric_label.strip().lower() not in header_texts:
+        return None
+    col_idx = header_texts.index(metric_label.strip().lower())
+    for row in rows[1:]:
+        cells = row.query_selector_all("td")
+        # Team-header/team-total rows use a single colSpan cell (or blanks) --
+        # only a real player row's first cell has the player's name AND enough
+        # cells to index into.
+        if len(cells) <= col_idx:
+            continue
+        if player_name in cells[0].inner_text():
+            return cells[col_idx].inner_text()
+    return None
 
 
 # ================================ VELO BOARD =================================
@@ -226,7 +265,10 @@ def test_cauldron_save_persists_across_fresh_session(browser):
     """Coach edits a manual scoring cell for one player/day through the real
     DataTable, Saves (which hides + re-locks the grid -- Cauldron does NOT
     re-render the grid in place the way Velo Board does), and a BRAND NEW
-    browser context reads back the exact value as the same coach."""
+    browser context reads back the exact value -- as the same coach, and (via
+    the week-bounded scoreboard, the only surface a player account can see;
+    Cauldron has no shared table the way Velo Board does) as a different
+    (player) account too."""
     new_value = random.randint(300, 999)   # well outside real scoring's -10..20 range
 
     def _open_grid_to(page):
@@ -291,3 +333,45 @@ def test_cauldron_save_persists_across_fresh_session(browser):
         f"Cauldron save did NOT persist across a fresh session: wrote {new_value} "
         f"(before-edit value was {before_value!r}), but a brand-new coach session "
         f"reads back {reloaded_value!r}")
+
+    # ---- Session 3: a DIFFERENT account (player) -----------------------
+    # Unlike Velo Board, Cauldron has no shared table -- `cauldron-coach-
+    # section` (which contains `cauldron-grid`/`cauldron-edit`/`cauldron-save`)
+    # is entirely absent from a player's component tree (`layout.py` only
+    # renders it `if is_coach`), confirmed live: `#cauldron-grid` does not
+    # exist at all on a player's rendered page. The ONLY place a player can
+    # see this value is the week-bounded `cauldron-scoreboard` table, which
+    # pivots points by player x metric -- so this session selects the same
+    # season AND snaps the shared Week picker onto the entry date's week
+    # (season selection alone does not do this; the week auto-snaps to the
+    # season's own default week instead) before reading the cell back.
+    ctx3 = browser.new_context()
+    page3 = ctx3.new_page()
+    _login(page3, PLAYER_EMAIL, PLAYER_PASSWORD)
+    page3.goto(f"{BASE_URL}/dash/cauldron/")
+    page3.wait_for_load_state("networkidle")
+    assert page3.query_selector("#cauldron-edit") is None, (
+        "a player account unexpectedly sees the coach Edit control")
+
+    _select_dropdown(page3, "cauldron-season", SEASON)
+    # Extra settle time beyond `_select_dropdown`'s own wait: typing into the
+    # week picker too soon after the season change races its own async
+    # `cauldron-week.date` snap-back response and gets silently overwritten.
+    page3.wait_for_timeout(1200)
+    week_input = page3.query_selector("#cauldron-week")
+    week_input.click()
+    week_input.fill("")
+    week_input.type(CAULDRON_ENTRY_DATE)
+    page3.keyboard.press("Enter")
+    page3.wait_for_load_state("networkidle")
+    page3.wait_for_timeout(1500)   # scoreboard re-render after the XHR settles
+
+    player_view_text = _scoreboard_metric_text(page3, CAULDRON_PLAYER_NAME, CAULDRON_METRIC_LABEL)
+    ctx3.close()
+
+    assert player_view_text is not None, (
+        f"could not find {CAULDRON_PLAYER_NAME!r} / {CAULDRON_METRIC_LABEL!r} in the "
+        "player's scoreboard view -- selectors may need updating")
+    assert player_view_text == f"+{new_value}", (
+        f"Cauldron value differs by viewing account: expected +{new_value}, "
+        f"a player session's scoreboard reads back {player_view_text!r}")
