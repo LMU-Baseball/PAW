@@ -31,6 +31,7 @@ def warm_caches() -> None:
     own queries (available_seasons/current_season)."""
     from app.data import hitting_caps as H, pitching_caps as P
     from app.data import catching_caps as C, video, seasons, precalc
+    from app.data import called_strike, xba
 
     _safe(seasons.available_seasons)          # Season dropdown options
     season = _safe(seasons.current_season)    # dropdown default
@@ -76,11 +77,20 @@ def warm_caches() -> None:
         g = _safe(lambda: C.games_for_catcher(cid, s_b, e_b))
         _safe(lambda: C.catcher_profile(cid))
         _safe(lambda: C.framing_season_tiles(cid, season))
-        # Also warms called_strike._get_lookup() (a ~56,537-row GAMES scan)
-        # inline the first time it's built -- otherwise it gets built lazily
-        # on whatever coach opens the catching dashboard first after a
-        # restart, since sidebar() now reads slaa_season_tiles too.
         _safe(lambda: C.slaa_season_tiles(cid, season))
+        _safe(lambda: precalc.read_catching_season(cid, season))  # always-uncached read
+        # called_strike._get_lookup() (a ~56,537-row GAMES scan) and
+        # xba._get_lookup() are process-wide singletons that used to get
+        # built here for free as a side effect of slaa_season_tiles's live
+        # compute path. Now that slaa_season_tiles (and hitting_caps.
+        # sidebar_stats) read precalc FIRST, that live path -- and this warm
+        # -- is only reached if the precalc row is somehow absent, which
+        # after a startup rebuild it never is. So warm both lookups directly
+        # and unconditionally instead of relying on that side effect, or the
+        # first coach to hit a cold precalc row after a restart pays the
+        # full scan inline.
+        _safe(called_strike._get_lookup)
+        _safe(xba._get_lookup)
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
             gid = str(g.iloc[0]["game_id"])

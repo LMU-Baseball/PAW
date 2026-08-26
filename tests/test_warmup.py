@@ -83,6 +83,53 @@ def test_warm_caches_warms_game_context(monkeypatch):
     assert len(calls) == 0                       # game_context warmed
 
 
+def test_warm_caches_warms_called_strike_and_xba_lookups(monkeypatch):
+    """warm_caches must build called_strike._get_lookup()/xba._get_lookup()
+    directly and unconditionally -- these are process-wide singletons that
+    used to get built for free as a side effect of slaa_season_tiles's live
+    compute path, but now that slaa_season_tiles/sidebar_stats read precalc
+    first, that live path (and the warm) is only reached if the precalc row
+    is absent, which after a startup rebuild it never is."""
+    from app.data import called_strike, xba
+
+    cache.clear_all()
+    warmup.warm_caches()
+
+    calls = []
+    real_taken = called_strike._raw_taken_pitches
+    real_batted = xba._raw_batted_balls
+    monkeypatch.setattr(called_strike, "_raw_taken_pitches",
+                        lambda: (calls.append("called_strike"), real_taken())[1])
+    monkeypatch.setattr(xba, "_raw_batted_balls",
+                        lambda: (calls.append("xba"), real_batted())[1])
+
+    called_strike._get_lookup()
+    xba._get_lookup()
+    assert calls == [], f"expected both lookups already warmed, but re-built: {calls}"
+
+
+def test_warm_caches_warms_catching_precalc_read(monkeypatch):
+    """Symmetry with the hitting/pitching precalc warms: warm_caches also
+    warms precalc.read_catching_season for the default catcher/season."""
+    from app.data import catching_caps as C, precalc
+
+    cache.clear_all()
+    warmup.warm_caches()
+
+    season = seasons.current_season()
+    catchers = C.lmu_catchers(season)
+    if catchers is None or catchers.empty:
+        return
+    cid = int(catchers.iloc[0]["CatcherId"])
+
+    pcalls = []
+    real = precalc.query_df
+    monkeypatch.setattr(precalc, "query_df",
+                        lambda sql, params=None: (pcalls.append(1), real(sql, params))[1])
+    precalc.read_catching_season(cid, season)
+    assert len(pcalls) == 0            # catching season rollup read warmed
+
+
 def test_warm_caches_never_raises(monkeypatch):
     """A warm failure must not propagate (startup must not crash)."""
     monkeypatch.setattr(H, "lmu_hitters",
