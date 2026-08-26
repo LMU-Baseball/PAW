@@ -94,29 +94,44 @@ def warm_caches() -> None:
     # here is what makes them open instantly instead of cold-loading. The exact
     # (season, week, cycle, play_date) keys mirror what serve_layout defaults to
     # so the warmed @cached entries actually hit.
+    #
+    # Velo Board/Cauldron's OWN default season (serve_layout in both
+    # dashboards' layout.py) is today's real calendar season, not
+    # current_season() -- their data source is BULLPEN, which gets Fall-2026
+    # rows well before GAMES does. Use that same value here so the warmed
+    # cache keys actually match what serve_layout requests; `season` (above)
+    # stays current_season() for the hitting/pitching/catching warming only.
     from datetime import date
     from app.data import velo_board, cauldron
 
-    _safe(lambda: velo_board.leaderboard(season))     # player-facing heat board
-    # Default week = the layout's _default_week(season): today's week while the
-    # season is live, else its final week (offseason). Kept in sync with
-    # velo_board/layout.py::_default_week.
     today = date.today().isoformat()
-    anchor = min(today, e_b)
-    if anchor < s_b:
-        anchor = s_b
+    board_season = seasons.season_label_for(today)
+
+    _safe(lambda: velo_board.leaderboard(board_season))  # player-facing heat board
+    # Default week = the layout's _default_week(board_season): today's week
+    # while the season is live, else its final week (offseason). Kept in sync
+    # with velo_board/layout.py::_default_week.
+    board_s_b, board_e_b = seasons.season_bounds(board_season)
+    anchor = min(today, board_e_b)
+    if anchor < board_s_b:
+        anchor = board_s_b
     week = _safe(lambda: velo_board.week_start_for(anchor))
     if week:
-        _safe(lambda: velo_board.board_rows(season, week))  # unified board rows
+        _safe(lambda: velo_board.board_rows(board_season, week))  # unified board rows
 
-    cycle = f"{season}-c1"
+    cycle = f"{board_season}-c1"
     _safe(cauldron.read_scoring)
     _safe(lambda: cauldron.read_teams(cycle))
     _safe(cauldron.read_daily)
-    if pitchers is not None and not pitchers.empty:
+    # cauldron/grid.py::coach_grid() resolves its own roster as
+    # pitching_caps.lmu_pitchers(season) using the SAME board_season layout.py
+    # now passes in -- warm that exact roster key, not the current_season()-
+    # scoped `pitchers` fetched above for the pitching dashboard's own warming.
+    board_pitchers = _safe(lambda: P.lmu_pitchers(board_season))
+    if board_pitchers is not None and not board_pitchers.empty:
         from app.dashboards.cauldron import grid as cauldron_grid
         _safe(lambda: cauldron_grid._grid_rows(
-            pitchers, cauldron.read_scoring(), cauldron.read_teams(cycle),
+            board_pitchers, cauldron.read_scoring(), cauldron.read_teams(cycle),
             cauldron.read_daily(today), today))            # coach grid prefill
 
 
