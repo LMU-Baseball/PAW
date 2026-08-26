@@ -408,15 +408,57 @@ def slaa_summary(df, *, lookup=None) -> dict:
     }
 
 
+def _compute_slaa_season_rollup(catcher_id, season=None, *, lookup=None) -> dict:
+    """The SLAA/SL+ season rollup for one catcher, computed from raw CAPS --
+    the precalc-bound counterpart to `slaa_season_tiles`. Thin wrapper over
+    `slaa_summary` with the season's resolved date window; no metric is
+    redefined here.
+
+    `precalc.rebuild_catching` writes this dict to
+    `precalc_catching_player_season`; `slaa_season_tiles` reads it back
+    (with this function as the compute fallback) for the season-default
+    view. `lookup=` is exposed for DB-free tests; real callers omit it.
+    """
+    from app.data import seasons
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    df = range_pitches_for(int(catcher_id), s, e)
+    summary = slaa_summary(df, lookup=lookup)
+    return {
+        "catcher_id": int(catcher_id),
+        "catcher_name": catcher_name(catcher_id),
+        "slaa": summary["slaa"],
+        "sl_plus": summary["sl_plus"],
+        "taken": summary["taken"],
+        "season_label": season,
+    }
+
+
 def slaa_season_tiles(catcher_id, season=None, start=None, end=None) -> dict:
     """Display-ready SLAA / SL+ / taken-pitch count for the sidebar.
 
     Mirrors `framing_season_tiles`' scoping so date-range selection behaves
-    identically. Returns strings; "—" where a value is unavailable.
+    identically. For the season-default view (no sub-range, or a sub-range
+    equal to the season's own bounds), reads the precalc rollup -- falling
+    back to a live compute when the row is absent (pre-rebuild, unbuilt
+    catcher, or table not yet created), so correctness never depends on a
+    rebuild having run. A genuine sub-range always computes live. Returns
+    strings; "—" where a value is unavailable.
     """
+    from app.data import seasons, precalc
     tiles = {"slaa": "—", "sl_plus": "—", "taken": "—"}
     if catcher_id is None:
         return tiles
+    resolved_season = season or seasons.current_season()
+    s_b, e_b = seasons.season_bounds(resolved_season)
+    is_season_default = not (start and end) or (str(start) == s_b and str(end) == e_b)
+    if is_season_default:
+        row = precalc.read_catching_season(int(catcher_id), resolved_season)
+        if row is not None:
+            tiles["taken"] = str(row["taken"])
+            tiles["slaa"] = f"{row['slaa']:+.1f}"
+            tiles["sl_plus"] = "—" if row["sl_plus"] is None else f"{row['sl_plus']:.0f}"
+            return tiles
     window = _resolve_season_window(season, start, end)
     df = range_pitches_for(int(catcher_id), *window)
     if df is None or df.empty:

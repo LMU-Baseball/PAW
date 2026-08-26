@@ -6,14 +6,15 @@ here), so precalc is always reproducible from CAPS -- not a second source of
 truth. Refresh with `flask rebuild-precalc`; a daily cron will call it after each
 pipeline load later.
 
-Two season rollups (one row per player), one per module:
+Three season rollups (one row per player), one per module:
   hitting  -> precalc_hitting_player_season   (kills the profiled full-season
               sidebar load; the big win)
   pitching -> precalc_pitching_player_season  (same full-season hotspot in
               range_summary)
-Catching has NO rollup -- framing_season_tiles is already a cheap aggregate off
-a cached primitive, so the once-built precalc_catching_player_season was retired
-(2026-08-13).
+  catching -> precalc_catching_player_season  (SLAA / SL+ only -- those two
+              alone are the expensive per-pitch model call; STRIKES/STRIKES
+              LOST/STEAL% stay on framing_season_tiles's existing cheap live
+              aggregate, unchanged)
 See docs/superpowers/specs/2026-08-07-phase4-precalc-hitting-design.md.
 """
 from __future__ import annotations
@@ -30,11 +31,8 @@ from app.data import cache
 
 HITTING_SEASON_TABLE = "precalc_hitting_player_season"
 PITCHING_SEASON_TABLE = "precalc_pitching_player_season"
+CATCHING_SEASON_TABLE = "precalc_catching_player_season"
 PRECALC_META_TABLE = "precalc_meta"
-# NOTE: catching has NO precalc rollup -- catching_caps.framing_season_tiles
-# computes its sidebar tiles fresh from a cached primitive, so a
-# precalc_catching_player_season table was retired (2026-08-13). An orphan
-# table may still exist in prod from older rebuilds; it is unused.
 
 # Each season rollup is keyed by (player_id, season_label) so one row exists per
 # player PER academic-year season -- picking a past season from the Season
@@ -64,6 +62,17 @@ _DDL = {
             built_at     DATETIME,
             PRIMARY KEY (pitcher_id, season_label)
         )""",
+    CATCHING_SEASON_TABLE: f"""
+        CREATE TABLE IF NOT EXISTS {CATCHING_SEASON_TABLE} (
+            catcher_id   BIGINT NOT NULL,
+            catcher_name VARCHAR(128),
+            slaa         DECIMAL(6,1) NULL,
+            sl_plus      DECIMAL(6,1) NULL,
+            taken        INT,
+            season_label VARCHAR(32) NOT NULL,
+            built_at     DATETIME,
+            PRIMARY KEY (catcher_id, season_label)
+        )""",
     PRECALC_META_TABLE: f"""
         CREATE TABLE IF NOT EXISTS {PRECALC_META_TABLE} (
             id INT PRIMARY KEY,
@@ -77,6 +86,7 @@ _DDL = {
 _ROLLUP_PK = {
     HITTING_SEASON_TABLE: {"batter_id", "season_label"},
     PITCHING_SEASON_TABLE: {"pitcher_id", "season_label"},
+    CATCHING_SEASON_TABLE: {"catcher_id", "season_label"},
 }
 
 
@@ -143,13 +153,23 @@ def ensure_tables(engine=None) -> None:
     Additionally migrates HITTING_SEASON_TABLE forward with an ADD COLUMN for
     any of `_HITTING_NEW_COLUMNS` missing on a table that predates them (a
     plain column addition doesn't trigger the PK-drift drop-and-recreate
-    above, so it needs its own idempotent, re-runnable ALTER TABLE)."""
+    above, so it needs its own idempotent, re-runnable ALTER TABLE).
+
+    Also drops CATCHING_SEASON_TABLE if it still carries the retired
+    2026-08-13 orphan schema (games/pitches/net_strikes/steal_pct, no
+    `slaa`) -- that legacy table shares the SAME (catcher_id, season_label)
+    PK as the new SLAA/SL+ rollup added in Task 5, so the PK-drift check
+    above never sees it as stale. Same "safe, derived cache" reasoning: the
+    very next `rebuild_catching` repopulates it."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         for table, expected_pk in _ROLLUP_PK.items():
             pk = _pk_columns(conn, table)
             if pk and pk != expected_pk:
                 conn.execute(text(f"DROP TABLE {table}"))
+        cat_cols = _existing_columns(conn, CATCHING_SEASON_TABLE)
+        if cat_cols and "slaa" not in cat_cols:
+            conn.execute(text(f"DROP TABLE {CATCHING_SEASON_TABLE}"))
         for ddl in _DDL.values():
             conn.execute(text(ddl))
         cols = _existing_columns(conn, HITTING_SEASON_TABLE)
@@ -263,7 +283,29 @@ def read_pitching_season(pitcher_id, season=None) -> dict | None:
     return _read_one(PITCHING_SEASON_TABLE, "pitcher_id", pitcher_id, season)
 
 
+# ---- catching (SLAA / SL+ only -- STRIKES/STRIKES LOST/STEAL% stay live) ---
+
+def rebuild_catching(engine=None) -> int:
+    from app.data import catching_caps
+    engine = engine or get_engine()
+    ensure_tables(engine)
+    rows = _build_all_seasons(engine, catching_caps.lmu_catchers, "CatcherId",
+                              catching_caps._compute_slaa_season_rollup)
+    return _replace_rows(engine, CATCHING_SEASON_TABLE, rows)
+
+
+@cache.cached
+def read_catching_season(catcher_id, season=None) -> dict | None:
+    row = _read_one(CATCHING_SEASON_TABLE, "catcher_id", catcher_id, season)
+    if row is not None:
+        for k in ("slaa", "sl_plus"):
+            v = row.get(k)
+            row[k] = None if v is None or pd.isna(v) else float(v)
+    return row
+
+
 def rebuild_all(engine=None) -> dict:
     engine = engine or get_engine()
     return {"hitting": rebuild_hitting(engine),
-            "pitching": rebuild_pitching(engine)}
+            "pitching": rebuild_pitching(engine),
+            "catching": rebuild_catching(engine)}

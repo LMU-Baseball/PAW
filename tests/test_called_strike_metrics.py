@@ -82,15 +82,43 @@ def test_empty_frame_returns_zeroed_summary_without_raising():
     assert out["sl_plus"] is None
 
 
+def test_compute_slaa_season_rollup_shape(monkeypatch):
+    """The precalc-bound rollup dict must carry catcher_id, catcher_name,
+    slaa, sl_plus, taken, and season_label -- everything
+    slaa_season_tiles needs to read back without a live compute."""
+    import pandas as pd
+    from app.data import catching_caps
+
+    def fake_range_pitches_for(cid, start, end):
+        return pd.DataFrame(
+            [(0.0, 2.5, "StrikeCalled")] * 100,
+            columns=["plate_loc_side", "plate_loc_height", "pitch_call"])
+    monkeypatch.setattr(catching_caps, "range_pitches_for", fake_range_pitches_for)
+    monkeypatch.setattr(catching_caps, "catcher_name", lambda cid: "Test Catcher")
+
+    out = catching_caps._compute_slaa_season_rollup(1, season="2025/2026")
+    assert out["catcher_id"] == 1
+    assert out["catcher_name"] == "Test Catcher"
+    assert out["season_label"] == "2025/2026"
+    assert out["taken"] == 100
+    assert "slaa" in out and "sl_plus" in out
+
+
 def test_slaa_season_tiles_with_no_range_defaults_to_current_season_window(monkeypatch):
     """Fix-round-1: with season/start/end all None (the dashboard's initial
     paint), slaa_season_tiles must resolve the window via
     seasons.current_season()/season_bounds() -- same as framing_season_tiles
     -- NOT pass start=None, end=None straight through to range_pitches_for
     (which used to bind literal 'None' strings into the SQL BETWEEN clause
-    and silently match zero rows)."""
-    from app.data import seasons
+    and silently match zero rows).
+
+    Task 5: `slaa_season_tiles` now reads precalc first for the season-
+    default view, so `precalc.read_catching_season` is monkeypatched to
+    return None here -- forcing the live-compute fallback this test is
+    actually exercising."""
+    from app.data import seasons, precalc
     monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+    monkeypatch.setattr(precalc, "read_catching_season", lambda cid, season=None: None)
     calls = []
 
     def _fake_range_pitches_for(c, s, e):
