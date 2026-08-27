@@ -66,7 +66,10 @@ def test_game_pitches_feeds_plate_discipline_and_zone():
 
 
 def test_season_pitches_non_empty():
-    df = hitting_caps.season_pitches(WADAS)
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    df = hitting_caps.season_pitches(WADAS, season="2025/2026")
     assert not df.empty
     assert "PlateLocSide" in df.columns
 
@@ -171,7 +174,10 @@ def test_sidebar_stats_matches_qab_and_slash():
 def test_lmu_hitters_shape_and_window():
     # Was a *_matches_warehouse superset/sibling parity test. The oracle is
     # gone, so this keeps only the caps-native invariants (all confirmed live):
-    new = hitting_caps.lmu_hitters()
+    # pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    new = hitting_caps.lmu_hitters("2025/2026")
 
     # 1. SHAPE: one deduped row per hitter name, canonical int BatterId.
     assert list(new.columns) == ["Batter", "BatterId"]
@@ -194,8 +200,11 @@ def test_lmu_hitters_shape_and_window():
 def test_lmu_hitters_scopes_by_date():
     # Task 5: the Hitter dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(hitting_caps.lmu_hitters(season)["BatterId"])
     ranged = set(hitting_caps.lmu_hitters(season, start=str(s), end=str(e))["BatterId"])
@@ -212,8 +221,10 @@ def test_lmu_hitters_all_have_numeric_game_id_rows():
     # GameIDs would be listed while every numeric-GameID-guarded data function
     # (games_for_batter, season_pitches, etc.) returned empty for them.
     # Checked as a single SQL set-membership query rather than N per-id round
-    # trips.
-    ids = set(hitting_caps.lmu_hitters()["BatterId"].astype(int))
+    # trips. Pinned to "2025/2026" (the actual latest season with real GAMES
+    # data) rather than the default (current_season(), now always today's
+    # calendar season, which has zero real Trackman rows yet).
+    ids = set(hitting_caps.lmu_hitters("2025/2026")["BatterId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT BatterId FROM GAMES "
         "WHERE BatterTeam = :t AND BatterId IS NOT NULL "
@@ -358,10 +369,14 @@ def test_last_n_pas_shape():
 def test_compute_season_rollup_matches_current_compute():
     """_compute_season_rollup (Phase 4 rollup source) reproduces the current
     on-the-fly compute exactly, so precalc == compute is guaranteed."""
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet) -- both calls must agree
+    # on the same season for this comparison to mean anything.
     from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
-    r = hitting_caps._compute_season_rollup(WADAS)
+    r = hitting_caps._compute_season_rollup(WADAS, "2025/2026")
     assert r["batter_id"] == WADAS and r["batter_name"]
-    q = qab_frame(hitting_caps.season_pitches(WADAS))
+    q = qab_frame(hitting_caps.season_pitches(WADAS, season="2025/2026"))
     slash = _slash_from_pas(q)
     counts = _slash_counts(q)
     assert (r["ba"], r["obp"], r["slg"]) == (slash["BA"], slash["OBP"], slash["SLG"])

@@ -104,8 +104,11 @@ def test_games_for_catcher_has_no_numeric_game_id_guard():
 def test_lmu_catchers_scopes_by_date():
     # Task 5: the Catcher dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(catching_caps.lmu_catchers(season)["CatcherId"])
     ranged = set(catching_caps.lmu_catchers(season, start=str(s), end=str(e))["CatcherId"])
@@ -157,8 +160,11 @@ def test_lmu_catchers_all_have_numeric_game_id_rows():
     # per-id queries: every id lmu_catchers lists must have at least one
     # numeric-GameID GAMES row -- the exact universe games_for_catcher/
     # framing_season_tiles can actually serve.
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
     from app.db import query_df
-    ids = set(catching_caps.lmu_catchers()["CatcherId"].astype(int))
+    ids = set(catching_caps.lmu_catchers("2025/2026")["CatcherId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT CatcherId FROM GAMES "
         "WHERE PitcherTeam = :t AND CatcherId IS NOT NULL "
@@ -309,8 +315,11 @@ def test_framing_tiles_subrange_matches_rollup_over():
     does NOT apply) can't exclude anything here, keeping the two paths'
     universes identical -- exactly what the real date-range picker also
     guarantees (it's bounded to the season)."""
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s_b, e_b = seasons.season_bounds(season)
     g = catching_caps.games_for_catcher(RAW_CID, start=s_b, end=e_b)
     g = g[g["game_date"].astype(str) != ""]

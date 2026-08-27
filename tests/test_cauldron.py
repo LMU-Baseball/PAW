@@ -122,9 +122,12 @@ def test_daily_upsert_and_team_and_scoring_seed():
 
 
 def test_compute_player_day_standard_metrics():
-    from app.data import cauldron as C, pitching_caps, seasons
+    from app.data import cauldron as C, pitching_caps
     # pick a pitcher + a date they pitched (derive from _pitcher_velo_appearances)
-    pid = int(pitching_caps.lmu_pitchers(seasons.current_season()).iloc[0]["PitcherId"])
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than seasons.current_season() (now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    pid = int(pitching_caps.lmu_pitchers("2025/2026").iloc[0]["PitcherId"])
     apps = pitching_caps._pitcher_velo_appearances(pid)
     date = str(apps.sort_values("game_date")["game_date"].iloc[-1])
     m = C.compute_player_day(pid, date)
@@ -197,8 +200,11 @@ def test_score_day_never_clobbers_manual(monkeypatch):
 
 
 def test_score_day_smoke():
-    from app.data import pitching_caps, seasons
-    season = seasons.current_season()
+    from app.data import pitching_caps
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than seasons.current_season() (now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    season = "2025/2026"
     pid = int(pitching_caps.lmu_pitchers(season).iloc[0]["PitcherId"])
     apps = pitching_caps._pitcher_velo_appearances(pid)
     date = str(apps.sort_values("game_date")["game_date"].iloc[-1])

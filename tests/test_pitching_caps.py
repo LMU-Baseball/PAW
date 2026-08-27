@@ -133,7 +133,10 @@ def test_lmu_pitchers_all_have_numeric_game_id_rows():
     # Checked as a single SQL set-membership query rather than N per-id round
     # trips (the module no longer exposes a _NUMERIC_GAME_ID_CLAUSE constant,
     # so the numeric REGEXP is inlined here, mirroring test_hitting_caps).
-    ids = set(pitching_caps.lmu_pitchers()["PitcherId"].astype(int))
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    ids = set(pitching_caps.lmu_pitchers("2025/2026")["PitcherId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT PitcherId FROM GAMES "
         "WHERE PitcherTeam = :t AND PitcherId IS NOT NULL "
@@ -159,8 +162,11 @@ def test_games_for_pitcher_has_no_numeric_game_id_guard():
 def test_lmu_pitchers_scopes_by_date():
     # Task 5: the Pitcher dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(pitching_caps.lmu_pitchers(season)["PitcherId"])
     ranged = set(pitching_caps.lmu_pitchers(season, start=str(s), end=str(e))["PitcherId"])
