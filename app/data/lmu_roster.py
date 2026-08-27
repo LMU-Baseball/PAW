@@ -24,6 +24,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
+from app.data.roster_media import _norm_name
 from app.db import get_engine, query_df
 
 TABLE = "lmu_roster"
@@ -110,3 +111,39 @@ def upsert_season_roster(season_label: str, players: list[dict], engine=None) ->
                 "position": p.get("position"),
             })
     return len(players)
+
+
+def placeholder_rows(season_label: str, groups: tuple[str, ...],
+                     id_col: str, name_col: str) -> pd.DataFrame:
+    """lmu_roster rows for `season_label` whose _position_group is in `groups`,
+    shaped as a 2-column DataFrame [id_col, name_col] -- id = -roster_id,
+    name = "Last, First" (matches GAMES.Pitcher/Batter/Catcher's own format)."""
+    roster = load_roster(season_label)
+    if roster.empty:
+        return pd.DataFrame(columns=[id_col, name_col])
+    sub = roster[roster["position"].map(_position_group).isin(groups)]
+    if sub.empty:
+        return pd.DataFrame(columns=[id_col, name_col])
+    return pd.DataFrame({
+        id_col: (-sub["roster_id"].astype(int)).values,
+        name_col: (sub["last_name"] + ", " + sub["first_name"]).values,
+    })
+
+
+def union_with_roster(df: pd.DataFrame, season_label: str, groups: tuple[str, ...],
+                      id_col: str, name_col: str) -> pd.DataFrame:
+    """Append placeholder_rows() entries for any roster name not already
+    present in df[name_col] (order/case/punctuation-insensitive match via
+    roster_media._norm_name), then re-sort by name_col. Returns `df` itself,
+    unchanged, when there's no placeholder to add. Real Trackman-derived rows
+    always win: a placeholder is only ever added for a name with zero real
+    rows this season."""
+    ph = placeholder_rows(season_label, groups, id_col, name_col)
+    if ph.empty:
+        return df
+    existing = {_norm_name(n) for n in df[name_col]} if not df.empty else set()
+    ph = ph[~ph[name_col].map(_norm_name).isin(existing)]
+    if ph.empty:
+        return df
+    out = pd.concat([df, ph], ignore_index=True, sort=False)
+    return out.sort_values(name_col, kind="mergesort").reset_index(drop=True)

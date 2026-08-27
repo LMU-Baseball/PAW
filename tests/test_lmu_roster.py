@@ -64,3 +64,44 @@ def test_load_roster_empty_season_returns_empty_frame():
     df = LR.load_roster("1800/1801")  # never seeded
     assert df.empty
     assert list(df.columns) == ["roster_id", "first_name", "last_name", "class_year", "position"]
+
+
+def test_placeholder_rows_shape_and_negative_ids(monkeypatch):
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 501, "first_name": "Test", "last_name": "Rhp", "class_year": "FR", "position": "RHP"},
+        {"roster_id": 502, "first_name": "Test", "last_name": "Inf", "class_year": "SO", "position": "SS"},
+    ]))
+    df = LR.placeholder_rows(SEASON, ("pitcher",), "PitcherId", "Pitcher")
+    assert list(df.columns) == ["PitcherId", "Pitcher"]
+    assert len(df) == 1
+    assert df.iloc[0]["PitcherId"] == -501
+    assert df.iloc[0]["Pitcher"] == "Rhp, Test"
+
+
+def test_placeholder_rows_empty_when_no_roster(monkeypatch):
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame(
+        columns=["roster_id", "first_name", "last_name", "class_year", "position"]))
+    df = LR.placeholder_rows(SEASON, ("pitcher",), "PitcherId", "Pitcher")
+    assert df.empty
+
+
+def test_union_with_roster_adds_unmatched_and_dedupes_matched(monkeypatch):
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 1, "first_name": "adam", "last_name": "BEHRENS",  # same player as real row, different case
+         "class_year": "SR", "position": "RHP"},
+        {"roster_id": 2, "first_name": "New", "last_name": "Guy", "class_year": "FR", "position": "RHP"},
+    ]))
+    real = pd.DataFrame({"PitcherId": [123], "Pitcher": ["Behrens, Adam"]})
+    out = LR.union_with_roster(real, SEASON, ("pitcher",), "PitcherId", "Pitcher")
+    assert list(out["PitcherId"]).count(123) == 1        # real row not duplicated
+    assert (out["PitcherId"] == -2).any()                 # non-matching roster row added
+    assert not (out["PitcherId"] == -1).any()              # matching roster row suppressed
+    assert len(out) == 2
+
+
+def test_union_with_roster_returns_df_unchanged_when_no_placeholders(monkeypatch):
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame(
+        columns=["roster_id", "first_name", "last_name", "class_year", "position"]))
+    real = pd.DataFrame({"PitcherId": [123], "Pitcher": ["Behrens, Adam"]})
+    out = LR.union_with_roster(real, SEASON, ("pitcher",), "PitcherId", "Pitcher")
+    assert out is real
