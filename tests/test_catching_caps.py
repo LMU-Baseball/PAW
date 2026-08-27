@@ -125,6 +125,33 @@ def test_lmu_catchers_has_no_numeric_game_id_guard_and_is_season_scoped():
     assert "season_bounds" in src
 
 
+def test_lmu_catchers_unions_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9201, "first_name": "Test", "last_name": "Backstop",
+         "class_year": "FR", "position": "C"},
+        {"roster_id": 9202, "first_name": "Test", "last_name": "Infielder3",
+         "class_year": "SO", "position": "SS"},
+    ]))
+    df = catching_caps.lmu_catchers("1899/1900")
+    assert (df["CatcherId"] == -9201).any()
+    assert not (df["CatcherId"] == -9202).any()   # non-catcher position excluded
+    cache.clear_all()
+
+
+def test_lmu_catchers_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9203, "first_name": "Test", "last_name": "Backstop2",
+         "class_year": "FR", "position": "C"},
+    ]))
+    df = catching_caps.lmu_catchers("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["CatcherId"] == -9203).any() if not df.empty else True
+    cache.clear_all()
+
+
 def test_lmu_catchers_all_have_numeric_game_id_rows():
     # No-ghost property, as a single SQL set-membership check rather than N
     # per-id queries: every id lmu_catchers lists must have at least one

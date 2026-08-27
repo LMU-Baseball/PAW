@@ -132,10 +132,18 @@ def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
     When both `start` and `end` are given, they replace the season's date
     bounds (the coach's date-range dropdown nests inside the season, so this
     narrows the roster to catchers with data in that window).
+
+    At the season level (no start/end override), also unions in
+    `app.data.lmu_roster` placeholder rows (negative CatcherId) for any
+    rostered catcher with zero GAMES rows yet this season. A ranged call
+    never gets placeholders -- it's explicitly asking "who has DATA in this
+    window", which a data-less placeholder can never answer yes to.
     """
     from app.data import seasons
-    s, e = seasons.season_bounds(season or seasons.current_season())
-    if start is not None and end is not None:
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    ranged = start is not None and end is not None
+    if ranged:
         s, e = str(start), str(end)
     df = query_df(
         f"""
@@ -153,6 +161,9 @@ def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
     )
     if not df.empty:
         df["CatcherId"] = df["CatcherId"].astype(int)
+    if not ranged:
+        from app.data import lmu_roster
+        df = lmu_roster.union_with_roster(df, season, ("catcher",), "CatcherId", "Catcher")
     return df
 
 
