@@ -223,6 +223,36 @@ def test_lmu_hitters_all_have_numeric_game_id_rows():
     assert ids <= current_ids
 
 
+def test_lmu_hitters_unions_roster_placeholders_including_catchers(monkeypatch):
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9101, "first_name": "Test", "last_name": "Infielder",
+         "class_year": "FR", "position": "SS"},
+        {"roster_id": 9102, "first_name": "Test", "last_name": "Catcher",
+         "class_year": "SO", "position": "C"},
+        {"roster_id": 9103, "first_name": "Test", "last_name": "Pitcheronly",
+         "class_year": "JR", "position": "RHP"},
+    ]))
+    df = hitting_caps.lmu_hitters("1899/1900")
+    assert (df["BatterId"] == -9101).any()
+    assert (df["BatterId"] == -9102).any()          # catchers also appear here
+    assert not (df["BatterId"] == -9103).any()       # pitcher-only does not
+    cache.clear_all()
+
+
+def test_lmu_hitters_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9104, "first_name": "Test", "last_name": "Infielder2",
+         "class_year": "FR", "position": "SS"},
+    ]))
+    df = hitting_caps.lmu_hitters("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["BatterId"] == -9104).any() if not df.empty else True
+    cache.clear_all()
+
+
 def _first_bip_game(bid):
     """First game (by games_for_batter order) with >=1 ball in play."""
     for gid in hitting_caps.games_for_batter(bid)["game_id"]:
