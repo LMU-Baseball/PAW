@@ -193,6 +193,49 @@ def test_lmu_pitchers_season_scoped_and_past_seasons_surface():
     assert all(isinstance(v, str) for v in g["game_id"])
 
 
+def test_lmu_pitchers_unions_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9001, "first_name": "Test", "last_name": "Placeholder",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900")
+    assert (df["PitcherId"] == -9001).any()
+    assert (df.loc[df["PitcherId"] == -9001, "Pitcher"] == "Placeholder, Test").all()
+    cache.clear_all()
+
+
+def test_lmu_pitchers_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9002, "first_name": "Test", "last_name": "Placeholder2",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["PitcherId"] == -9002).any() if not df.empty else True
+    cache.clear_all()
+
+
+def test_lmu_pitchers_dedupes_placeholder_matching_real_row_by_name(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(pitching_caps, "query_df", lambda sql, params=None: pd.DataFrame(
+        {"PitcherId": [123], "Pitcher": ["Behrens, Adam"]}))
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 1, "first_name": "adam", "last_name": "BEHRENS",
+         "class_year": "SR", "position": "RHP"},
+        {"roster_id": 2, "first_name": "New", "last_name": "Guy",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900")
+    assert list(df["PitcherId"]).count(123) == 1
+    assert (df["PitcherId"] == -2).any()
+    assert not (df["PitcherId"] == -1).any()
+    cache.clear_all()
+
+
 def test_report_data_version_present():
     assert hasattr(pitching_caps, "report_data_version")
     assert pitching_caps.report_data_version(RAW_PID) != "none"

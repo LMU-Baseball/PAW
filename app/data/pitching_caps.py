@@ -312,15 +312,23 @@ def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
     Mirrors pitching.wh_lmu_pitchers's dedup logic, but over GAMES/PitcherId
     instead of fact_tm_game_pitch/pitcher_id. Season date-bounds (not a
     numeric-GameID filter) do the scoping now, so legacy composite-GameID
-    seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed over
-    the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
+    seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed
+    over the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
 
     When both `start` and `end` are given, they replace the season's date
     bounds (the coach's date-range dropdown nests inside the season, so this
     narrows the roster to pitchers with data in that window).
+
+    At the season level (no start/end override), also unions in
+    `app.data.lmu_roster` placeholder rows (negative PitcherId) for any
+    rostered pitcher with zero GAMES rows yet this season. A ranged call
+    never gets placeholders -- it's explicitly asking "who has DATA in this
+    window", which a data-less placeholder can never answer yes to.
     """
-    s, e = seasons.season_bounds(season or seasons.current_season())
-    if start is not None and end is not None:
+    season = season or seasons.current_season()
+    s, e = seasons.season_bounds(season)
+    ranged = start is not None and end is not None
+    if ranged:
         s, e = str(start), str(end)
     df = query_df(
         f"""
@@ -338,6 +346,9 @@ def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
     )
     if not df.empty:
         df["PitcherId"] = df["PitcherId"].astype(int)
+    if not ranged:
+        from app.data import lmu_roster
+        df = lmu_roster.union_with_roster(df, season, ("pitcher",), "PitcherId", "Pitcher")
     return df
 
 
