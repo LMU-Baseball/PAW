@@ -106,11 +106,13 @@ def warm_caches() -> None:
     # so the warmed @cached entries actually hit.
     #
     # Velo Board/Cauldron's OWN default season (serve_layout in both
-    # dashboards' layout.py) is today's real calendar season, not
-    # current_season() -- their data source is BULLPEN, which gets Fall-2026
-    # rows well before GAMES does. Use that same value here so the warmed
-    # cache keys actually match what serve_layout requests; `season` (above)
-    # stays current_season() for the hitting/pitching/catching warming only.
+    # dashboards' layout.py) is today's real calendar season -- as of this
+    # session, current_season() (used for the hitting/pitching/catching
+    # warming above) ALSO always returns today's calendar season, so
+    # `board_season` and `season` are now the same value. Kept as two
+    # separately-computed locals (rather than collapsed to one) so this file
+    # doesn't silently break if the two functions' behavior ever diverges
+    # again later.
     from datetime import date
     from app.data import velo_board, cauldron
 

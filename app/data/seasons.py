@@ -60,17 +60,15 @@ def available_seasons() -> list[str]:
 
 
 def current_season() -> str:
-    """The latest season that has real GAMES data (the dropdown's default for
-    catching/hitting/pitching). Falls back to today's academic year only if GAMES
-    is entirely empty.
+    """Today's real calendar academic-year label -- the dropdown default for
+    catching/hitting/pitching (and everything else that defaults off this).
 
-    Deliberately reads _games_seasons() directly rather than available_seasons():
-    the latter always includes today's calendar season label (see above), which --
-    since today's label can never be "older" than any GAMES-derived label -- would
-    otherwise always win the max() and silently make this function track today's
-    calendar date instead of real data. That would regress catching/hitting/pitching
-    dashboards to an empty default view every day until real Fall-2026 GAMES rows
-    land. This function's behavior is intentionally unchanged from before
-    available_seasons() started including today's label."""
-    labels = _games_seasons()
-    return max(labels) if labels else season_label_for(date.today().isoformat())
+    Used to prefer the latest season WITH real GAMES data instead, falling
+    back to today's calendar season only if GAMES was entirely empty -- a
+    guard against defaulting onto a blank page before any data existed for
+    the new season. That guard is no longer needed: `app.data.lmu_roster`
+    unions each season's rostered players in as placeholder rows wherever
+    `lmu_pitchers`/`lmu_hitters`/`lmu_catchers` are read, so the current
+    season's view is never actually empty, even on day one before any
+    Trackman data exists for it."""
+    return season_label_for(date.today().isoformat())
