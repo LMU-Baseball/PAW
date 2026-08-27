@@ -24,6 +24,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
+from app.data import pitching_caps
 from app.data.roster_media import _norm_name
 from app.db import get_engine, query_df
 
@@ -147,3 +148,41 @@ def union_with_roster(df: pd.DataFrame, season_label: str, groups: tuple[str, ..
         return df
     out = pd.concat([df, ph], ignore_index=True, sort=False)
     return out.sort_values(name_col, kind="mergesort").reset_index(drop=True)
+
+
+def reconcile_ids(season_label: str, engine=None) -> int:
+    """Migrate any cauldron_teams/cauldron_daily/velo_board_entries/
+    velo_board_overrides row saved against a pitcher placeholder id
+    (-roster_id) over to that pitcher's real Trackman PitcherId, once one
+    exists (matched by name). Idempotent: once migrated, a placeholder id no
+    longer has any row referencing it, so re-running is a safe no-op. Only
+    PITCHER placeholders are ever reconciled -- Cauldron and Velo Board are
+    both pitcher-only systems (see _RECONCILE_TABLES); hitter/catcher
+    placeholders never persist anywhere, so there's nothing to migrate for
+    them. Returns the total number of rows migrated across all four tables.
+    """
+    engine = engine or get_engine()
+    roster = load_roster(season_label)
+    if roster.empty:
+        return 0
+    pitchers = roster[roster["position"].map(_position_group) == "pitcher"]
+    if pitchers.empty:
+        return 0
+    real = pitching_caps.lmu_pitchers(season_label)
+    real_by_name = {_norm_name(n): int(pid) for pid, n in
+                    zip(real["PitcherId"], real["Pitcher"])} if not real.empty else {}
+
+    migrated = 0
+    with engine.begin() as conn:
+        for _, r in pitchers.iterrows():
+            key = _norm_name(f"{r['last_name']}, {r['first_name']}")
+            real_id = real_by_name.get(key)
+            if real_id is None:
+                continue
+            placeholder_id = -int(r["roster_id"])
+            for table, col in _RECONCILE_TABLES:
+                result = conn.execute(
+                    text(f"UPDATE {table} SET {col} = :real WHERE {col} = :placeholder"),
+                    {"real": real_id, "placeholder": placeholder_id})
+                migrated += result.rowcount
+    return migrated

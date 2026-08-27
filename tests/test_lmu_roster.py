@@ -105,3 +105,38 @@ def test_union_with_roster_returns_df_unchanged_when_no_placeholders(monkeypatch
     real = pd.DataFrame({"PitcherId": [123], "Pitcher": ["Behrens, Adam"]})
     out = LR.union_with_roster(real, SEASON, ("pitcher",), "PitcherId", "Pitcher")
     assert out is real
+
+
+def test_reconcile_ids_migrates_matched_pitcher_and_is_idempotent(monkeypatch):
+    from app.data import cauldron, velo_board
+    cauldron.ensure_tables()
+    velo_board.ensure_tables()
+
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9301, "first_name": "Recon", "last_name": "Cilable",
+         "class_year": "FR", "position": "RHP"},
+        {"roster_id": 9302, "first_name": "Still", "last_name": "Unmatched",
+         "class_year": "SO", "position": "RHP"},
+    ]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777001], "Pitcher": ["Cilable, Recon"]}))
+
+    placeholder_id = -9301
+    cauldron.set_team(placeholder_id, "TEST-RECON-c1", "Team 1")
+    velo_board.set_override(placeholder_id, SEASON, season_max=95.0)
+
+    migrated = LR.reconcile_ids(SEASON)
+    assert migrated == 2  # one cauldron_teams row + one velo_board_overrides row
+
+    teams = cauldron.read_teams("TEST-RECON-c1")
+    ids = set(teams["player_id"].astype(int))
+    assert 777001 in ids
+    assert placeholder_id not in ids
+
+    overrides = velo_board.read_overrides(SEASON)
+    ov_ids = set(overrides["pitcher_id"].astype(int))
+    assert 777001 in ov_ids
+    assert placeholder_id not in ov_ids
+
+    again = LR.reconcile_ids(SEASON)
+    assert again == 0  # idempotent -- nothing left under the placeholder id
