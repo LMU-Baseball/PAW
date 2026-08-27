@@ -54,9 +54,10 @@ default to today's calendar season.
 - Test: `tests/test_lmu_roster.py`
 
 **Interfaces:**
-- Consumes: `app.data.pitching_caps.lmu_pitchers` (module-level import — needed by `reconcile_ids`;
-  safe because `pitching_caps.py` will only import `lmu_roster` LOCALLY inside its own functions,
-  see Task 3), `app.data.roster_media._norm_name`, `app.db.get_engine`/`query_df`.
+- Consumes: `app.data.roster_media._norm_name`, `app.db.get_engine`/`query_df`. (NOT
+  `pitching_caps` yet — that module-level import is added in Task 7, the first task that actually
+  uses it (`reconcile_ids`). Adding it here in Task 1 would be an unused import from Task 1 through
+  Task 6 and fail this repo's `ruff check .` CI step (F401 is enabled for `app/`, per `ruff.toml`).)
 - Produces (used by Tasks 2, 3, 4, 5, 6):
   - `ensure_table(engine=None) -> None`
   - `_position_group(position: str) -> str` — `"pitcher"` / `"catcher"` / `"hitter"`
@@ -175,7 +176,6 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
-from app.data import pitching_caps
 from app.data.roster_media import _norm_name
 from app.db import get_engine, query_df
 
