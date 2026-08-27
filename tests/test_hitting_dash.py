@@ -468,13 +468,18 @@ def _find_component(node, comp_id):
 
 
 def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeypatch):
+    from datetime import date
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
     from app.data import seasons
+    todays_season = seasons.season_label_for(date.today().isoformat())
     monkeypatch.setattr(seasons, "available_seasons",
-                        lambda: ["2025/2026", "2024/2025", "2023/2024"])
-    monkeypatch.setattr(seasons, "current_season", lambda: "2025/2026")
+                        lambda: [todays_season, "2025/2026", "2024/2025"])
+    # current_season() is deliberately GAMES-data-driven and can lag months
+    # behind; pin it to a stale season to prove serve_layout's default does
+    # NOT come from it (regression guard for the 2026-08-26 season-default fix).
+    monkeypatch.setattr(seasons, "current_season", lambda: "2024/2025")
     monkeypatch.setattr("app.data.hitting_caps.lmu_hitters",
                         lambda season=None, start=None, end=None: pd.DataFrame(
                             [{"Batter": "Doe, John", "BatterId": 1}]))
@@ -497,8 +502,8 @@ def test_serve_layout_season_dropdown_first_and_defaults_current(server, monkeyp
             out = layout.serve_layout()
     dd = _find_component(out, "hit-season")
     assert dd is not None
-    assert dd.value == "2025/2026"                       # defaults to current season
-    assert [o["value"] for o in dd.options] == ["2025/2026", "2024/2025", "2023/2024"]
+    assert dd.value == todays_season                     # defaults to TODAY's calendar season
+    assert [o["value"] for o in dd.options] == [todays_season, "2025/2026", "2024/2025"]
     # it is the first control in the selector row
     row = _find_component(out, "hitter-dd")  # sanity: hitter dd also present
     assert row is not None

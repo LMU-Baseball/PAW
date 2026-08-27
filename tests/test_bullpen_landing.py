@@ -87,7 +87,10 @@ def test_bullpen_landing_player_sees_all(app_ctx, monkeypatch):
 
 def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeypatch):
     """The Season dropdown passes that season's date bounds to the pitcher query,
-    and defaults to the current season."""
+    and defaults to TODAY's real calendar season (BULLPEN data lands before any
+    game is played, so this bypasses current_season()'s GAMES-only preference --
+    same fix and rationale as Velo Board/Cauldron)."""
+    from datetime import date
     from app.data import seasons
     calls = []
 
@@ -101,7 +104,7 @@ def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeyp
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     with app_ctx.app_context():
-        cur = seasons.current_season()
+        cur = seasons.season_label_for(date.today().isoformat())
         cur_bounds = seasons.season_bounds(cur)
         others = [s for s in seasons.available_seasons() if s < cur]
 

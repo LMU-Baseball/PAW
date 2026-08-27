@@ -1,11 +1,20 @@
 """Startup cache warm-up."""
+from datetime import date
+
 from app import warmup
 from app.data import hitting_caps as H, cache, seasons
 
 
+def _todays_season() -> str:
+    """warm_caches() scopes hitting/pitching/catching to TODAY's real calendar
+    season, not seasons.current_season() -- see the 2026-08-26 season-default
+    fix. Tests must key their assertions the same way."""
+    return seasons.season_label_for(date.today().isoformat())
+
+
 def test_warm_caches_populates_roster_cache(monkeypatch):
     """After warm_caches(), the roster read is a cache hit (no new query).
-    warm_caches scopes to the current season, so the hit is on the same
+    warm_caches scopes to today's calendar season, so the hit is on the same
     season-keyed call."""
     cache.clear_all()
     calls = []
@@ -13,7 +22,7 @@ def test_warm_caches_populates_roster_cache(monkeypatch):
     monkeypatch.setattr(H, "query_df", lambda sql, params=None: (calls.append(1), real(sql, params))[1])
     warmup.warm_caches()
     n = len(calls)
-    H.lmu_hitters(seasons.current_season())   # warmed -> served from cache
+    H.lmu_hitters(_todays_season())   # warmed -> served from cache
     assert len(calls) == n
 
 
@@ -24,7 +33,7 @@ def test_warm_caches_warms_range_scoped_roster_and_new_reads(monkeypatch):
     cache.clear_all()
     warmup.warm_caches()
 
-    season = seasons.current_season()
+    season = _todays_season()
     s_b, e_b = seasons.season_bounds(season)
 
     calls = []
@@ -64,7 +73,7 @@ def test_warm_caches_warms_game_context(monkeypatch):
     cache.clear_all()
     warmup.warm_caches()
 
-    season = seasons.current_season()
+    season = _todays_season()
     s_b, e_b = seasons.season_bounds(season)
     pitchers = P.lmu_pitchers(season)
     if pitchers is None or pitchers.empty:
@@ -116,7 +125,7 @@ def test_warm_caches_warms_catching_precalc_read(monkeypatch):
     cache.clear_all()
     warmup.warm_caches()
 
-    season = seasons.current_season()
+    season = _todays_season()
     catchers = C.lmu_catchers(season)
     if catchers is None or catchers.empty:
         return

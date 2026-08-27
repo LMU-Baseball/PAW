@@ -69,12 +69,12 @@ def serve_layout() -> html.Div:
     is_coach = bool(getattr(current_user, "is_coach", False))
     own_name = getattr(current_user, "name", None)
 
-    # Default view opens on the MOST RECENT session date (a single day), showing
-    # the first-alphabetical player who had a session that day. Everything the
-    # layout needs (bounds, names, latest date, players-on-latest) comes from ONE
-    # sessions query -- not a full all-players pitch load -- then a single scoped
-    # pitch load for the default player (2 round-trips, light render).
+    # Everything the layout needs (bounds, names, latest date, players-on-latest)
+    # comes from ONE sessions query -- not a full all-players pitch load -- then
+    # a single scoped pitch load for the default player (2 round-trips, light
+    # render).
     from datetime import date as _date
+    today = _date.today()
     sessions = P.load_sessions()
     if sessions is not None and not sessions.empty:
         s = sessions.copy()
@@ -85,12 +85,18 @@ def serve_layout() -> html.Div:
         on_latest_all = sorted(s.loc[s["session_date"] == latest, "player_name"].unique(),
                                key=str.lower)
     else:
-        min_d = max_d = latest = _date.today()
+        min_d = max_d = today
+        latest = today
         on_latest_all = []
 
-    # Default the date filter to "This Season" (same preset behavior as the game
-    # dashboards) instead of a single day, clamped to the data's own bounds.
-    s0, e0 = dr.preset_range("season", str(max_d))
+    # Default the date filter to "This Season" anchored on TODAY's real calendar
+    # date, not the latest practice session -- so a new season with no HitTrax
+    # data ingested yet shows an honest empty view instead of a frozen prior-
+    # season snapshot (same fix/rationale as the 2026-08-26 season-default
+    # change to the game dashboards). Clamped only at the data's own earliest
+    # bound; the calendar's own max (below) is likewise not capped at old data.
+    cal_max = max(str(max_d), str(today))
+    s0, e0 = dr.preset_range("season", str(today))
     start_d, end_d = max(str(s0), str(min_d)), str(e0)
 
     # First paint's player list/options are scoped to that same season-default
@@ -115,7 +121,7 @@ def serve_layout() -> html.Div:
     filters = html.Div([
         html.Div([
             html.Label("Date range", style={"color": "white", "fontWeight": "bold"}),
-            dr.date_control("prac", str(max_d), min_date=str(min_d), max_date=str(max_d),
+            dr.date_control("prac", str(today), min_date=str(min_d), max_date=cal_max,
                             preset="season", start=start_d, end=end_d),
         ]),
         html.Div([

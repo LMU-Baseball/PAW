@@ -78,8 +78,13 @@ def test_player_subject_dropdown_is_enabled(server, module_path, url, dd_id):
     assert not getattr(dd, "disabled", False), (
         f"{dd_id} is disabled for a player -- players must be able to switch "
         "subjects (team-transparent view)")
-    # An enabled dropdown is only useful with options behind it.
-    assert dd.options, f"{dd_id} rendered with no options for a player"
+    # Hitting/pitching/catching/bullpen now default to TODAY's real calendar
+    # season (2026-08-26 season-default fix), so a genuinely fresh season with
+    # no Trackman/HitTrax data ingested yet legitimately renders zero options --
+    # that's an honest empty default, not a bug. This test only pins that a
+    # player never sees FEWER options than a coach would (checked exactly by
+    # test_player_and_coach_see_the_same_filter_options below), not that
+    # options are non-empty.
 
 
 @pytest.mark.parametrize("module_path,url,dd_id", SUBJECT_DROPDOWNS)

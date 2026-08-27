@@ -63,7 +63,14 @@ def serve_layout() -> html.Div:
     default_pitcher = selectors.resolve_pitcher(
         pitchers_all[0]["value"] if pitchers_all else None, is_coach=is_coach, own_trackman_id=own)
 
-    anchor = _bullpen_anchor(default_pitcher)
+    # Default view anchors on TODAY, not the default pitcher's last session
+    # (that's what _bullpen_anchor is for -- used when a coach explicitly
+    # switches pitchers, see callbacks.py). Anchoring the PAGE default on a
+    # specific pitcher's history meant the whole page (range, roster, sidebar)
+    # could silently open on a stale prior-season block if that pitcher hadn't
+    # thrown yet this season, even if others had. Same fix/rationale as the
+    # 2026-08-26 season-default change to the other dashboards.
+    anchor = date.today().isoformat()
     s0, e0 = dr.preset_range("season", anchor)
     start_d, end_d = str(s0), str(e0)
     # WINDOW_MIN remains the calendar min; end bound = today

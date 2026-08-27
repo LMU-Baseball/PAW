@@ -60,17 +60,23 @@ def available_seasons() -> list[str]:
 
 
 def current_season() -> str:
-    """The latest season that has real GAMES data (the dropdown's default for
-    catching/hitting/pitching). Falls back to today's academic year only if GAMES
-    is entirely empty.
+    """The latest season that has real GAMES data. Falls back to today's academic
+    year only if GAMES is entirely empty.
+
+    NOT the Season dropdown's default anywhere anymore (as of 2026-08-26):
+    catching/hitting/pitching/velo_board/cauldron and the bullpen report all
+    default their own initial selection to
+    seasons.season_label_for(date.today().isoformat()) directly at their
+    serve_layout/route call sites, bypassing this function, so a new season
+    shows as the honest-but-empty default from day one instead of a frozen
+    prior-season snapshot. This function still backs the season param's
+    fallback inside hitting_caps/pitching_caps/catching_caps/precalc/reports
+    when a caller doesn't pass an explicit season (e.g. ad-hoc scripts, tests).
 
     Deliberately reads _games_seasons() directly rather than available_seasons():
     the latter always includes today's calendar season label (see above), which --
     since today's label can never be "older" than any GAMES-derived label -- would
     otherwise always win the max() and silently make this function track today's
-    calendar date instead of real data. That would regress catching/hitting/pitching
-    dashboards to an empty default view every day until real Fall-2026 GAMES rows
-    land. This function's behavior is intentionally unchanged from before
-    available_seasons() started including today's label."""
+    calendar date instead of real data."""
     labels = _games_seasons()
     return max(labels) if labels else season_label_for(date.today().isoformat())

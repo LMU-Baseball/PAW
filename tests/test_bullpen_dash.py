@@ -334,10 +334,12 @@ def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
 
 
 def test_layout_initial_paint_player_role_gets_full_roster(server):
-    """Team-transparent: a player-role user paints the FULL roster (same as a
-    coach) with a valid default selection drawn from those options -- never an
-    empty, disabled dropdown -- even when their own trackman_id has no bullpen
-    data at all."""
+    """Team-transparent: a player-role user paints the SAME roster options and
+    default selection a coach would see -- never restricted to just their own
+    trackman_id, even when it has no bullpen data at all. The season-default
+    range (today's real calendar season, per the 2026-08-26 fix) can
+    legitimately be empty early in a new season; that's an honest empty
+    default, not a bug, so this only asserts non-restriction, not non-emptiness."""
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
@@ -354,12 +356,17 @@ def test_layout_initial_paint_player_role_gets_full_roster(server):
     store = out.children[0]
     pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
     assert pitcher_dd.id == "bp-pitcher-dd"
-    assert pitcher_dd.options != []
-    # Defaults to a real roster pitcher present in the options (not the synthetic
-    # -999), and the store agrees with the dropdown.
     option_values = {o["value"] for o in pitcher_dd.options}
-    assert pitcher_dd.value in option_values
-    assert store.data["pitcher_id"] == pitcher_dd.value
+    if option_values:
+        # Defaults to a real roster pitcher present in the options (not the
+        # synthetic -999), and the store agrees with the dropdown.
+        assert pitcher_dd.value in option_values
+        assert store.data["pitcher_id"] == pitcher_dd.value
+    else:
+        # No bullpen data yet in the current season-default range: an honest
+        # empty default, not a silent fallback to the synthetic -999 id.
+        assert pitcher_dd.value is None
+        assert store.data["pitcher_id"] is None
 
 
 def test_bullpen_layout_uses_preset_dropdown(server):
@@ -393,8 +400,10 @@ def test_bullpen_preset_resolves_season_range_live():
 
 
 def test_serve_layout_season_default_matches_preset_range(server):
-    # serve_layout's initial start/end should equal preset_range("season", anchor) for
-    # the default pitcher, so first render and the preset dropdown agree.
+    # serve_layout's initial start/end should equal preset_range("season", TODAY) --
+    # the page default anchors on today's real date, not the default pitcher's own
+    # last session (see 2026-08-26 season-default fix) -- so first render and the
+    # preset dropdown agree.
     from app.extensions import db
     from app.auth.models import User
     from flask_login import login_user
@@ -410,8 +419,7 @@ def test_serve_layout_season_default_matches_preset_range(server):
             out = layout.serve_layout()
     store = out.children[0]
     assert store.id == "bp-selection"
-    anchor = layout._bullpen_anchor(store.data["pitcher_id"])
-    s, e = dr.preset_range("season", anchor)
+    s, e = dr.preset_range("season", layout.date.today().isoformat())
     assert store.data["start"] == str(s) and store.data["end"] == str(e)
 
 

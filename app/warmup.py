@@ -29,12 +29,18 @@ def warm_caches() -> None:
     CURRENT SEASON (the dropdown's default), so the warmed cache keys match the
     scoped reads serve_layout actually makes. Also warms the Season dropdown's
     own queries (available_seasons/current_season)."""
+    from datetime import date
     from app.data import hitting_caps as H, pitching_caps as P
     from app.data import catching_caps as C, video, seasons, precalc
     from app.data import called_strike, xba
 
     _safe(seasons.available_seasons)          # Season dropdown options
-    season = _safe(seasons.current_season)    # dropdown default
+    # Hitting/Pitching/Catching now default (serve_layout) to TODAY's real
+    # calendar season, not seasons.current_season() -- see
+    # docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4 and the
+    # 2026-08-26 season-default fix. Warm that same value so these cache keys
+    # actually match what serve_layout requests.
+    season = _safe(lambda: seasons.season_label_for(date.today().isoformat()))
     if not season:
         return
     s_b, e_b = seasons.season_bounds(season)
@@ -72,6 +78,19 @@ def warm_caches() -> None:
 
     catchers = _safe(lambda: C.lmu_catchers(season))
     _safe(lambda: C.lmu_catchers(season, s_b, e_b))
+    # called_strike._get_lookup() (a ~56,537-row GAMES scan) and
+    # xba._get_lookup() are process-wide singletons that used to get built here
+    # for free as a side effect of slaa_season_tiles's live compute path. Now
+    # that slaa_season_tiles (and hitting_caps.sidebar_stats) read precalc
+    # FIRST, that live path -- and this warm -- is only reached if the precalc
+    # row is somehow absent, which after a startup rebuild it never is. So warm
+    # both lookups directly and unconditionally (NOT nested under "does the
+    # CURRENT season have a catcher yet" -- a fresh season with zero rows so
+    # far must not skip warming a lookup spanning ALL of GAMES history) instead
+    # of relying on that side effect, or the first coach to hit a cold precalc
+    # row after a restart pays the full scan inline.
+    _safe(called_strike._get_lookup)
+    _safe(xba._get_lookup)
     if catchers is not None and not catchers.empty:
         cid = int(catchers.iloc[0]["CatcherId"])
         g = _safe(lambda: C.games_for_catcher(cid, s_b, e_b))
@@ -79,18 +98,6 @@ def warm_caches() -> None:
         _safe(lambda: C.framing_season_tiles(cid, season))
         _safe(lambda: C.slaa_season_tiles(cid, season))
         _safe(lambda: precalc.read_catching_season(cid, season))  # always-uncached read
-        # called_strike._get_lookup() (a ~56,537-row GAMES scan) and
-        # xba._get_lookup() are process-wide singletons that used to get
-        # built here for free as a side effect of slaa_season_tiles's live
-        # compute path. Now that slaa_season_tiles (and hitting_caps.
-        # sidebar_stats) read precalc FIRST, that live path -- and this warm
-        # -- is only reached if the precalc row is somehow absent, which
-        # after a startup rebuild it never is. So warm both lookups directly
-        # and unconditionally instead of relying on that side effect, or the
-        # first coach to hit a cold precalc row after a restart pays the
-        # full scan inline.
-        _safe(called_strike._get_lookup)
-        _safe(xba._get_lookup)
         if g is not None and not g.empty:
             _safe(lambda: video.video_game_ids(g, catcher_id=cid))
             gid = str(g.iloc[0]["game_id"])
@@ -106,16 +113,13 @@ def warm_caches() -> None:
     # so the warmed @cached entries actually hit.
     #
     # Velo Board/Cauldron's OWN default season (serve_layout in both
-    # dashboards' layout.py) is today's real calendar season, not
-    # current_season() -- their data source is BULLPEN, which gets Fall-2026
-    # rows well before GAMES does. Use that same value here so the warmed
-    # cache keys actually match what serve_layout requests; `season` (above)
-    # stays current_season() for the hitting/pitching/catching warming only.
-    from datetime import date
+    # dashboards' layout.py) is today's real calendar season -- same value as
+    # `season` above now that hitting/pitching/catching also default there.
+    # Kept as a separate name for readability of the block below.
     from app.data import velo_board, cauldron
 
     today = date.today().isoformat()
-    board_season = seasons.season_label_for(today)
+    board_season = season
 
     _safe(lambda: velo_board.leaderboard(board_season))  # player-facing heat board
     # Default week = the layout's _default_week(board_season): today's week

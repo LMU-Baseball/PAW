@@ -207,7 +207,12 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
     own = getattr(current_user, "trackman_id", None)
-    season = seasons.current_season()
+    # Default to today's real calendar season (bypassing current_season()'s
+    # GAMES-only "latest season WITH data" preference), same fix as Velo
+    # Board/Cauldron: once a new season starts, showing a stale-but-populated
+    # prior season is worse than an honest empty view of the real one. See
+    # docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4.
+    season = seasons.season_label_for(date.today().isoformat())
     s_bound, e_bound = seasons.season_bounds(season)
     # Layer-2 fan-out: the unscoped + range-scoped roster reads and the season
     # list are mutually independent -- warm them concurrently so the sequential

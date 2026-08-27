@@ -165,10 +165,16 @@ def bullpen_landing():
     pitchers with a bullpen in that academic year, and the session list to that
     season's sessions.
     """
+    from datetime import date
     from app.data import seasons
-    season = request.args.get("season") or seasons.current_season()
+    # Bullpen data (unlike GAMES) lands well before any game is played, so this
+    # defaults to today's real calendar season -- same fix and rationale as
+    # Velo Board/Cauldron. See
+    # docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4.
+    todays_season = seasons.season_label_for(date.today().isoformat())
+    season = request.args.get("season") or todays_season
     if season not in seasons.available_seasons():
-        season = seasons.current_season()
+        season = todays_season
     s_b, e_b = seasons.season_bounds(season)
 
     pitchers = BULL.lmu_bullpen_pitchers(start=s_b, end=e_b)
