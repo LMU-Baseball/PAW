@@ -229,16 +229,18 @@ def test_change_password_requires_login(client):
     assert "/login" in resp.headers["Location"]
 
 
-def test_change_password_player_forbidden(client):
-    # The player login is shared, so a player must NOT be able to change it
-    # (would lock out the whole team) -- redirected away, password unchanged.
+def test_change_password_player_now_allowed(client):
+    # Accounts are per-person now (self-service registration), so the old
+    # shared-login lockout risk is gone -- a player may change their own
+    # password same as a coach.
     _login(client, "player@lmu.edu", "pw-player")
     resp = client.post("/change-password", data={
-        "current_password": "pw-player", "new_password": "sneaky-new-pw",
-        "confirm": "sneaky-new-pw"}, follow_redirects=True)
-    assert b"coach-only" in resp.data
+        "current_password": "pw-player", "new_password": "brand-new-pw",
+        "confirm": "brand-new-pw"}, follow_redirects=True)
+    assert b"Password changed." in resp.data
     client.post("/logout")
-    assert b"Devan O" in _login(client, "player@lmu.edu", "pw-player").data  # unchanged
+    assert b"Invalid email or password." in _login(client, "player@lmu.edu", "pw-player").data
+    assert b"Devan O" in _login(client, "player@lmu.edu", "brand-new-pw").data
 
 
 def test_change_password_wrong_current_rejected(client):
@@ -267,3 +269,65 @@ def test_change_password_success_updates_login(client):
     # old password no longer works; the new one does
     assert b"Invalid email or password." in _login(client, "coach@lmu.edu", "pw-coach").data
     assert b"Coach K" in _login(client, "coach@lmu.edu", "brand-new-pw").data
+
+
+# --------------------------- registration ----------------------------------
+
+def _register(client, name, email, password, confirm=None):
+    return client.post("/register", data={
+        "name": name, "email": email, "password": password,
+        "confirm": confirm if confirm is not None else password,
+    }, follow_redirects=True)
+
+
+def test_register_creates_player_account(app, client):
+    resp = _register(client, "New Kid", "newkid@lmu.edu", "a-real-password")
+    assert b"Account created." in resp.data
+    assert b"New Kid" in resp.data  # auto-logged-in, home greets by name
+    with app.app_context():
+        user = User.query.filter_by(email="newkid@lmu.edu").first()
+        assert user is not None and user.role == "player"
+        assert user.check_password("a-real-password")
+
+
+def test_register_creates_coach_account_for_allowlisted_email(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_COACH_EMAILS", "Assistant@LMU.edu, other@lmu.edu")
+    _register(client, "New Coach", "assistant@lmu.edu", "a-real-password")
+    with app.app_context():
+        user = User.query.filter_by(email="assistant@lmu.edu").first()
+        assert user is not None and user.role == "coach"
+
+
+def test_register_rejects_non_lmu_email(app, client):
+    resp = _register(client, "Outsider", "outsider@gmail.com", "a-real-password")
+    assert b"Use your LMU email address" in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="outsider@gmail.com").first() is None
+
+
+def test_register_rejects_duplicate_email(app, client):
+    resp = _register(client, "Impostor", "coach@lmu.edu", "a-real-password")
+    assert b"already exists" in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="coach@lmu.edu").count() == 1
+
+
+def test_register_rejects_password_mismatch(app, client):
+    resp = _register(client, "New Kid", "mismatch@lmu.edu", "a-real-password",
+                     confirm="different-password")
+    assert b"Passwords must match." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="mismatch@lmu.edu").first() is None
+
+
+def test_register_rejects_short_password(app, client):
+    resp = _register(client, "New Kid", "short@lmu.edu", "short")
+    assert b"Use at least 8 characters." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="short@lmu.edu").first() is None
+
+
+def test_register_email_case_and_whitespace_normalized(app, client):
+    _register(client, "New Kid", "  Mixed.Case@LMU.edu  ", "a-real-password")
+    with app.app_context():
+        assert User.query.filter_by(email="mixed.case@lmu.edu").first() is not None

@@ -26,6 +26,15 @@ _SEED_SPECS = (
 )
 
 
+def is_coach_email(email: str) -> bool:
+    """True if `email` is in the PAW_COACH_EMAILS allowlist (comma-separated,
+    case-insensitive) -- determines the role a self-registered account gets.
+    Not used for the seeded shared accounts, which already specify role
+    explicitly via PAW_SEED_COACH_EMAIL/PAW_SEED_PLAYER_EMAIL."""
+    allowlist = {e.strip().lower() for e in os.getenv("PAW_COACH_EMAILS", "").split(",") if e.strip()}
+    return email.strip().lower() in allowlist
+
+
 class User(UserMixin, db.Model):
     __tablename__ = "users"
 

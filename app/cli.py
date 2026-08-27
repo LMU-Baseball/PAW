@@ -42,6 +42,19 @@ def register_cli(server):
         db.session.commit()
         click.echo(f"Password updated for {email}.")
 
+    @server.cli.command("set-trackman-id")
+    @click.option("--email", required=True)
+    @click.option("--trackman-id", type=int, required=True)
+    def set_trackman_id(email, trackman_id):
+        """Link an existing account to their Trackman id (own-player convenience default)."""
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        user.trackman_id = trackman_id
+        db.session.commit()
+        click.echo(f"Linked {email} -> trackman_id {trackman_id}.")
+
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",
                   type=click.Choice(["all", "hitting", "pitching", "catching"]),

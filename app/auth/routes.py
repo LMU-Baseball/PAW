@@ -5,18 +5,42 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf import FlaskForm
 from wtforms import PasswordField, StringField, SubmitField
-from wtforms.validators import DataRequired, EqualTo, Length
+from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 
-from app.auth.models import User
+from app.auth.models import User, is_coach_email
 from app.extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
+
+_LMU_DOMAINS = {"lmu.edu", "lion.lmu.edu"}
+
+
+def _lmu_email(form, field):
+    # No wtforms.validators.Email() here -- it requires the extra
+    # `email_validator` package, which isn't a project dependency. The domain
+    # check below already implies a well-formed local-part@domain shape.
+    value = (field.data or "").strip()
+    local, sep, domain = value.rpartition("@")
+    if not sep or not local:
+        raise ValidationError("Enter a valid email address.")
+    if domain.lower() not in _LMU_DOMAINS:
+        raise ValidationError("Use your LMU email address (@lmu.edu or @lion.lmu.edu).")
 
 
 class LoginForm(FlaskForm):
     email = StringField("Email", validators=[DataRequired()])
     password = PasswordField("Password", validators=[DataRequired()])
     submit = SubmitField("Sign in")
+
+
+class RegisterForm(FlaskForm):
+    name = StringField("Name", validators=[DataRequired()])
+    email = StringField("Email", validators=[DataRequired(), _lmu_email])
+    password = PasswordField(
+        "Password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
+    confirm = PasswordField("Confirm password", validators=[
+        DataRequired(), EqualTo("password", message="Passwords must match.")])
+    submit = SubmitField("Create account")
 
 
 class ChangePasswordForm(FlaskForm):
@@ -60,15 +84,37 @@ def login():
     return render_template("auth/login.html", form=form)
 
 
+@auth_bp.route("/register", methods=["GET", "POST"])
+# Same deduct_when shape as /login and for the same reason: only a rejected
+# submission (200, re-rendered) should cost budget, not a successful one.
+@limiter.limit("10 per hour", methods=["POST"],
+                deduct_when=lambda resp: resp.status_code != 302)
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for("main.index"))
+    form = RegisterForm()
+    if form.validate_on_submit():
+        email = form.email.data.strip().lower()
+        if User.query.filter_by(email=email).first():
+            flash("An account with that email already exists. Try signing in instead.", "error")
+        else:
+            role = "coach" if is_coach_email(email) else "player"
+            user = User(email=email, name=form.name.data.strip(), role=role)
+            user.set_password(form.password.data)
+            db.session.add(user)
+            db.session.commit()
+            login_user(user)
+            flash("Account created.", "info")
+            return redirect(url_for("main.index"))
+    return render_template("auth/register.html", form=form)
+
+
 @auth_bp.route("/change-password", methods=["GET", "POST"])
 @login_required
 def change_password():
-    """Let a coach change their account password (verifies the current one
-    first). Coach-only: the player login is SHARED, so letting a player change
-    it would lock out the whole team."""
-    if not current_user.is_coach:
-        flash("Password changes are coach-only.", "error")
-        return redirect(url_for("main.index"))
+    """Let any logged-in account change its own password (verifies the
+    current one first). No longer coach-only: accounts are per-person now,
+    so there's no shared-login lockout risk."""
     form = ChangePasswordForm()
     if form.validate_on_submit():
         if not current_user.check_password(form.current_password.data):

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Create account — The PAW{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 380px; margin: 40px auto;">
+  <h2 style="margin-top: 0;">Create account</h2>
+  <form method="post" action="{{ url_for('auth.register') }}">
+    {{ form.hidden_tag() }}
+    <label for="name">Name</label>
+    {{ form.name(id="name", autofocus=true) }}
+    {% for e in form.name.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <label for="email">Email</label>
+    {{ form.email(id="email", type="text") }}
+    {% for e in form.email.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <label for="password">Password</label>
+    {{ form.password(id="password") }}
+    {% for e in form.password.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <label for="confirm">Confirm password</label>
+    {{ form.confirm(id="confirm") }}
+    {% for e in form.confirm.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <div style="margin-top: 20px;">{{ form.submit(class="btn") }}</div>
+  </form>
+  <p style="margin-top: 16px;">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+</div>
+{% endblock %}
