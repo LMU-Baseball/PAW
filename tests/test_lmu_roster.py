@@ -140,3 +140,53 @@ def test_reconcile_ids_migrates_matched_pitcher_and_is_idempotent(monkeypatch):
 
     again = LR.reconcile_ids(SEASON)
     assert again == 0  # idempotent -- nothing left under the placeholder id
+
+
+def test_reconcile_ids_survives_a_collision_and_still_migrates_other_pitchers(monkeypatch):
+    """A row can already exist under a pitcher's real id for a table's other
+    key dimensions (e.g. a coach re-assigned the real id's Cauldron team
+    before flask roster-reconcile next ran) -- the raw UPDATE would then hit a
+    duplicate-key violation. reconcile_ids must isolate that one collision
+    (per table, per pitcher) with a SAVEPOINT, drop the now-stale placeholder
+    row instead of raising, and keep migrating every other pitcher in the same
+    call -- one collision must never abort the whole run."""
+    from app.data import cauldron
+    cauldron.ensure_tables()
+
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9401, "first_name": "Colliding", "last_name": "Pitcher",
+         "class_year": "FR", "position": "RHP"},
+        {"roster_id": 9402, "first_name": "Clean", "last_name": "Migrator",
+         "class_year": "SO", "position": "RHP"},
+    ]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777011, 777012],
+         "Pitcher": ["Pitcher, Colliding", "Migrator, Clean"]}))
+
+    placeholder_collide = -9401
+    placeholder_clean = -9402
+    cycle = "TEST-RECON-c2"
+
+    # Colliding pitcher: a row already exists under the REAL id (more current
+    # state -- it should win), plus a stale placeholder row that must be
+    # dropped rather than migrated on top of it.
+    cauldron.set_team(777011, cycle, "Team 2")
+    cauldron.set_team(placeholder_collide, cycle, "Team 1")
+    # Non-colliding pitcher: only a placeholder row exists -- must still
+    # migrate cleanly even though it's processed in the same call as the
+    # collision above.
+    cauldron.set_team(placeholder_clean, cycle, "Team 3")
+
+    migrated = LR.reconcile_ids(SEASON)  # must not raise
+    assert migrated == 1  # only the clean pitcher's cauldron_teams row counts
+
+    teams = cauldron.read_teams(cycle)
+    by_id = {int(pid): team for pid, team in zip(teams["player_id"], teams["team"])}
+
+    # Real-id row for the colliding pitcher is untouched; its placeholder is gone.
+    assert by_id.get(777011) == "Team 2"
+    assert placeholder_collide not in by_id
+
+    # Non-colliding pitcher migrated to its real id.
+    assert by_id.get(777012) == "Team 3"
+    assert placeholder_clean not in by_id

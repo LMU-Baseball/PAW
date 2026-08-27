@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import pandas as pd
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.data import pitching_caps
 from app.data.roster_media import _norm_name
@@ -181,8 +182,20 @@ def reconcile_ids(season_label: str, engine=None) -> int:
                 continue
             placeholder_id = -int(r["roster_id"])
             for table, col in _RECONCILE_TABLES:
-                result = conn.execute(
-                    text(f"UPDATE {table} SET {col} = :real WHERE {col} = :placeholder"),
-                    {"real": real_id, "placeholder": placeholder_id})
-                migrated += result.rowcount
+                try:
+                    with conn.begin_nested():
+                        result = conn.execute(
+                            text(f"UPDATE {table} SET {col} = :real WHERE {col} = :placeholder"),
+                            {"real": real_id, "placeholder": placeholder_id})
+                        migrated += result.rowcount
+                except IntegrityError:
+                    # A row already exists under the real id for this table's
+                    # other key dimensions (e.g. a coach touched the real-id
+                    # row before this ran) -- that row reflects more current
+                    # state, so it wins: drop the now-stale placeholder row
+                    # instead of leaving a collision that would recur forever.
+                    with conn.begin_nested():
+                        conn.execute(
+                            text(f"DELETE FROM {table} WHERE {col} = :placeholder"),
+                            {"placeholder": placeholder_id})
     return migrated
