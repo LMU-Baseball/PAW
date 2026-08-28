@@ -300,7 +300,7 @@ def serve_layout() -> html.Div:
     tabs = dcc.Tabs(id="tabs", value="breakdown", children=[
         dcc.Tab(label="Personal Breakdown", value="breakdown"),
         dcc.Tab(label="Movement Profile", value="location"),
-        dcc.Tab(label="Outing Overview", value="outings"),
+        dcc.Tab(label="Outing Trend", value="outings"),
         dcc.Tab(label="Outing Video", value="pitchlevel"),
         dcc.Tab(label="Count Performance", value="counts"),
         dcc.Tab(label="Zone Frequency", value="heatmaps"),

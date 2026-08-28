@@ -1,8 +1,11 @@
-"""Last Outings tab: coach picks how many outings; table + avg/max velo trend."""
+"""Outing Trend tab: coach picks how many outings; table + velo trend + the
+process-metrics/velocity trend grid (pitcher vs. LMU team avg vs. LMU
+baseline, per `pitcher_outing_trend.outing_trend`)."""
 from __future__ import annotations
 
 from dash import dcc, html
 
+from app.data import pitcher_outing_trend as outing_trend
 from app.data import pitching as P
 from app.data import pitching_caps
 from app.dashboards.pitching import tables
@@ -15,6 +18,29 @@ _COLS = {
 COUNT_OPTIONS = [{"label": "Last 3", "value": 3}, {"label": "Last 5", "value": 5},
                  {"label": "Last 10", "value": 10}, {"label": "Last 15", "value": 15},
                  {"label": "All", "value": 9999}]
+
+
+_MUTED = {"padding": "12px", "color": "#555"}
+
+
+def _trend_section(pitcher_id, game_id, n) -> list:
+    trend = outing_trend.outing_trend(pitcher_id, game_id, n)
+    if not trend["rows"]:
+        return [
+            section("Process Metrics Trend"),
+            html.Div("Need at least 2 outings to show a trend.", style=_MUTED),
+        ]
+    out = [
+        section("Process Metrics Trend"),
+        dcc.Graph(figure=P.fig_process_metrics_grid(trend["rows"]), style={"height": "auto"}),
+    ]
+    if trend["velo"]["series"]:
+        out += [
+            section("Average Velocity"),
+            dcc.Graph(figure=P.fig_outing_velo_by_pitch(
+                trend["velo"]["dates"], trend["velo"]["series"])),
+        ]
+    return out
 
 
 def body(pitcher_id, game_id, n) -> html.Div:
@@ -33,6 +59,7 @@ def body(pitcher_id, game_id, n) -> html.Div:
         tables.df_table(show, id_="lo-avgs"),
         section("Velocity Trend"),
         dcc.Graph(figure=P.fig_outings_velo_trend(recent)),
+        *_trend_section(pitcher_id, str(game_id), n),
     ])
 
 

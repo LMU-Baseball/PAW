@@ -181,7 +181,7 @@ def yoy_movement(pitcher_id, season):
 
 def render(df: pd.DataFrame, pitcher_id=None, season=None) -> html.Div:
     """`pitcher_id` / `season` come from the `selection` store via
-    `callbacks._render_tab` (the same way the Outing Overview tab is handed its
+    `callbacks._render_tab` (the same way the Outing Trend tab is handed its
     pitcher). They are optional so a bare `render(df)` -- tests, and any caller
     that only has a dataframe -- still works, just without the year-over-year
     panel, which cannot be built from one selection's pitches alone."""

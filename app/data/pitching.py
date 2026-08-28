@@ -572,6 +572,85 @@ def fig_outings_velo_trend(recent_df: pd.DataFrame) -> go.Figure:
     return _base_layout(fig, "Velocity Trend (Selected Outings)")
 
 
+# Line colors shared by the process-metrics grid: this pitcher (black), the
+# LMU team average on that date (blue -- same blue fig_outings_velo_trend
+# uses for Avg Velo), and the LMU baseline target (maroon -- the app's house
+# accent, same role fig_outings_velo_trend gives Max Velo).
+_TREND_PLAYER_COLOR = "#000000"
+_TREND_TEAM_COLOR = "#0076A5"
+_TREND_BASELINE_COLOR = "#9A0021"
+
+
+def fig_process_metrics_grid(rows: list[dict]) -> go.Figure:
+    """2-column small-multiples grid, one panel per process/outcome metric,
+    each with 3 lines: this pitcher, LMU team average (same dates), LMU
+    baseline (flat target). `rows` is `pitcher_outing_trend.outing_trend()`'s
+    `"rows"` list -- each `{"label", "dates", "player", "team", "baseline"}`.
+
+    Mirrors `bullpen.charts.trend_small_multiples`'s make_subplots/legend
+    idiom (legend shown once, on the first panel) so the two "development
+    trend" style tabs read as one visual family.
+    """
+    from plotly.subplots import make_subplots
+
+    fig = go.Figure()
+    if not rows:
+        fig.update_layout(template="simple_white",
+                          font=dict(family="Teko, sans-serif", size=16))
+        return fig
+
+    ncols = 2
+    nrows = (len(rows) + 1) // 2
+    fig = make_subplots(rows=nrows, cols=ncols,
+                        subplot_titles=[r["label"] for r in rows],
+                        vertical_spacing=0.14, horizontal_spacing=0.09)
+    for i, row in enumerate(rows):
+        r, c = i // ncols + 1, i % ncols + 1
+        dates, player, team = row["dates"], row["player"], row["team"]
+        baseline = [row["baseline"]] * len(dates)
+        fig.add_trace(go.Scatter(
+            x=dates, y=player, mode="lines+markers", name="Pitcher",
+            legendgroup="Pitcher", showlegend=(i == 0),
+            line=dict(color=_TREND_PLAYER_COLOR),
+            hovertemplate=f"{row['label']}: %{{y:.1f}}<extra>Pitcher</extra>"),
+            row=r, col=c)
+        fig.add_trace(go.Scatter(
+            x=dates, y=team, mode="lines", name="LMU Team Avg",
+            legendgroup="LMU Team Avg", showlegend=(i == 0),
+            line=dict(color=_TREND_TEAM_COLOR, width=2),
+            hovertemplate=f"{row['label']} (Team): %{{y:.1f}}<extra>LMU Team Avg</extra>"),
+            row=r, col=c)
+        fig.add_trace(go.Scatter(
+            x=dates, y=baseline, mode="lines", name="LMU Baseline",
+            legendgroup="LMU Baseline", showlegend=(i == 0),
+            line=dict(color=_TREND_BASELINE_COLOR, width=2, dash="dash"),
+            hovertemplate=f"{row['label']} (Baseline): %{{y:.1f}}<extra>LMU Baseline</extra>"),
+            row=r, col=c)
+    fig.update_layout(
+        template="simple_white", font=dict(family="Teko, sans-serif", size=13),
+        title_font=dict(color="#9A0021"), showlegend=True,
+        margin=dict(l=40, r=20, t=54, b=30), height=max(280, 230 * nrows),
+        legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="left", x=0))
+    fig.update_xaxes(showgrid=True, gridcolor="#eee")
+    fig.update_yaxes(showgrid=True, gridcolor="#eee", ticksuffix="%")
+    return fig
+
+
+def fig_outing_velo_by_pitch(dates: list[str], series: dict[str, list]) -> go.Figure:
+    """Avg velocity per pitch type across the same outings as the process-
+    metrics grid, one line per pitch type actually thrown, colored by
+    `pitch_color` (the same mapping the movement/location figures use)."""
+    fig = go.Figure()
+    for pt, vals in series.items():
+        fig.add_trace(go.Scatter(
+            x=dates, y=vals, mode="lines+markers", name=pt,
+            line=dict(color=pitch_color(pt)),
+            connectgaps=False,
+            hovertemplate=f"{pt}<br>Date: %{{x}}<br>Velo: %{{y:.1f}} mph<extra></extra>"))
+    fig.update_xaxes(title="Outing Date"); fig.update_yaxes(title="Velo (mph)")
+    return _base_layout(fig, "Average Velocity")
+
+
 def count_states(df: pd.DataFrame) -> list[str]:
     """Sorted distinct '{balls}-{strikes}' count states present in df."""
     if df is None or df.empty:

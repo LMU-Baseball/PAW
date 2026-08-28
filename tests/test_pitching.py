@@ -198,6 +198,40 @@ def test_fig_outings_velo_trend_two_lines():
     assert {"Avg Velo", "Max Velo"} <= names
 
 
+def test_fig_process_metrics_grid_empty_rows():
+    fig = P.fig_process_metrics_grid([])
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+
+
+def test_fig_process_metrics_grid_three_lines_per_metric():
+    rows = [
+        {"key": "strike_pct", "label": "Strike%", "dates": ["04-19", "04-26", "05-03"],
+         "player": [60.0, 55.0, 58.0], "team": [59.0, 57.0, 56.0], "baseline": 55.0},
+        {"key": "k_pct", "label": "K%", "dates": ["04-19", "04-26", "05-03"],
+         "player": [20.0, 25.0, 22.0], "team": [15.0, 18.0, 16.0], "baseline": 27.0},
+    ]
+    fig = P.fig_process_metrics_grid(rows)
+    assert len(fig.data) == 3 * len(rows)  # Pitcher + LMU Team Avg + LMU Baseline per panel
+    names = {tr.name for tr in fig.data}
+    assert {"Pitcher", "LMU Team Avg", "LMU Baseline"} == names
+    # Legend shown once (first panel) then suppressed for the rest.
+    shown = [tr.showlegend for tr in fig.data]
+    assert shown.count(True) == 3
+    # Baseline is flattened to a constant across the panel's dates.
+    baseline_trace = next(tr for tr in fig.data if tr.name == "LMU Baseline")
+    assert list(baseline_trace.y) == [55.0, 55.0, 55.0]
+
+
+def test_fig_outing_velo_by_pitch_one_line_per_type():
+    dates = ["04-19", "04-26", "05-03"]
+    series = {"Fastball": [92.1, 91.8, 92.5], "Sinker": [90.0, 89.5, None]}
+    fig = P.fig_outing_velo_by_pitch(dates, series)
+    assert isinstance(fig, go.Figure)
+    names = {tr.name for tr in fig.data}
+    assert names == {"Fastball", "Sinker"}
+
+
 def test_pitching_figs_have_labeled_hovers():
     df = pd.DataFrame({
         "pitch_no": [1, 2, 3, 4],

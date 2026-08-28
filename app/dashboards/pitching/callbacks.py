@@ -223,7 +223,7 @@ def register_callbacks(dash_app) -> None:
         if tab == "location":
             # The year-over-year panel needs more than this selection's pitches:
             # hand the tab the pitcher and the selected season so it can pull
-            # the two full seasons itself (same shape as the Outing Overview
+            # the two full seasons itself (same shape as the Outing Trend
             # dispatch above, which is also handed ids rather than a frame).
             sel = sel or {}
             return location_movement.render(df, sel.get("pitcher_id"),
