@@ -21,6 +21,8 @@ the real id.
 """
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -210,7 +212,15 @@ def reconcile_ids(season_label: str, engine=None) -> int:
     pitchers = roster[roster["position"].map(_position_group) == "pitcher"]
     if pitchers.empty:
         return 0
+    # UNSCOPED (no start/end) -- per lmu_pitchers's own union logic, that
+    # means placeholder rows (this function's own negative ids) are unioned
+    # in too. Filter down to genuinely real (positive) Trackman ids only, or
+    # every placeholder pitcher would match ITSELF by name in real_by_name
+    # below and produce a self-referential no-op UPDATE ... SET col = -13
+    # WHERE col = -13.
     real = pitching_caps.lmu_pitchers(season_label)
+    if not real.empty:
+        real = real[real["PitcherId"] > 0]
     real_by_name = {_norm_name(n): int(pid) for pid, n in
                     zip(real["PitcherId"], real["Pitcher"])} if not real.empty else {}
 
@@ -235,6 +245,10 @@ def reconcile_ids(season_label: str, engine=None) -> int:
                     # row before this ran) -- that row reflects more current
                     # state, so it wins: drop the now-stale placeholder row
                     # instead of leaving a collision that would recur forever.
+                    logging.warning(
+                        f"reconcile_ids: {table} collision for placeholder "
+                        f"{placeholder_id} -> real {real_id}, dropping stale "
+                        f"placeholder row")
                     with conn.begin_nested():
                         conn.execute(
                             text(f"DELETE FROM {table} WHERE {col} = :placeholder"),

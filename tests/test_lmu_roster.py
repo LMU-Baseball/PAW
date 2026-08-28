@@ -122,24 +122,34 @@ def test_reconcile_ids_migrates_matched_pitcher_and_is_idempotent(monkeypatch):
         {"PitcherId": [777001], "Pitcher": ["Cilable, Recon"]}))
 
     placeholder_id = -9301
-    cauldron.set_team(placeholder_id, "TEST-RECON-c1", "Team 1")
-    velo_board.set_override(placeholder_id, SEASON, season_max=95.0)
+    try:
+        cauldron.set_team(placeholder_id, "TEST-RECON-c1", "Team 1")
+        velo_board.set_override(placeholder_id, SEASON, season_max=95.0)
 
-    migrated = LR.reconcile_ids(SEASON)
-    assert migrated == 2  # one cauldron_teams row + one velo_board_overrides row
+        migrated = LR.reconcile_ids(SEASON)
+        assert migrated == 2  # one cauldron_teams row + one velo_board_overrides row
 
-    teams = cauldron.read_teams("TEST-RECON-c1")
-    ids = set(teams["player_id"].astype(int))
-    assert 777001 in ids
-    assert placeholder_id not in ids
+        teams = cauldron.read_teams("TEST-RECON-c1")
+        ids = set(teams["player_id"].astype(int))
+        assert 777001 in ids
+        assert placeholder_id not in ids
 
-    overrides = velo_board.read_overrides(SEASON)
-    ov_ids = set(overrides["pitcher_id"].astype(int))
-    assert 777001 in ov_ids
-    assert placeholder_id not in ov_ids
+        overrides = velo_board.read_overrides(SEASON)
+        ov_ids = set(overrides["pitcher_id"].astype(int))
+        assert 777001 in ov_ids
+        assert placeholder_id not in ov_ids
 
-    again = LR.reconcile_ids(SEASON)
-    assert again == 0  # idempotent -- nothing left under the placeholder id
+        again = LR.reconcile_ids(SEASON)
+        assert again == 0  # idempotent -- nothing left under the placeholder id
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM cauldron_teams WHERE cycle_id='TEST-RECON-c1' "
+                            "AND player_id IN (:p1, :p2)"), {"p1": placeholder_id, "p2": 777001})
+            c.execute(text("DELETE FROM velo_board_overrides WHERE season_label=:s "
+                            "AND pitcher_id IN (:p1, :p2)"),
+                      {"s": SEASON, "p1": placeholder_id, "p2": 777001})
 
 
 def test_reconcile_ids_survives_a_collision_and_still_migrates_other_pitchers(monkeypatch):
@@ -167,26 +177,77 @@ def test_reconcile_ids_survives_a_collision_and_still_migrates_other_pitchers(mo
     placeholder_clean = -9402
     cycle = "TEST-RECON-c2"
 
-    # Colliding pitcher: a row already exists under the REAL id (more current
-    # state -- it should win), plus a stale placeholder row that must be
-    # dropped rather than migrated on top of it.
-    cauldron.set_team(777011, cycle, "Team 2")
-    cauldron.set_team(placeholder_collide, cycle, "Team 1")
-    # Non-colliding pitcher: only a placeholder row exists -- must still
-    # migrate cleanly even though it's processed in the same call as the
-    # collision above.
-    cauldron.set_team(placeholder_clean, cycle, "Team 3")
+    try:
+        # Colliding pitcher: a row already exists under the REAL id (more current
+        # state -- it should win), plus a stale placeholder row that must be
+        # dropped rather than migrated on top of it.
+        cauldron.set_team(777011, cycle, "Team 2")
+        cauldron.set_team(placeholder_collide, cycle, "Team 1")
+        # Non-colliding pitcher: only a placeholder row exists -- must still
+        # migrate cleanly even though it's processed in the same call as the
+        # collision above.
+        cauldron.set_team(placeholder_clean, cycle, "Team 3")
 
-    migrated = LR.reconcile_ids(SEASON)  # must not raise
-    assert migrated == 1  # only the clean pitcher's cauldron_teams row counts
+        migrated = LR.reconcile_ids(SEASON)  # must not raise
+        assert migrated == 1  # only the clean pitcher's cauldron_teams row counts
 
-    teams = cauldron.read_teams(cycle)
-    by_id = {int(pid): team for pid, team in zip(teams["player_id"], teams["team"])}
+        teams = cauldron.read_teams(cycle)
+        by_id = {int(pid): team for pid, team in zip(teams["player_id"], teams["team"])}
 
-    # Real-id row for the colliding pitcher is untouched; its placeholder is gone.
-    assert by_id.get(777011) == "Team 2"
-    assert placeholder_collide not in by_id
+        # Real-id row for the colliding pitcher is untouched; its placeholder is gone.
+        assert by_id.get(777011) == "Team 2"
+        assert placeholder_collide not in by_id
 
-    # Non-colliding pitcher migrated to its real id.
-    assert by_id.get(777012) == "Team 3"
-    assert placeholder_clean not in by_id
+        # Non-colliding pitcher migrated to its real id.
+        assert by_id.get(777012) == "Team 3"
+        assert placeholder_clean not in by_id
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM cauldron_teams WHERE cycle_id=:cy "
+                            "AND player_id IN (:p1, :p2, :p3, :p4)"),
+                      {"cy": cycle, "p1": placeholder_collide, "p2": placeholder_clean,
+                       "p3": 777011, "p4": 777012})
+
+
+def test_reconcile_ids_does_not_self_migrate_its_own_unioned_placeholder(monkeypatch):
+    """`real = pitching_caps.lmu_pitchers(season_label)` is an UNSCOPED call
+    (no start/end), so per lmu_pitchers's own union logic it includes
+    placeholder rows too -- simulate that here by having the monkeypatched
+    lmu_pitchers return ONLY the placeholder's own negative id under its own
+    name (exactly what an unscoped/unioned call would incorrectly hand back
+    pre-fix). Without the `real["PitcherId"] > 0` filter, this pitcher would
+    match itself in real_by_name and reconcile_ids would attempt a
+    self-referential no-op UPDATE ... SET col = -13 WHERE col = -13 -- fixed
+    by never even reaching the UPDATE for this pitcher (real_by_name has no
+    entry for it once positive-only filtering is applied)."""
+    from app.data import cauldron
+    cauldron.ensure_tables()
+
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9501, "first_name": "Selfmatch", "last_name": "Placeholder",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    # Simulate an unscoped lmu_pitchers call returning only this placeholder's
+    # own negative id under its own name (as the union would, pre-fix).
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [-9501], "Pitcher": ["Placeholder, Selfmatch"]}))
+
+    placeholder_id = -9501
+    cycle = "TEST-RECON-c3"
+    try:
+        cauldron.set_team(placeholder_id, cycle, "Team 1")
+
+        migrated = LR.reconcile_ids(SEASON)
+        assert migrated == 0  # never reached the UPDATE for this pitcher
+
+        teams = cauldron.read_teams(cycle)
+        ids = set(teams["player_id"].astype(int))
+        assert placeholder_id in ids  # untouched -- no self-referential update ran
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM cauldron_teams WHERE cycle_id=:cy AND player_id=:p"),
+                      {"cy": cycle, "p": placeholder_id})
