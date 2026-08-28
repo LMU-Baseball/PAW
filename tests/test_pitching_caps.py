@@ -224,6 +224,45 @@ def test_lmu_pitchers_ranged_call_excludes_roster_placeholders(monkeypatch):
     cache.clear_all()
 
 
+def test_lmu_pitchers_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY (as bullpen_landing-style callers do) must behave
+    # identically to no start/end at all -- placeholders still included.
+    from app.data import lmu_roster, cache, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9003, "first_name": "Test", "last_name": "Placeholder3",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = pitching_caps.lmu_pitchers("1899/1900", start=s, end=e)
+    assert (df["PitcherId"] == -9003).any()
+    cache.clear_all()
+
+
+def test_pitcher_name_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so pitcher_name
+    # must resolve via lmu_roster FIRST, not fall through to "Pitcher -N".
+    from app.data import lmu_roster
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Placeholder4"}]))
+    assert pitching_caps.pitcher_name(-9004) == "Test Placeholder4"
+
+
+def test_pitcher_name_falls_through_to_games_for_real_id(monkeypatch):
+    # A real (non-negative) id must never be short-circuited by lmu_roster.
+    from app.data import lmu_roster
+    called = {"query_df": False}
+
+    def fake_query_df(sql, params=None):
+        called["query_df"] = True
+        return pd.DataFrame(columns=["first_name", "last_name"])
+    monkeypatch.setattr(lmu_roster, "query_df", fake_query_df)
+    name = pitching_caps.pitcher_name(RAW_PID)
+    assert name != f"Pitcher {RAW_PID}"
+    assert not called["query_df"]  # placeholder_name short-circuits on pid >= 0
+
+
 def test_lmu_pitchers_dedupes_placeholder_matching_real_row_by_name(monkeypatch):
     from app.data import lmu_roster, cache
     cache.clear_all()

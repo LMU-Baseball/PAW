@@ -361,7 +361,14 @@ def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
 def pitcher_name(pitcher_id) -> str:
     """"First Last", matching pitching.pitcher_name's format exactly (built
     from tm_player there; derived here by splitting GAMES.Pitcher's
-    "Last, First")."""
+    "Last, First"). A negative placeholder id has zero GAMES rows, so check
+    lmu_roster FIRST -- falling through to GAMES only for a real id (or an
+    id lmu_roster no longer recognizes)."""
+    from app.data import lmu_roster
+    ph = lmu_roster.placeholder_name(pitcher_id)
+    if ph is not None:
+        last, first = (p.strip() for p in ph.split(",", 1))
+        return f"{first} {last}".strip()
     df = query_df(
         "SELECT Pitcher FROM GAMES WHERE PitcherId = :p LIMIT 1",
         {"p": int(pitcher_id)},

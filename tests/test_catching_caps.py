@@ -155,6 +155,45 @@ def test_lmu_catchers_ranged_call_excludes_roster_placeholders(monkeypatch):
     cache.clear_all()
 
 
+def test_lmu_catchers_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY must behave identically to no start/end at all --
+    # placeholders still included.
+    from app.data import lmu_roster, cache, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9204, "first_name": "Test", "last_name": "Backstop3",
+         "class_year": "FR", "position": "C"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = catching_caps.lmu_catchers("1899/1900", start=s, end=e)
+    assert (df["CatcherId"] == -9204).any()
+    cache.clear_all()
+
+
+def test_catcher_name_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so catcher_name
+    # must resolve via lmu_roster FIRST, not fall through to the raw id.
+    from app.data import lmu_roster
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Backstop4"}]))
+    assert catching_caps.catcher_name(-9205) == "Backstop4, Test"
+
+
+def test_catcher_name_falls_through_to_games_for_real_id(monkeypatch):
+    # A real (non-negative) id must never be short-circuited by lmu_roster.
+    from app.data import lmu_roster
+    called = {"query_df": False}
+
+    def fake_query_df(sql, params=None):
+        called["query_df"] = True
+        return pd.DataFrame(columns=["first_name", "last_name"])
+    monkeypatch.setattr(lmu_roster, "query_df", fake_query_df)
+    name = catching_caps.catcher_name(RAW_CID)
+    assert name != str(RAW_CID)
+    assert not called["query_df"]  # placeholder_name short-circuits on cid >= 0
+
+
 def test_lmu_catchers_all_have_numeric_game_id_rows():
     # No-ghost property, as a single SQL set-membership check rather than N
     # per-id queries: every id lmu_catchers lists must have at least one

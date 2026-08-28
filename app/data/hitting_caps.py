@@ -321,6 +321,12 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
 def player_profile(batter_id):
     blank = {"name": "", "bats": "", "class_year": "", "position": "",
              "photo": "", "jersey": ""}
+    from app.data import lmu_roster
+    ph = lmu_roster.placeholder_profile(batter_id)
+    if ph is not None:
+        return {"name": f"{ph['first_name']} {ph['last_name']}", "bats": "",
+                "class_year": ph["class_year"] or "", "position": ph["position"] or "",
+                "photo": "", "jersey": ""}
     df = query_df(
         "SELECT Batter, BatterSide FROM GAMES WHERE BatterId = :b "
         "ORDER BY Date DESC LIMIT 1", {"b": int(batter_id)})

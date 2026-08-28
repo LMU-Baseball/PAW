@@ -88,6 +88,47 @@ def load_roster(season_label: str) -> pd.DataFrame:
     )
 
 
+def placeholder_name(player_id) -> str | None:
+    """"Last, First" for a negative placeholder id (-roster_id), or None if
+    `player_id` is a real (non-negative) Trackman id, or the roster row no
+    longer exists. Callers that resolve a display name from GAMES/BULLPEN
+    (which has zero rows for a placeholder) should check this FIRST."""
+    try:
+        pid = int(player_id)
+    except (TypeError, ValueError):
+        return None
+    if pid >= 0:
+        return None
+    ensure_table()
+    df = query_df(
+        f"SELECT first_name, last_name FROM {TABLE} WHERE roster_id = :rid",
+        {"rid": -pid})
+    if df.empty:
+        return None
+    r = df.iloc[0]
+    return f"{r['last_name']}, {r['first_name']}"
+
+
+def placeholder_profile(player_id) -> dict | None:
+    """{first_name, last_name, class_year, position} for a negative
+    placeholder id, or None if not a placeholder / not found. For
+    hitting_caps.player_profile's use -- unlike placeholder_name, callers
+    here want the structured fields, not a formatted name string."""
+    try:
+        pid = int(player_id)
+    except (TypeError, ValueError):
+        return None
+    if pid >= 0:
+        return None
+    ensure_table()
+    df = query_df(
+        f"SELECT first_name, last_name, class_year, position FROM {TABLE} "
+        f"WHERE roster_id = :rid", {"rid": -pid})
+    if df.empty:
+        return None
+    return df.iloc[0].to_dict()
+
+
 def upsert_season_roster(season_label: str, players: list[dict], engine=None) -> int:
     """Upsert each {first_name,last_name,class_year,position} dict for
     `season_label`, keyed on (season_label,last_name,first_name). A repeat

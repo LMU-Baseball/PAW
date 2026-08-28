@@ -125,6 +125,29 @@ def test_player_profile_shape():
     assert isinstance(prof["photo"], str) and isinstance(prof["jersey"], str)
 
 
+def test_player_profile_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so player_profile
+    # must resolve via lmu_roster FIRST, not fall through to the blank profile.
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Infielder4",
+          "class_year": "SO", "position": "SS"}]))
+    prof = hitting_caps.player_profile(-9105)
+    assert prof == {"name": "Test Infielder4", "bats": "", "class_year": "SO",
+                     "position": "SS", "photo": "", "jersey": ""}
+    cache.clear_all()
+
+
+def test_player_profile_falls_through_to_games_for_real_id():
+    # A real (non-negative) id must never be short-circuited by lmu_roster --
+    # covered by the existing test_player_profile_shape fixture assertion, but
+    # pinned explicitly here for the negative/positive branch itself.
+    cache.clear_all()
+    prof = hitting_caps.player_profile(WADAS)
+    assert prof["name"]  # real batter -- not a blank/placeholder profile
+
+
 def test_season_qab_rate_is_sane():
     r = hitting_caps.season_qab_rate(WADAS)
     assert r is None or 0.0 <= r <= 1.0
@@ -261,6 +284,22 @@ def test_lmu_hitters_ranged_call_excludes_roster_placeholders(monkeypatch):
     ]))
     df = hitting_caps.lmu_hitters("1899/1900", start="1899-08-01", end="1899-08-02")
     assert not (df["BatterId"] == -9104).any() if not df.empty else True
+    cache.clear_all()
+
+
+def test_lmu_hitters_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY must behave identically to no start/end at all --
+    # placeholders still included.
+    from app.data import lmu_roster, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9106, "first_name": "Test", "last_name": "Infielder5",
+         "class_year": "FR", "position": "SS"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = hitting_caps.lmu_hitters("1899/1900", start=s, end=e)
+    assert (df["BatterId"] == -9106).any()
     cache.clear_all()
 
 

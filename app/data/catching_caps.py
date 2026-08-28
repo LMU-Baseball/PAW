@@ -176,7 +176,13 @@ def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
 def catcher_name(catcher_id) -> str:
     """"Last, First" straight from GAMES.Catcher -- matches
     catching.catcher_name's format exactly (also "Last, First", built from
-    tm_player there), so no reordering is needed (unlike pitcher_name)."""
+    tm_player there), so no reordering is needed (unlike pitcher_name). A
+    negative placeholder id has zero GAMES rows, so check lmu_roster FIRST --
+    it already returns "Last, First", so no reordering needed here either."""
+    from app.data import lmu_roster
+    ph = lmu_roster.placeholder_name(catcher_id)
+    if ph is not None:
+        return ph
     df = query_df(
         "SELECT Catcher FROM GAMES WHERE CatcherId = :c LIMIT 1",
         {"c": int(catcher_id)},
