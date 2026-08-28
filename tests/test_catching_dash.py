@@ -244,7 +244,13 @@ def real_catcher():
 
 def test_catcher_options_coach_live(real_catcher):
     from app.dashboards.catching import selectors
-    opts = selectors.catcher_options(is_coach=True, own_trackman_id=None)
+    # Pinned to the actual latest season with real GAMES data: current_season()
+    # now always resolves to today's calendar season ("2026/2027" as of this
+    # writing), which has zero real Trackman rows yet (only roster
+    # placeholders) -- see tests/test_pitching_caps.py's identical "2025/2026"
+    # pin for the same reason.
+    opts = selectors.catcher_options(is_coach=True, own_trackman_id=None,
+                                      season="2025/2026")
     assert opts and {"label", "value"} <= set(opts[0])
     assert real_catcher in {o["value"] for o in opts}
 

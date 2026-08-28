@@ -346,22 +346,27 @@ def lmu_hitters(season=None, start=None, end=None) -> pd.DataFrame:
     When both `start` and `end` are given, they replace the season's date
     bounds (the coach's date-range dropdown nests inside the season, so this
     narrows the roster to hitters with data in that window -- e.g. the
-    Hitter dropdown refresh on `*-daterange` change).
+    Hitter dropdown refresh on `*-daterange` change) -- but only if that
+    window actually differs from the season's own full bounds. A call that
+    happens to pass the season's own bounds back (e.g. a dashboard's
+    default-range render) behaves identically to no start/end override at all.
 
-    At the season level (no start/end override), also unions in
+    At the season level (no narrowing override), also unions in
     `app.data.lmu_roster` placeholder rows (negative BatterId) for any
     rostered hitter OR catcher with zero GAMES rows yet this season --
     catchers hit too, so they're eligible here in addition to
-    `lmu_catchers`. A ranged call never gets placeholders -- it's explicitly
-    asking "who has DATA in this window", which a data-less placeholder can
-    never answer yes to.
+    `lmu_catchers`. A genuinely narrowed call never gets placeholders --
+    it's explicitly asking "who has DATA in this window", which a data-less
+    placeholder can never answer yes to.
     """
     from app.data import seasons
     season = season or seasons.current_season()
-    s, e = seasons.season_bounds(season)
-    ranged = start is not None and end is not None
-    if ranged:
+    season_s, season_e = seasons.season_bounds(season)
+    if start is not None and end is not None:
         s, e = str(start), str(end)
+    else:
+        s, e = season_s, season_e
+    narrowed = (s, e) != (season_s, season_e)
     df = query_df(
         f"""
         SELECT Batter, BatterId FROM (
@@ -378,7 +383,7 @@ def lmu_hitters(season=None, start=None, end=None) -> pd.DataFrame:
     )
     if not df.empty:
         df["BatterId"] = df["BatterId"].astype(int)
-    if not ranged:
+    if not narrowed:
         from app.data import lmu_roster
         df = lmu_roster.union_with_roster(df, season, ("hitter", "catcher"), "BatterId", "Batter")
     return df

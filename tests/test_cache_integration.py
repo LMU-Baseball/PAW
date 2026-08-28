@@ -32,20 +32,26 @@ def test_sibling_ids_memoized(monkeypatch):
 
 
 def test_season_pitches_cached_and_copied(monkeypatch):
+    # Pinned to the actual latest season with real GAMES data: current_season()
+    # now always resolves to today's calendar season ("2026/2027" as of this
+    # writing), which has zero real Trackman rows yet -- see
+    # tests/test_pitching_caps.py's identical "2025/2026" pin for the same
+    # reason.
+    season = "2025/2026"
     cache.clear_all()
     calls = _query_spy(monkeypatch, HC)
-    a = HC.season_pitches(WADAS)
+    a = HC.season_pitches(WADAS, season=season)
     n1 = len(calls)
     assert n1 > 0 and not a.empty
-    b = HC.season_pitches(WADAS)
+    b = HC.season_pitches(WADAS, season=season)
     assert len(calls) == n1                    # 2nd call: no new queries
     assert a.equals(b)
     # copy-on-hit: mutating a returned frame can't corrupt the cached value
     a.loc[a.index[0], "PitchNo"] = -999
-    c = HC.season_pitches(WADAS)
+    c = HC.season_pitches(WADAS, season=season)
     assert (c["PitchNo"] != -999).all()
     cache.clear_all()
-    HC.season_pitches(WADAS)
+    HC.season_pitches(WADAS, season=season)
     assert len(calls) > n1                      # re-queried after clear
 
 
