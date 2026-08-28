@@ -85,6 +85,30 @@ def test_bullpen_landing_player_sees_all(app_ctx, monkeypatch):
     assert "Other, Guy" in body        # AND every other pitcher
 
 
+def test_bullpen_landing_unions_roster_placeholders(app_ctx, monkeypatch):
+    """Fix 2: BULL.lmu_bullpen_pitchers has no placeholder-union of its own
+    (it's not one of the 3 caps functions Task 3 touched), so bullpen_landing
+    must union placeholders in directly at the route -- otherwise the picker
+    regresses to an empty list whenever the season (now always today's
+    calendar season by default) has zero real BULLPEN rows yet."""
+    monkeypatch.setattr(
+        "app.data.bullpen.lmu_bullpen_pitchers",
+        lambda start=None, end=None: pd.DataFrame(
+            columns=["pitcher_id", "pitcher", "sessions", "last_date"]))
+    monkeypatch.setattr("app.data.bullpen.bullpen_data_max_date", lambda: "2025-04-14")
+    from app.data import lmu_roster
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9801, "first_name": "Test", "last_name": "Bullpenner",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    client = app_ctx.test_client()
+    _login(client, "c@lmu.edu")
+    resp = client.get("/reports/bullpen")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Bullpenner, Test" in body
+
+
 def test_bullpen_landing_scopes_pitcher_list_to_selected_season(app_ctx, monkeypatch):
     """The Season dropdown passes that season's date bounds to the pitcher query,
     and defaults to the current season."""

@@ -172,6 +172,9 @@ def bullpen_landing():
     s_b, e_b = seasons.season_bounds(season)
 
     pitchers = BULL.lmu_bullpen_pitchers(start=s_b, end=e_b)
+    from app.data import lmu_roster
+    pitchers = lmu_roster.union_with_roster(
+        pitchers, season, ("pitcher",), "pitcher_id", "pitcher")
     pid = request.args.get("pitcher_id", type=int)
     sessions = None
     selected = None
