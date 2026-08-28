@@ -19,50 +19,51 @@ this grew out of, see `docs/pipeline-cron-runbook.md`.
 
 | Job | Command | Schedule (UTC) | Mode |
 |---|---|---|---|
-| `games` | `flask pipeline-load --dry-run --since-days 3` | `30 9 * * *` | Dry-run — writes nothing yet. |
+| `games` | `flask pipeline-load --no-dry-run --since-days 3` | `30 9 * * *` | **Live** as of 2026-08-28 — writes to `GAMES`, triggers `precalc.rebuild_all()` on any insert. |
 | `bullpen` | `flask ingest bullpen --no-dry-run` | `0 4 * * *`, `0 16 * * *` | **Live** — writes to `BULLPEN`. |
-| `hittrax` | `flask ingest hittrax --dry-run --limit 20` | `30 9 * * *` | Dry-run — writes nothing yet. |
+| `hittrax` | `flask ingest hittrax --no-dry-run --limit 20` | `30 9 * * *` | **Live** as of 2026-08-28 — writes to `RAW_PRACTICE_CSV`, rebuilds `PRACTICE_SESSIONS`/`PRACTICE_PLAYS`. |
 
 Because `on.schedule` is workflow-level in GitHub Actions, all three crons fire the whole
 workflow; each job carries an `if:` condition on `github.event.schedule` (plus
 `github.event_name == 'workflow_dispatch'`) so only the intended jobs actually run.
 
-## Known issue: HitTrax FTPS connection limit AND `--limit` is not incremental
+## HitTrax FTPS connection limit (still applies) + selection (FIXED 2026-08-28)
 
 The HitTrax FTPS server drops the connection if `flask ingest hittrax` tries to
-walk all ~580 remote files in one run (confirmed via a local pre-flight test:
+walk all ~600 remote files in one run (confirmed via a local pre-flight test:
 fails with `Aborted!`/EOFError with no limit, succeeds with `--limit 5` or
 `--limit 10`). The workflow's `hittrax` job uses `--limit 20` to stay safely inside
-the working range.
+the working range — this constraint is about how many files one FTPS session can
+download, and is unrelated to which files get picked, so it still applies and
+`--limit` should stay conservative regardless of the fix below.
 
-**`--limit N` does NOT mean "the newest N files."** `app/ingest/hittrax.py`'s
-`_list_csv_files` returns filenames from `sorted()` — plain alphabetical order —
-and `extract_load_raw` takes `filenames[:limit]`, an alphabetical *prefix*. HitTrax
-export filenames are `PlaysExport_<timestamp>.CSV` / `SessionExport_<timestamp>.CSV`,
-so alphabetically every `PlaysExport_*` file sorts before every `SessionExport_*`
-file. The FTPS server never deletes old files (currently ~580 files spanning
-2025-11-07 to present, growing daily). That means a fixed `--limit 20` selects the
-same 20 oldest `PlaysExport_*` files on every single run, forever: it will never
-reach a `SessionExport_*` file (so `PRACTICE_SESSIONS` is never fed) and never reach
-a new file, no matter how long the cron runs. A fixed `--limit` on this feed is not
-an incremental "keep pace with new daily exports" mechanism at all — it just
-reprocesses the same oldest files on a loop.
+**RESOLVED: `--limit N` used to mean "the alphabetically-first N files," not
+"the newest N."** `app/ingest/hittrax.py`'s `_list_csv_files` returns filenames
+from `sorted()` — plain alphabetical order — and `extract_load_raw` took
+`filenames[:limit]`, an alphabetical *prefix*. HitTrax export filenames are
+`PlaysExport_<timestamp>.CSV` / `SessionExport_<timestamp>.CSV`, so alphabetically
+every `PlaysExport_*` file sorts before every `SessionExport_*` file. The FTPS
+server never deletes old files (~600 files spanning 2025-11-07 to present, growing
+daily). That meant a fixed `--limit 20` selected the same 20 oldest `PlaysExport_*`
+files on every single run, forever: it would never reach a `SessionExport_*` file
+(so `PRACTICE_SESSIONS` was never fed) and never reach a new file, no matter how
+long the cron ran.
 
-**Do not flip the `hittrax` job to `--no-dry-run` with a fixed `--limit` as it's
-currently structured.** Doing so would produce a permanently green CI job that
-ingests zero new rows, while `transform()` still runs its full destructive
-delete-and-rebuild of `PRACTICE_SESSIONS`/`PRACTICE_PLAYS`/`player_stats_summary`
-from that same stale raw data on every run. That's a silent-staleness trap, not a
-working incremental pipeline — it would look healthy in the Actions tab while
-quietly never ingesting anything new.
+**Fixed in `app/ingest/hittrax.py`'s `extract_load_raw`, live mode only
+(`dry_run=False`):** the file list is now filtered against
+`_already_loaded_files(engine)` (every distinct `source_file` already in
+`RAW_PRACTICE_CSV` — a prior run already fully attempted it; re-processing it
+would insert nothing new anyway thanks to `row_hash` + `INSERT IGNORE`) and
+sorted newest-first by the timestamp embedded in the filename (`_sort_key`,
+interleaving `PlaysExport_*`/`SessionExport_*` correctly by actual export time
+instead of by name) before `--limit` is applied. Every run's `--limit` budget now
+goes toward genuinely new files, newest first, with the historical backlog filling
+in behind that over subsequent daily runs (~30 runs to fully clear the backlog at
+`--limit 20`, since each run also has to pick up that day's ~2 new files first).
+`dry_run=True` deliberately keeps its old behavior (no DB read, no exclusion) —
+see the docstring for why.
 
-Before hittrax can safely go live, the loader needs incremental file selection
-(e.g., newest-first ordering instead of alphabetical, or skip filenames whose
-`row_hash` already exists in `RAW_PRACTICE_CSV`). That's separate follow-up work,
-out of scope for this cron-scheduling round — do not implement it as part of this
-doc/workflow change. In the meantime, the current ~580-file backlog also won't
-clear via the daily cron alone at `--limit 20`; catching it up (or not) is bundled
-into that same follow-up work.
+This was the blocker for flipping `hittrax` to live — see the next section.
 
 ## Required repo secrets
 
@@ -76,24 +77,44 @@ the same source as the local `.env` (never commit them):
 (`MYSQL_PORT`/`TM_SFTP_PORT`/`HT_FTPS_PORT` and `TM_SFTP_DIR` are not set — the loaders
 default the ports to 3306/22/21, and no current loader reads `TM_SFTP_DIR`.)
 
-## Flipping games from dry-run to live
+## `games` flipped to live (2026-08-28)
 
-Once fall data is confirmed flowing (check a dry-run run's log for a nonzero
-`inserted=` count, or `files=` > 0) and you're satisfied with what it logged:
+A scoped dry-run (`--since-days 21`) confirmed the SFTP walk + LMU filter work
+correctly before flipping: `files=9 inserted=0 skipped=0 non_lmu=9` — 9 files
+present in the last 3 weeks of upload folders, all correctly identified as
+non-LMU (other programs' fall data on the shared Trackman SFTP), zero would-be
+LMU inserts. LMU's own fall games hadn't started uploading yet as of that check,
+which is exactly why the flip happened anyway rather than waiting: with the flag
+already live, the very first LMU upload gets picked up automatically on the next
+09:30 UTC run — nobody has to remember to come back and flip it once the season
+starts. The first LIVE run that actually inserts rows will also trigger
+`precalc.rebuild_all()` and bump the cache-invalidation version stamp (per
+`app/ingest/pipeline.py`'s `run_pipeline`).
 
-1. Edit `.github/workflows/pipeline-cron.yml`.
-2. In the `games` job, change `--dry-run` to `--no-dry-run` on the `pipeline-load`
-   line. Leave the job's `if:` condition alone — this flip is about the flag, not the
-   schedule.
-3. Commit and push. No other change needed — the next scheduled or manual run uses
-   the new flag. Note that the first LIVE run that actually inserts rows will also
-   trigger `precalc.rebuild_all()` and bump the cache-invalidation version stamp
-   (per `app/ingest/pipeline.py`'s `run_pipeline`) — this will be the first time
-   that code path runs for real in production, not just locally.
+**To roll back:** edit `.github/workflows/pipeline-cron.yml`, change
+`--no-dry-run` back to `--dry-run` on the `games` job's `pipeline-load` line,
+commit and push.
 
-`hittrax` is **not** part of this flip yet — see "Known issue: HitTrax FTPS
-connection limit AND `--limit` is not incremental" above for why it must stay
-`--dry-run` until incremental file selection is built.
+## `hittrax` flipped to live (2026-08-28)
+
+The selection bug that used to block this is fixed (see the section above) — the
+loader now skips files already in `RAW_PRACTICE_CSV` and takes what's left
+newest-first, so a live run makes real progress every day instead of looping on
+the same stale alphabetical prefix. `--limit 20` is unchanged (already proven to
+work over this FTPS connection via the prior dry-run jobs).
+
+Each live run loads up to 20 new raw files (newest first) into
+`RAW_PRACTICE_CSV`, then `transform()` rebuilds `PRACTICE_SESSIONS`/
+`PRACTICE_PLAYS` from the full raw table (atomic — see `transform`'s docstring
+for why `DELETE`, not `TRUNCATE`). Expect the ~600-file backlog to keep clearing
+gradually behind the live edge — at `--limit 20`/day (minus ~2 consumed by that
+day's new export), full catch-up takes several weeks. That's expected, not a
+bug: recent practice data reaches the dashboards on the very next run, and the
+historical backlog fills in behind it.
+
+**To roll back:** edit `.github/workflows/pipeline-cron.yml`, change
+`--no-dry-run` back to `--dry-run` on the `hittrax` job's `ingest hittrax` line,
+commit and push.
 
 ## Changing a schedule
 

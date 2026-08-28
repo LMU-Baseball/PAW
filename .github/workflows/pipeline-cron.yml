@@ -35,10 +35,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      # DRY-RUN ONLY this round (see spec §2 rollout table). Flip to
-      # --no-dry-run once fall data is confirmed flowing and a few dry-run
-      # runs have been reviewed.
-      - run: python -m flask --app run pipeline-load --dry-run --since-days 3
+      # LIVE as of 2026-08-28: a scoped dry-run (--since-days 21) confirmed the
+      # SFTP walk + LMU filter work correctly (files=9, all correctly identified
+      # as non_lmu, inserted=0 -- LMU's own fall games haven't started uploading
+      # yet). Flipping now means the very first upload gets picked up
+      # automatically on the next daily run, with nobody needing to remember to
+      # come back and flip this later. A live run that inserts rows also
+      # triggers precalc.rebuild_all() automatically (app/ingest/pipeline.py).
+      - run: python -m flask --app run pipeline-load --no-dry-run --since-days 3
         env:
           MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
           MYSQL_USER: ${{ secrets.MYSQL_USER }}
@@ -82,14 +86,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      # DRY-RUN ONLY this round (see spec §2 rollout table). Flip to
-      # --no-dry-run once fall data is confirmed flowing and a few dry-run
-      # runs have been reviewed.
-      # NOTE: --limit 20 takes the oldest 20 filenames alphabetically (not the
-      # newest 20) and will never reach new SessionExport files or new daily
-      # uploads — see docs/PIPELINE_CRON.md's "Known issue" section before ever
-      # flipping this job to --no-dry-run.
-      - run: python -m flask --app run ingest hittrax --dry-run --limit 20
+      # LIVE as of 2026-08-28: the selection bug that blocked this is fixed --
+      # extract_load_raw now skips files already in RAW_PRACTICE_CSV and takes
+      # what's left newest-first (see docs/PIPELINE_CRON.md), so a fixed
+      # --limit 20 makes real progress every run instead of looping on the same
+      # stale alphabetical prefix. --limit 20 itself is unchanged (already
+      # proven to work over this FTPS connection via the prior dry-run jobs).
+      - run: python -m flask --app run ingest hittrax --no-dry-run --limit 20
         env:
           MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
           MYSQL_USER: ${{ secrets.MYSQL_USER }}

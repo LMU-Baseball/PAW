@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from app.ingest.hittrax import csv_to_raw_rows, extract_load_raw, row_hash
+from app.ingest.hittrax import csv_to_raw_rows, extract_load_raw, row_hash, _sort_key
 
 
 def _reject_nonstrict_constants(_):
@@ -194,17 +194,49 @@ class _FakeConn:
         return False
 
 
+class _FakeSelectResult:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSelectConn:
+    def __init__(self, rows: list[dict]):
+        self._rows = rows
+
+    def execute(self, sql):
+        return _FakeSelectResult(self._rows)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 class _FakeEngine:
     """Fake engine reporting a fixed `rowcount` from `execute`, simulating
     MySQL's INSERT IGNORE behavior where duplicate rows (matched row_hash)
-    don't count toward rowcount."""
+    don't count toward rowcount. `already_loaded` seeds what
+    `_already_loaded_files` reads back via `connect()` (empty by default, so
+    existing tests that don't care about skip-already-loaded behavior see no
+    filtering, same as before that feature existed)."""
 
-    def __init__(self, rowcount: int):
+    def __init__(self, rowcount: int, already_loaded: list[str] | None = None):
         self.rowcount = rowcount
         self.calls: list = []
+        self._already_loaded = already_loaded or []
 
     def begin(self):
         return _FakeConn(self.rowcount, self.calls)
+
+    def connect(self):
+        return _FakeSelectConn([{"source_file": f} for f in self._already_loaded])
 
 
 def test_extract_load_raw_not_dry_run_computes_inserted_and_ignored_from_rowcount(fake_ftps):
@@ -252,3 +284,94 @@ def test_extract_load_raw_limit_caps_files_processed(fake_ftps):
     )
     assert result.files == 0
     assert result.inserted == 0
+
+
+# ---- _sort_key: real HitTrax filename shapes ----------------------------
+
+def test_sort_key_interleaves_plays_and_session_chronologically():
+    # A plain alphabetical sort would put every PlaysExport_* name before
+    # every SessionExport_* name regardless of date (P < S) -- this is
+    # exactly the bug docs/PIPELINE_CRON.md documents. _sort_key must not
+    # reproduce it.
+    names = [
+        "SessionExport_2026-08-20-08-40-14_UTC.CSV",
+        "PlaysExport_2026-08-21-08-40-09_UTC.CSV",
+        "PlaysExport_2026-08-19-08-40-11_UTC.CSV",
+    ]
+    assert sorted(names, key=_sort_key) == [
+        "PlaysExport_2026-08-19-08-40-11_UTC.CSV",
+        "SessionExport_2026-08-20-08-40-14_UTC.CSV",
+        "PlaysExport_2026-08-21-08-40-09_UTC.CSV",
+    ]
+
+
+def test_sort_key_falls_back_to_filename_for_unexpected_shapes():
+    # No embedded timestamp -> sorts by its own name rather than crashing.
+    assert _sort_key("weird_export.CSV") == "weird_export.CSV"
+
+
+# ---- extract_load_raw: live-mode skip-already-loaded + newest-first -----
+
+@pytest.fixture
+def dated_fake_ftps():
+    names = [
+        "PlaysExport_2026-08-19-08-40-11_UTC.CSV",
+        "PlaysExport_2026-08-20-08-40-09_UTC.CSV",
+        "PlaysExport_2026-08-21-08-40-14_UTC.CSV",
+    ]
+    return _FakeFTPS({n: FIXTURE_BYTES for n in names})
+
+
+def test_extract_load_raw_live_skips_already_loaded_files(dated_fake_ftps):
+    # 08-20 was already fully loaded by a prior run; only 08-19/08-21 remain
+    # candidates, and with limit=1 only the newest of those two is picked.
+    engine = _FakeEngine(rowcount=30, already_loaded=[
+        "PlaysExport_2026-08-20-08-40-09_UTC.CSV",
+    ])
+
+    extract_load_raw(
+        engine=engine,
+        ftps=dated_fake_ftps,
+        ingested_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+        dry_run=False,
+        limit=1,
+    )
+
+    assert dated_fake_ftps.retrbinary_calls == ["PlaysExport_2026-08-21-08-40-14_UTC.CSV"]
+
+
+def test_extract_load_raw_live_processes_newest_first(dated_fake_ftps):
+    engine = _FakeEngine(rowcount=30)
+
+    extract_load_raw(
+        engine=engine,
+        ftps=dated_fake_ftps,
+        ingested_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+        dry_run=False,
+        limit=2,
+    )
+
+    assert dated_fake_ftps.retrbinary_calls == [
+        "PlaysExport_2026-08-21-08-40-14_UTC.CSV",
+        "PlaysExport_2026-08-20-08-40-09_UTC.CSV",
+    ]
+
+
+def test_extract_load_raw_dry_run_does_not_skip_already_loaded(dated_fake_ftps):
+    # dry_run never touches the engine at all (see
+    # test_extract_load_raw_dry_run_writes_nothing), so the skip-already-
+    # loaded exclusion -- which requires a read -- deliberately does not
+    # apply here. It still gets the newest-first ordering, which needs no DB
+    # access.
+    result = extract_load_raw(
+        engine=_EngineMustNotBeCalled(),
+        ftps=dated_fake_ftps,
+        ingested_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+        dry_run=True,
+        limit=2,
+    )
+    assert dated_fake_ftps.retrbinary_calls == [
+        "PlaysExport_2026-08-21-08-40-14_UTC.CSV",
+        "PlaysExport_2026-08-20-08-40-09_UTC.CSV",
+    ]
+    assert result.files == 2

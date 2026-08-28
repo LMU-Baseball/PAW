@@ -108,16 +108,18 @@ def test_intended_schedule_mapping(wf):
         assert actual == slots, f"job {name!r} runs on {sorted(actual)}, expected {sorted(slots)}"
 
 
-def test_hittrax_stays_dry_run(wf):
-    """docs/PIPELINE_CRON.md: hittrax MUST stay --dry-run until incremental file
-    selection is built -- `--limit 20` takes the OLDEST 20 filenames and would
-    never reach new uploads, so a live flip would silently do the wrong thing."""
+def test_hittrax_stays_live(wf):
+    """Flipped live 2026-08-28 (docs/PIPELINE_CRON.md) once `app/ingest/
+    hittrax.py`'s extract_load_raw stopped taking the OLDEST 20 filenames
+    alphabetically (it now skips already-loaded files and takes what's left
+    newest-first -- see tests/test_ingest_hittrax_raw.py). If this ever flips
+    back to --dry-run, it should be a deliberate edit, not a silent revert."""
     steps = wf["jobs"]["hittrax"]["steps"]
     run = " ".join(s.get("run", "") for s in steps)
     assert "ingest hittrax" in run
-    assert "--dry-run" in run and "--no-dry-run" not in run, (
-        "hittrax flipped to live -- see the 'Known issue' section in "
-        "docs/PIPELINE_CRON.md before doing this")
+    assert "--no-dry-run" in run, (
+        "hittrax reverted to dry-run -- if that's deliberate, update this test "
+        "and docs/PIPELINE_CRON.md to match")
 
 
 def test_bullpen_stays_live(wf):
@@ -125,3 +127,15 @@ def test_bullpen_stays_live(wf):
     steps = wf["jobs"]["bullpen"]["steps"]
     run = " ".join(s.get("run", "") for s in steps)
     assert "ingest bullpen" in run and "--no-dry-run" in run
+
+
+def test_games_stays_live(wf):
+    """Flipped live 2026-08-28 (docs/PIPELINE_CRON.md) after a scoped dry-run
+    confirmed the SFTP walk + LMU filter work correctly. If this ever flips
+    back to --dry-run, it should be a deliberate edit, not a silent revert."""
+    steps = wf["jobs"]["games"]["steps"]
+    run = " ".join(s.get("run", "") for s in steps)
+    assert "pipeline-load" in run
+    assert "--no-dry-run" in run, (
+        "games reverted to dry-run -- if that's deliberate, update this test "
+        "and docs/PIPELINE_CRON.md to match")

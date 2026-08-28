@@ -47,6 +47,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 
 import pandas as pd
 from sqlalchemy import text
@@ -116,6 +117,45 @@ def _list_csv_files(ftps) -> list[str]:
     return sorted(n for n in names if n.lower().endswith(".csv"))
 
 
+# Real HitTrax export names are `PlaysExport_YYYY-MM-DD-HH-MM-SS_UTC.CSV` /
+# `SessionExport_YYYY-MM-DD-HH-MM-SS_UTC.CSV` (verified live on the FTPS
+# root, 2026-08-28). The captured group is fixed-width and zero-padded, so
+# sorting on it lexicographically is also sorting it chronologically.
+_TIMESTAMP_RE = re.compile(r"_(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})_UTC\.csv$", re.IGNORECASE)
+
+
+def _sort_key(filename: str) -> str:
+    """Chronological sort key for a HitTrax export filename.
+
+    A plain alphabetical sort of the *filenames* is NOT chronological across
+    both export types: every `PlaysExport_*` name sorts before every
+    `SessionExport_*` name purely because "P" < "S", regardless of date --
+    see docs/PIPELINE_CRON.md's "Known issue" for how that let a fixed
+    `--limit` cron job get stuck reprocessing the same oldest Plays files
+    forever and never reach a Session file. Sorting on the embedded
+    timestamp instead interleaves both types correctly by actual export
+    time. Falls back to the filename itself for anything that doesn't match
+    the expected shape, so one oddly-named file can't crash the loader --
+    it just sorts by its own name instead of jumping the queue.
+    """
+    m = _TIMESTAMP_RE.search(filename)
+    return m.group(1) if m else filename
+
+
+def _already_loaded_files(engine) -> set[str]:
+    """Distinct `source_file` values already in `RAW_PRACTICE_CSV` -- files a
+    prior LIVE run has already fully attempted.
+
+    Read-only, and purely an optimization: `row_hash` + `INSERT IGNORE`
+    already dedupe at the row level, so re-processing a covered file would
+    insert nothing new anyway. Skipping it up front is what makes a fixed
+    `--limit` cron run make forward progress every day instead of spending
+    its whole budget re-downloading/re-parsing files already covered."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT DISTINCT source_file FROM RAW_PRACTICE_CSV")).mappings().all()
+    return {r["source_file"] for r in rows}
+
+
 def _download(ftps, filename: str) -> bytes:
     """Fetch `filename` from the FTPS root into memory via RETR."""
     buf = io.BytesIO()
@@ -153,8 +193,29 @@ def extract_load_raw(
     against the same files inserts nothing new. `dry_run=True` (default)
     never touches `engine` at all -- rows are parsed and counted, but no
     SQL is issued.
+
+    Selection (LIVE mode only, `dry_run=False`): files already represented
+    in `RAW_PRACTICE_CSV` (see `_already_loaded_files`) are excluded, and
+    whatever remains is taken newest-first by the timestamp embedded in the
+    filename (`_sort_key`) before `limit` is applied. This is the fix for
+    the bug described in docs/PIPELINE_CRON.md's "Known issue" section: a
+    plain alphabetical sort always exhausts every `PlaysExport_*` name
+    before reaching a `SessionExport_*` one (so `PRACTICE_SESSIONS` was
+    never fed) and a fixed `--limit` re-selected the same oldest files on
+    every run forever (so new exports were never reached either). Excluding
+    already-loaded files makes every run's `limit` budget count toward
+    genuinely new data; newest-first means the most recent, most useful
+    data lands first, with the historical backlog filling in gradually
+    behind it over subsequent runs. `dry_run=True` deliberately skips this
+    exclusion (it would require an engine read, breaking the "never touches
+    engine" guarantee) -- dry-run stays a lightweight connectivity/parsing
+    smoke test, not a byte-perfect preview of a live run's selection.
     """
     filenames = _list_csv_files(ftps)
+    if not dry_run:
+        already = _already_loaded_files(engine)
+        filenames = [f for f in filenames if f not in already]
+    filenames = sorted(filenames, key=_sort_key, reverse=True)  # newest first
     if limit is not None:
         filenames = filenames[:limit]
 
