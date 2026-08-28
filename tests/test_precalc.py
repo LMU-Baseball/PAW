@@ -49,8 +49,11 @@ def test_rebuild_is_idempotent(rebuilt):
 
 
 def test_read_matches_compute_for_sample(rebuilt):
-    row = precalc.read_hitting_season(WADAS)
-    comp = hitting_caps._compute_season_rollup(WADAS)
+    # WADAS's real GAMES data is in 2025/2026, not necessarily the live
+    # calendar season current_season() now always defaults to -- pin it
+    # explicitly rather than relying on that default.
+    row = precalc.read_hitting_season(WADAS, "2025/2026")
+    comp = hitting_caps._compute_season_rollup(WADAS, "2025/2026")
     for k in ("qab_pct", "ba", "obp", "slg", "pa", "ab", "h",
               "doubles", "triples", "hr", "bb", "so",
               "hard_hit_pct", "popup_pct", "xba"):

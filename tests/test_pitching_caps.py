@@ -133,7 +133,10 @@ def test_lmu_pitchers_all_have_numeric_game_id_rows():
     # Checked as a single SQL set-membership query rather than N per-id round
     # trips (the module no longer exposes a _NUMERIC_GAME_ID_CLAUSE constant,
     # so the numeric REGEXP is inlined here, mirroring test_hitting_caps).
-    ids = set(pitching_caps.lmu_pitchers()["PitcherId"].astype(int))
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    ids = set(pitching_caps.lmu_pitchers("2025/2026")["PitcherId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT PitcherId FROM GAMES "
         "WHERE PitcherTeam = :t AND PitcherId IS NOT NULL "
@@ -159,8 +162,11 @@ def test_games_for_pitcher_has_no_numeric_game_id_guard():
 def test_lmu_pitchers_scopes_by_date():
     # Task 5: the Pitcher dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(pitching_caps.lmu_pitchers(season)["PitcherId"])
     ranged = set(pitching_caps.lmu_pitchers(season, start=str(s), end=str(e))["PitcherId"])
@@ -191,6 +197,88 @@ def test_lmu_pitchers_season_scoped_and_past_seasons_surface():
     assert not g.empty  # past-season outings now surface (were hidden pre-fix)
     # game_id is opaque: string values, not necessarily int-castable
     assert all(isinstance(v, str) for v in g["game_id"])
+
+
+def test_lmu_pitchers_unions_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9001, "first_name": "Test", "last_name": "Placeholder",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900")
+    assert (df["PitcherId"] == -9001).any()
+    assert (df.loc[df["PitcherId"] == -9001, "Pitcher"] == "Placeholder, Test").all()
+    cache.clear_all()
+
+
+def test_lmu_pitchers_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9002, "first_name": "Test", "last_name": "Placeholder2",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["PitcherId"] == -9002).any() if not df.empty else True
+    cache.clear_all()
+
+
+def test_lmu_pitchers_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY (as bullpen_landing-style callers do) must behave
+    # identically to no start/end at all -- placeholders still included.
+    from app.data import lmu_roster, cache, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9003, "first_name": "Test", "last_name": "Placeholder3",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = pitching_caps.lmu_pitchers("1899/1900", start=s, end=e)
+    assert (df["PitcherId"] == -9003).any()
+    cache.clear_all()
+
+
+def test_pitcher_name_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so pitcher_name
+    # must resolve via lmu_roster FIRST, not fall through to "Pitcher -N".
+    from app.data import lmu_roster
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Placeholder4"}]))
+    assert pitching_caps.pitcher_name(-9004) == "Test Placeholder4"
+
+
+def test_pitcher_name_falls_through_to_games_for_real_id(monkeypatch):
+    # A real (non-negative) id must never be short-circuited by lmu_roster.
+    from app.data import lmu_roster
+    called = {"query_df": False}
+
+    def fake_query_df(sql, params=None):
+        called["query_df"] = True
+        return pd.DataFrame(columns=["first_name", "last_name"])
+    monkeypatch.setattr(lmu_roster, "query_df", fake_query_df)
+    name = pitching_caps.pitcher_name(RAW_PID)
+    assert name != f"Pitcher {RAW_PID}"
+    assert not called["query_df"]  # placeholder_name short-circuits on pid >= 0
+
+
+def test_lmu_pitchers_dedupes_placeholder_matching_real_row_by_name(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(pitching_caps, "query_df", lambda sql, params=None: pd.DataFrame(
+        {"PitcherId": [123], "Pitcher": ["Behrens, Adam"]}))
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 1, "first_name": "adam", "last_name": "BEHRENS",
+         "class_year": "SR", "position": "RHP"},
+        {"roster_id": 2, "first_name": "New", "last_name": "Guy",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    df = pitching_caps.lmu_pitchers("1899/1900")
+    assert list(df["PitcherId"]).count(123) == 1
+    assert (df["PitcherId"] == -2).any()
+    assert not (df["PitcherId"] == -1).any()
+    cache.clear_all()
 
 
 def test_report_data_version_present():

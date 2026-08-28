@@ -66,7 +66,10 @@ def test_game_pitches_feeds_plate_discipline_and_zone():
 
 
 def test_season_pitches_non_empty():
-    df = hitting_caps.season_pitches(WADAS)
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    df = hitting_caps.season_pitches(WADAS, season="2025/2026")
     assert not df.empty
     assert "PlateLocSide" in df.columns
 
@@ -122,6 +125,29 @@ def test_player_profile_shape():
     assert isinstance(prof["photo"], str) and isinstance(prof["jersey"], str)
 
 
+def test_player_profile_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so player_profile
+    # must resolve via lmu_roster FIRST, not fall through to the blank profile.
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Infielder4",
+          "class_year": "SO", "position": "SS"}]))
+    prof = hitting_caps.player_profile(-9105)
+    assert prof == {"name": "Test Infielder4", "bats": "", "class_year": "SO",
+                     "position": "SS", "photo": "", "jersey": ""}
+    cache.clear_all()
+
+
+def test_player_profile_falls_through_to_games_for_real_id():
+    # A real (non-negative) id must never be short-circuited by lmu_roster --
+    # covered by the existing test_player_profile_shape fixture assertion, but
+    # pinned explicitly here for the negative/positive branch itself.
+    cache.clear_all()
+    prof = hitting_caps.player_profile(WADAS)
+    assert prof["name"]  # real batter -- not a blank/placeholder profile
+
+
 def test_season_qab_rate_is_sane():
     r = hitting_caps.season_qab_rate(WADAS)
     assert r is None or 0.0 <= r <= 1.0
@@ -171,7 +197,10 @@ def test_sidebar_stats_matches_qab_and_slash():
 def test_lmu_hitters_shape_and_window():
     # Was a *_matches_warehouse superset/sibling parity test. The oracle is
     # gone, so this keeps only the caps-native invariants (all confirmed live):
-    new = hitting_caps.lmu_hitters()
+    # pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
+    new = hitting_caps.lmu_hitters("2025/2026")
 
     # 1. SHAPE: one deduped row per hitter name, canonical int BatterId.
     assert list(new.columns) == ["Batter", "BatterId"]
@@ -194,8 +223,11 @@ def test_lmu_hitters_shape_and_window():
 def test_lmu_hitters_scopes_by_date():
     # Task 5: the Hitter dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(hitting_caps.lmu_hitters(season)["BatterId"])
     ranged = set(hitting_caps.lmu_hitters(season, start=str(s), end=str(e))["BatterId"])
@@ -212,8 +244,10 @@ def test_lmu_hitters_all_have_numeric_game_id_rows():
     # GameIDs would be listed while every numeric-GameID-guarded data function
     # (games_for_batter, season_pitches, etc.) returned empty for them.
     # Checked as a single SQL set-membership query rather than N per-id round
-    # trips.
-    ids = set(hitting_caps.lmu_hitters()["BatterId"].astype(int))
+    # trips. Pinned to "2025/2026" (the actual latest season with real GAMES
+    # data) rather than the default (current_season(), now always today's
+    # calendar season, which has zero real Trackman rows yet).
+    ids = set(hitting_caps.lmu_hitters("2025/2026")["BatterId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT BatterId FROM GAMES "
         "WHERE BatterTeam = :t AND BatterId IS NOT NULL "
@@ -221,6 +255,52 @@ def test_lmu_hitters_all_have_numeric_game_id_rows():
         {"t": hitting_caps.LMU_BATTER_TEAM},
     )["BatterId"].astype(int))
     assert ids <= current_ids
+
+
+def test_lmu_hitters_unions_roster_placeholders_including_catchers(monkeypatch):
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9101, "first_name": "Test", "last_name": "Infielder",
+         "class_year": "FR", "position": "SS"},
+        {"roster_id": 9102, "first_name": "Test", "last_name": "Catcher",
+         "class_year": "SO", "position": "C"},
+        {"roster_id": 9103, "first_name": "Test", "last_name": "Pitcheronly",
+         "class_year": "JR", "position": "RHP"},
+    ]))
+    df = hitting_caps.lmu_hitters("1899/1900")
+    assert (df["BatterId"] == -9101).any()
+    assert (df["BatterId"] == -9102).any()          # catchers also appear here
+    assert not (df["BatterId"] == -9103).any()       # pitcher-only does not
+    cache.clear_all()
+
+
+def test_lmu_hitters_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9104, "first_name": "Test", "last_name": "Infielder2",
+         "class_year": "FR", "position": "SS"},
+    ]))
+    df = hitting_caps.lmu_hitters("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["BatterId"] == -9104).any() if not df.empty else True
+    cache.clear_all()
+
+
+def test_lmu_hitters_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY must behave identically to no start/end at all --
+    # placeholders still included.
+    from app.data import lmu_roster, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9106, "first_name": "Test", "last_name": "Infielder5",
+         "class_year": "FR", "position": "SS"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = hitting_caps.lmu_hitters("1899/1900", start=s, end=e)
+    assert (df["BatterId"] == -9106).any()
+    cache.clear_all()
 
 
 def _first_bip_game(bid):
@@ -328,10 +408,14 @@ def test_last_n_pas_shape():
 def test_compute_season_rollup_matches_current_compute():
     """_compute_season_rollup (Phase 4 rollup source) reproduces the current
     on-the-fly compute exactly, so precalc == compute is guaranteed."""
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet) -- both calls must agree
+    # on the same season for this comparison to mean anything.
     from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts
-    r = hitting_caps._compute_season_rollup(WADAS)
+    r = hitting_caps._compute_season_rollup(WADAS, "2025/2026")
     assert r["batter_id"] == WADAS and r["batter_name"]
-    q = qab_frame(hitting_caps.season_pitches(WADAS))
+    q = qab_frame(hitting_caps.season_pitches(WADAS, season="2025/2026"))
     slash = _slash_from_pas(q)
     counts = _slash_counts(q)
     assert (r["ba"], r["obp"], r["slg"]) == (slash["BA"], slash["OBP"], slash["SLG"])

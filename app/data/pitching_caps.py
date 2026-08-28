@@ -312,16 +312,30 @@ def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
     Mirrors pitching.wh_lmu_pitchers's dedup logic, but over GAMES/PitcherId
     instead of fact_tm_game_pitch/pitcher_id. Season date-bounds (not a
     numeric-GameID filter) do the scoping now, so legacy composite-GameID
-    seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed over
-    the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
+    seasons are listable too. The COUNT(*) DESC dedup tiebreak is computed
+    over the season's rows only. Mirrors hitting_caps.lmu_hitters(season).
 
     When both `start` and `end` are given, they replace the season's date
     bounds (the coach's date-range dropdown nests inside the season, so this
-    narrows the roster to pitchers with data in that window).
+    narrows the roster to pitchers with data in that window) -- but only if
+    that window actually differs from the season's own full bounds. A call
+    that happens to pass the season's own bounds back (e.g. a dashboard's
+    default-range render) behaves identically to no start/end override at all.
+
+    At the season level (no narrowing override), also unions in
+    `app.data.lmu_roster` placeholder rows (negative PitcherId) for any
+    rostered pitcher with zero GAMES rows yet this season. A genuinely
+    narrowed call never gets placeholders -- it's explicitly asking "who has
+    DATA in this window", which a data-less placeholder can never answer yes
+    to.
     """
-    s, e = seasons.season_bounds(season or seasons.current_season())
+    season = season or seasons.current_season()
+    season_s, season_e = seasons.season_bounds(season)
     if start is not None and end is not None:
         s, e = str(start), str(end)
+    else:
+        s, e = season_s, season_e
+    narrowed = (s, e) != (season_s, season_e)
     df = query_df(
         f"""
         SELECT PitcherId, Pitcher FROM (
@@ -338,13 +352,23 @@ def lmu_pitchers(season=None, start=None, end=None) -> pd.DataFrame:
     )
     if not df.empty:
         df["PitcherId"] = df["PitcherId"].astype(int)
+    if not narrowed:
+        from app.data import lmu_roster
+        df = lmu_roster.union_with_roster(df, season, ("pitcher",), "PitcherId", "Pitcher")
     return df
 
 
 def pitcher_name(pitcher_id) -> str:
     """"First Last", matching pitching.pitcher_name's format exactly (built
     from tm_player there; derived here by splitting GAMES.Pitcher's
-    "Last, First")."""
+    "Last, First"). A negative placeholder id has zero GAMES rows, so check
+    lmu_roster FIRST -- falling through to GAMES only for a real id (or an
+    id lmu_roster no longer recognizes)."""
+    from app.data import lmu_roster
+    ph = lmu_roster.placeholder_name(pitcher_id)
+    if ph is not None:
+        last, first = (p.strip() for p in ph.split(",", 1))
+        return f"{first} {last}".strip()
     df = query_df(
         "SELECT Pitcher FROM GAMES WHERE PitcherId = :p LIMIT 1",
         {"p": int(pitcher_id)},

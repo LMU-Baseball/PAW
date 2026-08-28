@@ -19,33 +19,26 @@ def test_available_and_current_live():
     seasons = S.available_seasons()
     assert seasons == sorted(seasons, reverse=True)           # newest first
     assert all(len(s) == 9 and s[4] == "/" for s in seasons)  # 'YYYY/YYYY' labels
-    # current_season() stays GAMES-data-driven (deliberately NOT today's calendar
-    # season unless GAMES actually has rows for it) while available_seasons() now
-    # always additionally includes today's calendar season label -- so current_season()
-    # is always ONE of the available options, but not necessarily the newest-sorted
-    # one anymore (today's label can be newer than the latest season with real data).
+    # current_season() now always returns today's calendar academic-year label
+    # (see test_current_season_now_always_todays_calendar_season), which
+    # available_seasons() also always includes -- so current_season() is
+    # always the newest entry in available_seasons().
     assert S.current_season() in seasons
     assert S.current_season() <= seasons[0]
 
 
-def test_current_season_stays_games_driven_not_todays_calendar_season(monkeypatch):
-    """Regression guard for the _games_seasons() split: current_season() must
-    return the latest season WITH REAL GAMES DATA, never today's calendar
-    season just because available_seasons() now always includes it.
-
-    Mocks GAMES to have rows for an older season ("2024/2025") only -- today's
-    real calendar season (whatever date.today() actually is) has zero GAMES
-    rows here, matching live reality until real Fall-2026 games are played.
-    This must FAIL against the old `current_season() == available_seasons()[0]`
-    implementation: since available_seasons() always includes today's label and
-    it always sorts newest, that old implementation would incorrectly return
-    today's label instead of the older GAMES-backed season."""
+def test_current_season_now_always_todays_calendar_season(monkeypatch):
+    """current_season() now ALWAYS returns today's calendar academic-year
+    label, regardless of what GAMES contains -- the roster-placeholder union
+    (app.data.lmu_roster) means the season view is no longer blank just
+    because GAMES has zero rows for it yet, so the old "only fall back if
+    GAMES is entirely empty" guard is no longer needed."""
     cache.clear_all()
     monkeypatch.setattr(S, "query_df", lambda sql, params=None:
-                         pd.DataFrame({"Date": ["2024-11-01"]}))
+                         pd.DataFrame({"Date": ["2024-11-01"]}))  # GAMES has OLDER data only
     try:
-        assert S.current_season() == "2024/2025"
-        assert S.current_season() != S.season_label_for(date.today().isoformat())
+        assert S.current_season() == S.season_label_for(date.today().isoformat())
+        assert S.current_season() != "2024/2025"
     finally:
         cache.clear_all()
 

@@ -104,8 +104,11 @@ def test_games_for_catcher_has_no_numeric_game_id_guard():
 def test_lmu_catchers_scopes_by_date():
     # Task 5: the Catcher dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).
+    # Pinned to the actual latest season with real GAMES data ("2025/2026")
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s, e = seasons.season_bounds(season)
     full = set(catching_caps.lmu_catchers(season)["CatcherId"])
     ranged = set(catching_caps.lmu_catchers(season, start=str(s), end=str(e))["CatcherId"])
@@ -125,13 +128,82 @@ def test_lmu_catchers_has_no_numeric_game_id_guard_and_is_season_scoped():
     assert "season_bounds" in src
 
 
+def test_lmu_catchers_unions_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9201, "first_name": "Test", "last_name": "Backstop",
+         "class_year": "FR", "position": "C"},
+        {"roster_id": 9202, "first_name": "Test", "last_name": "Infielder3",
+         "class_year": "SO", "position": "SS"},
+    ]))
+    df = catching_caps.lmu_catchers("1899/1900")
+    assert (df["CatcherId"] == -9201).any()
+    assert not (df["CatcherId"] == -9202).any()   # non-catcher position excluded
+    cache.clear_all()
+
+
+def test_lmu_catchers_ranged_call_excludes_roster_placeholders(monkeypatch):
+    from app.data import lmu_roster, cache
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9203, "first_name": "Test", "last_name": "Backstop2",
+         "class_year": "FR", "position": "C"},
+    ]))
+    df = catching_caps.lmu_catchers("1899/1900", start="1899-08-01", end="1899-08-02")
+    assert not (df["CatcherId"] == -9203).any() if not df.empty else True
+    cache.clear_all()
+
+
+def test_lmu_catchers_full_season_bounds_explicit_still_includes_placeholders(monkeypatch):
+    # Pinning the exact bug Fix 2/3's review found: passing the season's own
+    # full bounds EXPLICITLY must behave identically to no start/end at all --
+    # placeholders still included.
+    from app.data import lmu_roster, cache, seasons
+    cache.clear_all()
+    monkeypatch.setattr(lmu_roster, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9204, "first_name": "Test", "last_name": "Backstop3",
+         "class_year": "FR", "position": "C"},
+    ]))
+    s, e = seasons.season_bounds("1899/1900")
+    df = catching_caps.lmu_catchers("1899/1900", start=s, end=e)
+    assert (df["CatcherId"] == -9204).any()
+    cache.clear_all()
+
+
+def test_catcher_name_resolves_placeholder_via_lmu_roster(monkeypatch):
+    # Fix 1: a placeholder id (negative) has zero GAMES rows, so catcher_name
+    # must resolve via lmu_roster FIRST, not fall through to the raw id.
+    from app.data import lmu_roster
+    monkeypatch.setattr(lmu_roster, "query_df", lambda sql, params=None: pd.DataFrame(
+        [{"first_name": "Test", "last_name": "Backstop4"}]))
+    assert catching_caps.catcher_name(-9205) == "Backstop4, Test"
+
+
+def test_catcher_name_falls_through_to_games_for_real_id(monkeypatch):
+    # A real (non-negative) id must never be short-circuited by lmu_roster.
+    from app.data import lmu_roster
+    called = {"query_df": False}
+
+    def fake_query_df(sql, params=None):
+        called["query_df"] = True
+        return pd.DataFrame(columns=["first_name", "last_name"])
+    monkeypatch.setattr(lmu_roster, "query_df", fake_query_df)
+    name = catching_caps.catcher_name(RAW_CID)
+    assert name != str(RAW_CID)
+    assert not called["query_df"]  # placeholder_name short-circuits on cid >= 0
+
+
 def test_lmu_catchers_all_have_numeric_game_id_rows():
     # No-ghost property, as a single SQL set-membership check rather than N
     # per-id queries: every id lmu_catchers lists must have at least one
     # numeric-GameID GAMES row -- the exact universe games_for_catcher/
     # framing_season_tiles can actually serve.
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than the default (current_season(), now always today's calendar
+    # season, which has zero real Trackman rows yet).
     from app.db import query_df
-    ids = set(catching_caps.lmu_catchers()["CatcherId"].astype(int))
+    ids = set(catching_caps.lmu_catchers("2025/2026")["CatcherId"].astype(int))
     current_ids = set(query_df(
         "SELECT DISTINCT CatcherId FROM GAMES "
         "WHERE PitcherTeam = :t AND CatcherId IS NOT NULL "
@@ -282,8 +354,11 @@ def test_framing_tiles_subrange_matches_rollup_over():
     does NOT apply) can't exclude anything here, keeping the two paths'
     universes identical -- exactly what the real date-range picker also
     guarantees (it's bounded to the season)."""
+    # Pinned to "2025/2026" (the actual latest season with real GAMES data)
+    # rather than current_season() (now always today's calendar season, which
+    # has zero real Trackman rows yet).
     from app.data import seasons
-    season = seasons.current_season()
+    season = "2025/2026"
     s_b, e_b = seasons.season_bounds(season)
     g = catching_caps.games_for_catcher(RAW_CID, start=s_b, end=e_b)
     g = g[g["game_date"].astype(str) != ""]

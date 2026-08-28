@@ -71,6 +71,18 @@ def register_cli(server):
         for m in targets:
             click.echo(f"rebuilt {m}: {fns[m](engine)} rows")
 
+    @server.cli.command("roster-reconcile")
+    @click.option("--season", default=None,
+                  help="Season label, e.g. 2026/2027 (default: today's calendar season).")
+    def roster_reconcile(season):
+        """Migrate Cauldron/Velo Board rows from placeholder roster ids to real
+        Trackman ids, for pitchers who now have real data."""
+        from datetime import date
+        from app.data import lmu_roster, seasons
+        season = season or seasons.season_label_for(date.today().isoformat())
+        n = lmu_roster.reconcile_ids(season)
+        click.echo(f"roster-reconcile ({season}): migrated {n} row(s)")
+
     @server.cli.command("pipeline-load")
     @click.option("--dry-run/--no-dry-run", default=True,
                   help="Preview only (default). --no-dry-run writes + rebuilds.")

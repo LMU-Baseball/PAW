@@ -60,23 +60,15 @@ def available_seasons() -> list[str]:
 
 
 def current_season() -> str:
-    """The latest season that has real GAMES data. Falls back to today's academic
-    year only if GAMES is entirely empty.
+    """Today's real calendar academic-year label -- the dropdown default for
+    catching/hitting/pitching (and everything else that defaults off this).
 
-    NOT the Season dropdown's default anywhere anymore (as of 2026-08-26):
-    catching/hitting/pitching/velo_board/cauldron and the bullpen report all
-    default their own initial selection to
-    seasons.season_label_for(date.today().isoformat()) directly at their
-    serve_layout/route call sites, bypassing this function, so a new season
-    shows as the honest-but-empty default from day one instead of a frozen
-    prior-season snapshot. This function still backs the season param's
-    fallback inside hitting_caps/pitching_caps/catching_caps/precalc/reports
-    when a caller doesn't pass an explicit season (e.g. ad-hoc scripts, tests).
-
-    Deliberately reads _games_seasons() directly rather than available_seasons():
-    the latter always includes today's calendar season label (see above), which --
-    since today's label can never be "older" than any GAMES-derived label -- would
-    otherwise always win the max() and silently make this function track today's
-    calendar date instead of real data."""
-    labels = _games_seasons()
-    return max(labels) if labels else season_label_for(date.today().isoformat())
+    Used to prefer the latest season WITH real GAMES data instead, falling
+    back to today's calendar season only if GAMES was entirely empty -- a
+    guard against defaulting onto a blank page before any data existed for
+    the new season. That guard is no longer needed: `app.data.lmu_roster`
+    unions each season's rostered players in as placeholder rows wherever
+    `lmu_pitchers`/`lmu_hitters`/`lmu_catchers` are read, so the current
+    season's view is never actually empty, even on day one before any
+    Trackman data exists for it."""
+    return season_label_for(date.today().isoformat())

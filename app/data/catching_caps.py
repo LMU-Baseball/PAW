@@ -131,12 +131,26 @@ def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
 
     When both `start` and `end` are given, they replace the season's date
     bounds (the coach's date-range dropdown nests inside the season, so this
-    narrows the roster to catchers with data in that window).
+    narrows the roster to catchers with data in that window) -- but only if
+    that window actually differs from the season's own full bounds. A call
+    that happens to pass the season's own bounds back (e.g. a dashboard's
+    default-range render) behaves identically to no start/end override at all.
+
+    At the season level (no narrowing override), also unions in
+    `app.data.lmu_roster` placeholder rows (negative CatcherId) for any
+    rostered catcher with zero GAMES rows yet this season. A genuinely
+    narrowed call never gets placeholders -- it's explicitly asking "who has
+    DATA in this window", which a data-less placeholder can never answer yes
+    to.
     """
     from app.data import seasons
-    s, e = seasons.season_bounds(season or seasons.current_season())
+    season = season or seasons.current_season()
+    season_s, season_e = seasons.season_bounds(season)
     if start is not None and end is not None:
         s, e = str(start), str(end)
+    else:
+        s, e = season_s, season_e
+    narrowed = (s, e) != (season_s, season_e)
     df = query_df(
         f"""
         SELECT CatcherId, Catcher FROM (
@@ -153,13 +167,22 @@ def lmu_catchers(season=None, start=None, end=None) -> pd.DataFrame:
     )
     if not df.empty:
         df["CatcherId"] = df["CatcherId"].astype(int)
+    if not narrowed:
+        from app.data import lmu_roster
+        df = lmu_roster.union_with_roster(df, season, ("catcher",), "CatcherId", "Catcher")
     return df
 
 
 def catcher_name(catcher_id) -> str:
     """"Last, First" straight from GAMES.Catcher -- matches
     catching.catcher_name's format exactly (also "Last, First", built from
-    tm_player there), so no reordering is needed (unlike pitcher_name)."""
+    tm_player there), so no reordering is needed (unlike pitcher_name). A
+    negative placeholder id has zero GAMES rows, so check lmu_roster FIRST --
+    it already returns "Last, First", so no reordering needed here either."""
+    from app.data import lmu_roster
+    ph = lmu_roster.placeholder_name(catcher_id)
+    if ph is not None:
+        return ph
     df = query_df(
         "SELECT Catcher FROM GAMES WHERE CatcherId = :c LIMIT 1",
         {"c": int(catcher_id)},
