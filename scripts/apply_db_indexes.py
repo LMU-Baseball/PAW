@@ -10,6 +10,19 @@ Measured 2026-08-23 (see docs/DATABASE.md):
   GAMES    — 104,764 rows with 12 indexes, but all single-column. A query
              filtering player AND date can only use one of them.
 
+Measured 2026-09-01 (catcher-page speed investigation): the roster query each
+dashboard runs once per season selection (`lmu_catchers`/`lmu_pitchers` in
+app/data/{catching,pitching}_caps.py, `lmu_hitters` in hitting_caps.py) filters
+`WHERE PitcherTeam/BatterTeam = 'LOY_LIO' AND Date BETWEEN ...` — a team code,
+not a player id, so it doesn't benefit from the pitcherid/batterid/catcherid+date
+indexes above. `EXPLAIN` on `lmu_catchers`'s query showed MySQL using the lone
+single-column `ix_games_pitcherteam` index and scanning ~49,939 of the table's
+104,764 rows (`Using where; Using temporary; Using filesort`), measured at
+~1.8-2.0s wall time for that one query alone — the single biggest cost in a
+catcher-page load, and PitcherTeam is shared by both the pitching and catching
+dashboards (a catcher is on the pitching team), so one composite index serves
+both.
+
 TEXT columns need a prefix length. `Date` is stored as TEXT holding ISO
 `YYYY-MM-DD`, so prefix 10 covers the whole date — the same choice the existing
 `ix_games_date` already made.
@@ -40,6 +53,15 @@ INDEXES = [
      "pitching dashboards filter pitcher + date range together"),
     ("GAMES", "ix_games_batterid_date", "BatterId, `Date`(10)",
      "hitting dashboards filter batter + date range together"),
+    ("GAMES", "ix_games_pitcherteam_date", "PitcherTeam(16), `Date`(10)",
+     "pitching_caps.lmu_pitchers + catching_caps.lmu_catchers filter "
+     "PitcherTeam + date range (roster query run once per season pick); "
+     "measured ~49,939-row scan without it. Prefix 16 matches the existing "
+     "single-column ix_games_pitcherteam's own prefix length"),
+    ("GAMES", "ix_games_batterteam_date", "BatterTeam(16), `Date`(10)",
+     "hitting_caps.lmu_hitters has the identical BatterTeam + date-range "
+     "filter shape with no composite index. Prefix 16 matches the existing "
+     "single-column ix_games_batterteam's own prefix length"),
 ]
 
 

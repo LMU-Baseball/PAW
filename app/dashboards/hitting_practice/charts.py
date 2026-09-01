@@ -52,7 +52,12 @@ def pitch_zone_heatmap(df: pd.DataFrame, metric: str = "contact") -> go.Figure:
     fig.update_layout(
         title=f"Pitch Zones — {title} (Catcher's View)",
         xaxis_title="Horizontal (ft)", yaxis_title="Height (ft)",
-        yaxis=dict(scaleanchor="x", scaleratio=1),
+        # constrain="domain" on both axes: keeps a box-zoom drag matching
+        # exactly what was dragged instead of Plotly growing one axis's
+        # range to hold the 1:1 aspect ratio (which is what makes zoom look
+        # recentered on the chart's shape rather than the mouse).
+        xaxis=dict(constrain="domain"),
+        yaxis=dict(scaleanchor="x", scaleratio=1, constrain="domain"),
         height=480, margin=dict(l=40, r=20, t=50, b=40),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
@@ -191,9 +196,9 @@ def spray_distribution_fan(fan_df: pd.DataFrame) -> go.Figure:
                                               color="#1a1a1a")))
     fig.update_layout(
         title="Batted-Ball Distribution", annotations=annotations,
-        xaxis=dict(range=[-340, 340], visible=False),
+        xaxis=dict(range=[-340, 340], visible=False, constrain="domain"),
         yaxis=dict(range=[-20, P.FAN_DISPLAY_MAX + 20], visible=False,
-                   scaleanchor="x", scaleratio=1),
+                   scaleanchor="x", scaleratio=1, constrain="domain"),
         height=460, margin=dict(l=10, r=10, t=50, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
@@ -274,8 +279,9 @@ def spray_chart_fig(spray_df: pd.DataFrame) -> go.Figure:
                 fig.add_trace(go.Scatter(**trace))
     fig.update_layout(
         title="Spray Chart", showlegend=False,
-        xaxis=dict(range=[-340, 340], visible=False),
-        yaxis=dict(range=[-20, L + 20], visible=False, scaleanchor="x", scaleratio=1),
+        xaxis=dict(range=[-340, 340], visible=False, constrain="domain"),
+        yaxis=dict(range=[-20, L + 20], visible=False, scaleanchor="x", scaleratio=1,
+                   constrain="domain"),
         height=460, margin=dict(l=10, r=10, t=50, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))

@@ -70,10 +70,17 @@ def _add_zone_shapes(fig, *, row=None, col=None):
 
 def _style_axes(fig, *, row=None, col=None):
     kw = {"row": row, "col": col} if row is not None else {}
+    # constrain="domain" on both axes: Plotly's default (constrain="range")
+    # resolves a box-zoom that breaks the locked aspect ratio by silently
+    # growing one axis's range, which is what makes drag-zoom look recentered
+    # on the plot's shape instead of the dragged box. "domain" instead pads
+    # the plot's own margins, so the zoomed range always matches exactly what
+    # was dragged under the mouse.
     fig.update_xaxes(range=list(_XRANGE), showgrid=False, zeroline=False,
-                     visible=False, **kw)
+                     visible=False, constrain="domain", **kw)
     fig.update_yaxes(range=list(_YRANGE), showgrid=False, zeroline=False,
-                     visible=False, scaleanchor="x", scaleratio=1, **kw)
+                     visible=False, scaleanchor="x", scaleratio=1,
+                     constrain="domain", **kw)
 
 
 def zone_scatter(df: pd.DataFrame, title: str = "") -> go.Figure:
@@ -225,18 +232,22 @@ def radial_fig(bip_df) -> go.Figure:
         fig.add_trace(go.Scatter(x=[0, np.cos(a)], y=[0, np.sin(a)], mode="lines",
                                  line=dict(color=color, width=1), hoverinfo="skip",
                                  showlegend=False))
+    has_result = "PlayResult" in d.columns
     for ht, sub in d.groupby("hit_type"):
+        cols = ["exit_speed", "la"] + (["PlayResult"] if has_result else [])
+        result_line = "<br>%{customdata[2]}" if has_result else ""
         fig.add_trace(go.Scatter(
             x=sub["rx"], y=sub["ry"], mode="markers", name=str(ht), showlegend=False,
             marker=dict(size=9, color=_HIT_COLORS.get(str(ht), "#888"),
                         line=dict(width=0.5, color="#555")),
-            customdata=sub[["exit_speed", "la"]].to_numpy(),
+            customdata=sub[cols].fillna("").to_numpy(),
             hovertemplate=(f"{ht}<br>EV: %{{customdata[0]:.1f}} mph"
-                           "<br>LA: %{customdata[1]:.0f}°<extra></extra>")))
+                           f"<br>LA: %{{customdata[1]:.0f}}°{result_line}<extra></extra>")))
     fig.update_layout(
         title="Launch Angle / Exit Velo", height=440, margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(range=[0, 1.15], visible=False),
-        yaxis=dict(range=[-1.15, 1.15], visible=False, scaleanchor="x", scaleratio=1),
+        xaxis=dict(range=[0, 1.15], visible=False, constrain="domain"),
+        yaxis=dict(range=[-1.15, 1.15], visible=False, scaleanchor="x", scaleratio=1,
+                   constrain="domain"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
     return fig
@@ -263,18 +274,22 @@ def spray_fig(bip_df) -> go.Figure:
     b = 63.6
     fig.add_shape(type="path", path=f"M 0,0 L {b},{b} L 0,{2 * b} L {-b},{b} Z",
                   line=dict(color="#bbb", width=1), fillcolor="rgba(0,0,0,0)")
+    has_result = "PlayResult" in d.columns
     for ht, sub in d.groupby("hit_type"):
+        cols = ["distance", "exit_speed"] + (["PlayResult"] if has_result else [])
+        result_line = "<br>%{customdata[2]}" if has_result else ""
         fig.add_trace(go.Scatter(
             x=sub["x"], y=sub["y"], mode="markers", name=str(ht), showlegend=False,
             marker=dict(size=9, color=_HIT_COLORS.get(str(ht), "#888"),
                         line=dict(width=0.5, color="#555")),
-            customdata=sub[["distance", "exit_speed"]].to_numpy(),
+            customdata=sub[cols].fillna("").to_numpy(),
             hovertemplate=(f"{ht}<br>Dist: %{{customdata[0]:.0f}} ft"
-                           "<br>EV: %{customdata[1]:.1f} mph<extra></extra>")))
+                           f"<br>EV: %{{customdata[1]:.1f}} mph{result_line}<extra></extra>")))
     fig.update_layout(
         title="Spray Chart", height=440, margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(range=[-300, 300], visible=False),
-        yaxis=dict(range=[-20, 430], visible=False, scaleanchor="x", scaleratio=1),
+        xaxis=dict(range=[-300, 300], visible=False, constrain="domain"),
+        yaxis=dict(range=[-20, 430], visible=False, scaleanchor="x", scaleratio=1,
+                   constrain="domain"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
     return fig

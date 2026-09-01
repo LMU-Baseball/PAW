@@ -45,8 +45,12 @@ def _zone_frame(fig, row=None, col=None):
 
 
 def _base_axes(fig, row=None, col=None):
-    fig.update_xaxes(range=[-40, 40], visible=False, row=row, col=col)
-    fig.update_yaxes(range=[-25, 25], visible=False, row=row, col=col)
+    # constrain="domain" on both axes so a box-zoom drag always matches
+    # exactly what was dragged instead of Plotly silently growing one axis's
+    # range to hold the scaleanchor'd aspect ratio (that's what makes zoom
+    # look recentered on the zone's shape rather than the mouse).
+    fig.update_xaxes(range=[-40, 40], visible=False, constrain="domain", row=row, col=col)
+    fig.update_yaxes(range=[-25, 25], visible=False, constrain="domain", row=row, col=col)
 
 
 def _hover_texts(sub: pd.DataFrame) -> list[str]:
@@ -103,7 +107,7 @@ def framing_scatter(df: pd.DataFrame) -> go.Figure:
         d = d[d["plate_loc_side"].notna() & d["plate_loc_height"].notna()]
         _scatter_traces(fig, d)
     _base_axes(fig)
-    fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain")
     fig.update_layout(
         title="Zone Location — Catcher View", showlegend=False,
         margin=dict(l=20, r=20, t=40, b=20), height=460,
@@ -131,7 +135,7 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
         _base_axes(fig, row=r, col=c)
         idx = (r - 1) * ncols + c  # make_subplots axis numbering (row-major)
         fig.update_yaxes(scaleanchor=("x" if idx == 1 else f"x{idx}"),
-                         scaleratio=1, row=r, col=c)
+                         scaleratio=1, constrain="domain", row=r, col=c)
     # Hide any unused trailing cells when len(vals) is odd and n < nrows*ncols
     if vals:
         for j in range(len(vals), nrows * ncols):
@@ -140,7 +144,7 @@ def framing_facets(df: pd.DataFrame, by: str, title: str) -> go.Figure:
             fig.update_yaxes(visible=False, row=r, col=c)
     if not vals:
         _zone_frame(fig, row=1, col=1); _base_axes(fig, row=1, col=1)
-        fig.update_yaxes(scaleanchor="x", scaleratio=1, row=1, col=1)
+        fig.update_yaxes(scaleanchor="x", scaleratio=1, constrain="domain", row=1, col=1)
     fig.update_layout(
         title=title, showlegend=False, height=360 * nrows, margin=dict(l=10, r=10, t=60, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
@@ -238,8 +242,9 @@ def slaa_location_figure(df: pd.DataFrame, *, lookup=None) -> go.Figure:
         title=dict(text="Strikes Gained vs Expected, by Location (Catcher's View)",
                    subtitle=dict(text=caption)),
         showlegend=False,
-        xaxis=dict(showticklabels=False, title=None),
-        yaxis=dict(showticklabels=False, title=None, scaleanchor="x", scaleratio=1),
+        xaxis=dict(showticklabels=False, title=None, constrain="domain"),
+        yaxis=dict(showticklabels=False, title=None, scaleanchor="x", scaleratio=1,
+                   constrain="domain"),
         height=420, margin=dict(l=10, r=10, t=40, b=10),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),

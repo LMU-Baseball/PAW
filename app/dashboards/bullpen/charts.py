@@ -137,8 +137,13 @@ def movement_fig(df):
             marker=dict(size=13, color="white", line=dict(width=2, color=color_for(pt)))))
     fig.add_hline(y=0, line_color="#ccc"); fig.add_vline(x=0, line_color="#ccc")
     fig.update_layout(title="Movement", xaxis_title="HB (in)", yaxis_title="IVB (in)", **_BASE)
-    fig.update_xaxes(showgrid=True, gridcolor="#eee")
-    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee")
+    # constrain="domain": keeps a box-zoom drag matching exactly what was
+    # dragged (Plotly's default "range" mode instead grows one axis's range
+    # to hold the locked aspect ratio, which is what makes zoom look
+    # recentered on the chart's shape rather than the mouse).
+    fig.update_xaxes(showgrid=True, gridcolor="#eee", constrain="domain")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee",
+                     constrain="domain")
     return fig
 
 
@@ -167,8 +172,9 @@ def release_fig(df):
             marker=dict(size=13, color="white", line=dict(width=2, color=col))))
     fig.update_layout(**_BASE)
     fig.update_layout(title="Release", xaxis_title="Rel side (ft)", yaxis_title="Rel height (ft)")
-    fig.update_xaxes(showgrid=True, gridcolor="#eee")
-    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee")
+    fig.update_xaxes(showgrid=True, gridcolor="#eee", constrain="domain")
+    fig.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=True, gridcolor="#eee",
+                     constrain="domain")
     return fig
 
 
@@ -185,8 +191,9 @@ def location_fig(df):
             customdata=[[str(pt)]] * len(sub),
             hovertemplate="%{customdata[0]}<br>Side: %{x:.2f} · Height: %{y:.2f} ft<extra></extra>"))
     fig.update_layout(title="Location", **_BASE)
-    fig.update_xaxes(range=[-2.5, 2.5], visible=False)
-    fig.update_yaxes(range=[0, 5], visible=False, scaleanchor="x", scaleratio=1)
+    fig.update_xaxes(range=[-2.5, 2.5], visible=False, constrain="domain")
+    fig.update_yaxes(range=[0, 5], visible=False, scaleanchor="x", scaleratio=1,
+                     constrain="domain")
     return fig
 
 

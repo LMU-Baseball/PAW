@@ -465,9 +465,14 @@ def fig_release(df: pd.DataFrame) -> go.Figure:
     if not np.isfinite(span) or span <= 0:
         span = _RELEASE_X_FALLBACK
     half = span + _RELEASE_X_PAD
-    fig.update_xaxes(title="Release Side (ft)", range=[-half, half], zeroline=True)
+    # constrain="domain" on both axes: keeps a box-zoom drag matching exactly
+    # what was dragged. Plotly's default "range" mode instead grows one
+    # axis's range to hold the locked 1:1 aspect ratio, which is what makes
+    # zoom look recentered on the chart's shape rather than the mouse.
+    fig.update_xaxes(title="Release Side (ft)", range=[-half, half], zeroline=True,
+                     constrain="domain")
     fig.update_yaxes(title="Release Height (ft)", zeroline=True,
-                     scaleanchor="x", scaleratio=1)
+                     scaleanchor="x", scaleratio=1, constrain="domain")
     return _base_layout(fig, "Release Point")
 
 
@@ -496,8 +501,9 @@ def fig_location(df: pd.DataFrame) -> go.Figure:
             marker=dict(color=pitch_color(pt), size=9), customdata=sub[["_res"]],
             hovertemplate=f"{pt}<br>Result: %{{customdata[0]}}<extra></extra>"))
     _add_zone(fig)
-    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
-    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5], constrain="domain")
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x",
+                     constrain="domain")
     return _base_layout(fig, "Pitch Location (Catcher View)")
 
 
@@ -512,8 +518,9 @@ def fig_location_split(df: pd.DataFrame) -> go.Figure:
             marker=dict(color=pitch_color(pt), size=9), customdata=sub[["_res"]],
             hovertemplate=f"{pt}<br>Result: %{{customdata[0]}}<extra></extra>"))
     _add_zone(fig)
-    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
-    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5], constrain="domain")
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x",
+                     constrain="domain")
     return _base_layout(fig, "Location by Pitch Type")
 
 
@@ -532,8 +539,9 @@ def _heatmap(d: pd.DataFrame, title: str) -> go.Figure:
         colorscale="YlOrRd", showscale=False, ncontours=12,
     ))
     _add_zone(fig)
-    fig.update_xaxes(title="", range=[-2.5, 2.5], showticklabels=False)
-    fig.update_yaxes(title="", range=[0, 5], scaleanchor="x", showticklabels=False)
+    fig.update_xaxes(title="", range=[-2.5, 2.5], showticklabels=False, constrain="domain")
+    fig.update_yaxes(title="", range=[0, 5], scaleanchor="x", showticklabels=False,
+                     constrain="domain")
     out = _base_layout(fig, title); out.update_layout(showlegend=False)
     return out
 
@@ -671,8 +679,9 @@ def fig_heatmap(df: pd.DataFrame) -> go.Figure:
             contours=dict(coloring="fill"), line=dict(width=0),
             showscale=False, ncontours=18, hoverinfo="skip"))
     _add_zone(fig)
-    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5])
-    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x")
+    fig.update_xaxes(title="Plate Side (ft)", range=[-2.5, 2.5], constrain="domain")
+    fig.update_yaxes(title="Plate Height (ft)", range=[0, 5], scaleanchor="x",
+                     constrain="domain")
     _base_layout(fig, "Location Heatmap (Catcher View)")
     fig.update_layout(showlegend=False)
     return fig

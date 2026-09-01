@@ -35,8 +35,15 @@ def register_callbacks(dash_app) -> None:
         show = {"display": "block" if preset == "custom" else "none", "marginTop": "6px"}
         if preset == "custom":
             return no_update, no_update, show
-        min_d, max_d = P.date_bounds()
-        anchor = str(max_d)
+        min_d, _ = P.date_bounds()
+        # Anchor rolling-window presets (Past Week/Month/.../Year) on TODAY's
+        # real calendar date, not the latest ingested session in the whole
+        # table -- anchoring on the latter silently narrows "Past Year" to
+        # end at whenever HitTrax was last ingested for ANY player, which
+        # can cut off a player whose own last session predates that by more
+        # than a year even though it's genuinely within the last 365 days.
+        # Matches the season-default anchor already used in layout.py.
+        anchor = str(date.today())
         s, e = dr.preset_range(preset, anchor)
         s = max(str(s), str(min_d))
         return s, str(e), show

@@ -35,7 +35,12 @@ def stat_table(df: pd.DataFrame, *, id: str | None = None,
         id=id or "stat-table",
         columns=cols,
         data=d.to_dict("records"),
-        style_table={"overflowX": "auto"},
+        # width: fit-content -- without it the table stretches to its flex/grid
+        # parent's full width, which on a wide monitor spreads a handful of
+        # columns across the whole screen with huge gaps between them. Sizing
+        # to content keeps cell padding tight regardless of viewport; a phone
+        # (parent already narrower than the content width) is unaffected.
+        style_table={"overflowX": "auto", "width": "fit-content", "maxWidth": "100%"},
         style_as_list_view=True,
         style_header={"backgroundColor": "#9A0021", "color": "white",
                       "fontWeight": "bold", "textAlign": "center"},
