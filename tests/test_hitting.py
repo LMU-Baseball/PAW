@@ -219,3 +219,131 @@ def test_slash_counts_matches_slash_from_pas_and_breaks_out_extra_bases():
     assert c["bb"] == 1 and c["so"] == 1 and c["tb"] == 1 + 4 + 2
     # _slash_from_pas display is unchanged (delegates to the same counts).
     assert hitting._slash_from_pas(pas) == {"BA": ".600", "SLG": "1.400", "OBP": ".667"}
+
+
+def test_pa_outcome_classifies_every_branch():
+    row = lambda **kw: pd.Series({"KorBB": None, "PlayResult": None, "PitchCall": None, **kw})
+    assert hitting._pa_outcome(row(KorBB="Walk")) == "bb"
+    assert hitting._pa_outcome(row(PitchCall="HitByPitch")) == "hbp"
+    assert hitting._pa_outcome(row(PlayResult="SacFly")) == "sf"
+    assert hitting._pa_outcome(row(PlayResult="Single", PitchCall="InPlay")) == "hit"
+    assert hitting._pa_outcome(row(PlayResult="Out", PitchCall="InPlay")) == "ab_out"
+    assert hitting._pa_outcome(row(KorBB="Strikeout", PlayResult="Out")) == "ab_out"
+    assert hitting._pa_outcome(row(PlayResult="Undefined", PitchCall="BallCalled")) == "other"
+
+
+def test_zone9_cell_buckets_and_bounds():
+    # center of the zone -> middle cell
+    assert hitting.zone9_cell(0.0, 2.5) == (1, 1)
+    # outside the rulebook box (either axis) -> None
+    assert hitting.zone9_cell(2.0, 2.5) is None
+    assert hitting.zone9_cell(0.0, 5.0) is None
+    # missing location -> None, never raises
+    assert hitting.zone9_cell(None, 2.5) is None
+    assert hitting.zone9_cell(0.0, None) is None
+    assert hitting.zone9_cell(float("nan"), 2.5) is None
+    # ascending col index must track ascending on-screen x (PlateLocSide*-12):
+    # a very positive PlateLocSide maps to negative x -> the leftmost column.
+    assert hitting.zone9_cell(0.7, 2.5)[1] == 0
+    assert hitting.zone9_cell(-0.7, 2.5)[1] == 2
+    # ascending row index tracks ascending height (bottom third -> top third).
+    assert hitting.zone9_cell(0.0, 1.5)[0] == 0
+    assert hitting.zone9_cell(0.0, 3.4)[0] == 2
+
+
+def _zf_row(game=1, inning=1, pa=1, pitch_of_pa=1, **kw):
+    base = {"GameID": game, "Inning": inning, "PAofInning": pa, "PitchofPA": pitch_of_pa,
+            "PlateLocSide": 0.0, "PlateLocHeight": 2.5, "PitchCall": "InPlay",
+            "PlayResult": "Single", "KorBB": None, "ExitSpeed": 90.0, "Distance": 300.0,
+            "TaggedPitchType": "Fastball", "PitchCat": "Fastball", "PitcherThrows": "Right"}
+    base.update(kw)
+    return base
+
+
+def test_zone_frequency_grid_ev_and_distance_average_batted_balls_in_cell():
+    df = pd.DataFrame([
+        _zf_row(pa=1, ExitSpeed=90.0, Distance=300.0),
+        _zf_row(pa=2, ExitSpeed=100.0, Distance=320.0),
+        # a take (no contact) at the same location must not count
+        _zf_row(pa=3, PitchCall="BallCalled", PlayResult=None, ExitSpeed=None, Distance=None),
+    ])
+    grid = hitting.zone_frequency_grid(df, metric="ev")
+    cell = grid[1][1]
+    assert cell["n"] == 2 and cell["value"] == pytest.approx(95.0)
+    grid_dist = hitting.zone_frequency_grid(df, metric="distance")
+    assert grid_dist[1][1]["value"] == pytest.approx(310.0)
+
+
+def test_zone_frequency_grid_avg_uses_last_pitch_of_pa_not_pregroup_filter():
+    """A PA that starts with a fastball taken for a strike and ends on an
+    offspeed pitch put in play must be classified (and zone-bucketed) by that
+    FINAL offspeed pitch -- filtering pitch-level rows by pitch_group before
+    finding the last pitch of the PA would corrupt this."""
+    df = pd.DataFrame([
+        _zf_row(pa=1, pitch_of_pa=1, PitchCall="StrikeCalled", PlayResult=None,
+               TaggedPitchType="Fastball", PitchCat="Fastball",
+               PlateLocSide=0.7, PlateLocHeight=1.5),  # earlier fastball, different cell
+        _zf_row(pa=1, pitch_of_pa=2, PitchCall="InPlay", PlayResult="Single",
+               TaggedPitchType="ChangeUp", PitchCat="Offspeed",
+               PlateLocSide=0.0, PlateLocHeight=2.5),  # PA-ending offspeed pitch
+    ])
+    grid = hitting.zone_frequency_grid(df, metric="avg", pitch_group="Offspeed")
+    assert grid[1][1] == {"value": 1.0, "n": 1}
+    # the PA must NOT be credited to the earlier fastball's cell
+    assert grid[0][0]["n"] == 0
+    # and must vanish entirely when filtered to Fastball (the PA ended on offspeed)
+    grid_fb = hitting.zone_frequency_grid(df, metric="avg", pitch_group="Fastball")
+    assert all(c["n"] == 0 for row in grid_fb for c in row)
+
+
+def test_zone_frequency_grid_avg_excludes_non_ab_outcomes():
+    df = pd.DataFrame([
+        _zf_row(pa=1, PitchCall="BallCalled", PlayResult=None, KorBB="Walk"),
+        _zf_row(pa=2, PitchCall="HitByPitch", PlayResult=None),
+        _zf_row(pa=3, PitchCall="InPlay", PlayResult="SacFly"),
+    ])
+    grid = hitting.zone_frequency_grid(df, metric="avg")
+    assert all(c["n"] == 0 for row in grid for c in row)
+
+
+def test_zone_frequency_grid_throws_filter():
+    df = pd.DataFrame([
+        _zf_row(pa=1, PitcherThrows="Right", ExitSpeed=90.0),
+        _zf_row(pa=2, PitcherThrows="Left", ExitSpeed=100.0),
+    ])
+    right_only = hitting.zone_frequency_grid(df, metric="ev", throws="Right")
+    assert right_only[1][1] == {"value": 90.0, "n": 1}
+    left_only = hitting.zone_frequency_grid(df, metric="ev", throws="Left")
+    assert left_only[1][1] == {"value": 100.0, "n": 1}
+
+
+def test_zone_frequency_grid_empty_is_safe():
+    grid = hitting.zone_frequency_grid(pd.DataFrame())
+    assert grid == [[{"value": None, "n": 0} for _ in range(3)] for _ in range(3)]
+    assert hitting.zone_frequency_grid(None) == grid
+
+
+def test_zone_pitch_frequency_grid_counts_every_pitch_regardless_of_contact():
+    """Unlike zone_frequency_grid's ev/distance (contact-only), this counts
+    EVERY pitch with a placeable location -- takes and swinging strikes too."""
+    df = pd.DataFrame([
+        _zf_row(pa=1, PitchCall="BallCalled", PlayResult=None, ExitSpeed=None),
+        _zf_row(pa=1, pitch_of_pa=2, PitchCall="StrikeSwinging", PlayResult=None,
+               ExitSpeed=None),
+        _zf_row(pa=2, PitchCall="InPlay", PlayResult="Single"),
+    ])
+    grid = hitting.zone_pitch_frequency_grid(df)
+    assert grid[1][1] == {"value": 3, "n": 3}
+
+
+def test_zone_pitch_frequency_grid_filters_and_empty():
+    df = pd.DataFrame([
+        _zf_row(pa=1, PitcherThrows="Right", PitchCat="Fastball"),
+        _zf_row(pa=2, PitcherThrows="Left", PitchCat="Offspeed"),
+    ])
+    assert hitting.zone_pitch_frequency_grid(df, throws="Right")[1][1] == {"value": 1, "n": 1}
+    assert hitting.zone_pitch_frequency_grid(df, pitch_group="Offspeed")[1][1] == {
+        "value": 1, "n": 1}
+    empty = hitting.zone_pitch_frequency_grid(pd.DataFrame())
+    assert empty == [[{"value": None, "n": 0} for _ in range(3)] for _ in range(3)]
+    assert hitting.zone_pitch_frequency_grid(None) == empty

@@ -389,40 +389,60 @@ def _fmt_avg(v) -> str:
     return s[1:] if 0 <= v < 1 else s
 
 
+def _pa_outcome(r) -> str:
+    """Classify one qab_frame row (one PA, last pitch) into exactly one of
+    "bb"/"hbp"/"sf"/"hit"/"ab_out"/"other" -- the single source of truth for
+    AB/Hit/BB/HBP/SF, shared by `_slash_counts` (season slash line) and
+    `zone_frequency_grid` (batting-average-by-zone).
+
+    PROVISIONAL definitions (one place to change; confirm with coaches):
+      * Walk = KorBB=='Walk'; HBP = last PitchCall=='HitByPitch';
+        Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
+      * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
+      * AB = a completed PA that is not a walk/HBP/sacrifice ("hit" or
+        "ab_out"); "other" = undefined/incomplete PA, not counted anywhere.
+    """
+    korbb = r.get("KorBB")
+    pr = r.get("PlayResult")
+    pc = r.get("PitchCall")
+    if korbb == "Walk":
+        return "bb"
+    if pc == "HitByPitch":
+        return "hbp"
+    if isinstance(pr, str) and pr.startswith("Sac"):
+        return "sf"
+    if pr in _HITS:
+        return "hit"
+    if pr in _AB_OUTS or korbb == "Strikeout":
+        return "ab_out"
+    return "other"
+
+
 def _slash_counts(pas_df: pd.DataFrame) -> dict:
     """Int counting components behind the slash line, from a one-row-per-PA
     frame (qab_frame output). Single source of truth for the AB/H/BB/HBP/SF
     definitions (so `_slash_from_pas` and the Phase 4 precalc rollup can't
     drift), and additionally breaks out doubles/triples/hr/so and pa.
 
-    PROVISIONAL definitions (one place to change; confirm with coaches):
-      * one row per PA = last pitch of the PA (via qab_frame).
-      * Walk = KorBB=='Walk'; HBP = last PitchCall=='HitByPitch';
-        Sacrifice = PlayResult starts with 'Sac' (excluded from AB).
-      * Hit = PlayResult in {Single,Double,Triple,HomeRun}.
-      * AB = a completed PA that is not a walk/HBP/sacrifice.
-      * SO = KorBB=='Strikeout'.
+    Per-row classification lives in `_pa_outcome`; this just tallies it plus
+    the SO/total-bases/extra-base breakdowns.
     """
     c = {"pa": int(len(pas_df)), "ab": 0, "h": 0, "tb": 0, "bb": 0, "hbp": 0,
          "sf": 0, "doubles": 0, "triples": 0, "hr": 0, "so": 0}
     if pas_df.empty:
         return c
     for _, r in pas_df.iterrows():
-        korbb = r.get("KorBB")
-        pr = r.get("PlayResult")
-        pc = r.get("PitchCall")
-        if korbb == "Strikeout":
+        if r.get("KorBB") == "Strikeout":
             c["so"] += 1
-        if korbb == "Walk":
+        outcome = _pa_outcome(r)
+        if outcome == "bb":
             c["bb"] += 1
-            continue
-        if pc == "HitByPitch":
+        elif outcome == "hbp":
             c["hbp"] += 1
-            continue
-        if isinstance(pr, str) and pr.startswith("Sac"):
+        elif outcome == "sf":
             c["sf"] += 1
-            continue
-        if pr in _HITS:
+        elif outcome == "hit":
+            pr = r.get("PlayResult")
             c["ab"] += 1
             c["h"] += 1
             c["tb"] += _TOTAL_BASES[pr]
@@ -432,9 +452,9 @@ def _slash_counts(pas_df: pd.DataFrame) -> dict:
                 c["triples"] += 1
             elif pr == "HomeRun":
                 c["hr"] += 1
-        elif pr in _AB_OUTS or korbb == "Strikeout":
+        elif outcome == "ab_out":
             c["ab"] += 1
-        # else: undefined/incomplete PA — not counted
+        # else "other": undefined/incomplete PA — not counted
     return c
 
 
@@ -454,6 +474,127 @@ def _slash_from_pas(pas_df: pd.DataFrame) -> dict:
     ob_denom = ab + bb + hbp + sf
     obp = (h + bb + hbp) / ob_denom if ob_denom else None
     return {"BA": _fmt_avg(ba), "SLG": _fmt_avg(slg), "OBP": _fmt_avg(obp)}
+
+
+# ============================ ZONE FREQUENCY ================================
+#
+# 9-pocket (3x3) rulebook-zone grid for the hitting dashboard's Zone Frequency
+# tab. Classifies in the exact same transformed (inches) coordinate system as
+# app.dashboards.hitting.charts's zone_scatter -- x=PlateLocSide*-12,
+# y=PlateLocHeight*12-30 -- against that chart's own zone box/gridlines
+# (_SZ=(-10,-13,10,13), _VLINES=(-3.33,3.33), _HLINES=(-4.33,4.33)), so this
+# grid lines up with the Zone Location tab's scatter and "col ascending"
+# genuinely means "left->right on screen" (if either set of constants
+# changes, check the other).
+
+
+def zone9_cell(side_ft, height_ft) -> tuple[int, int] | None:
+    """Bucket a pitch location into one of 9 rulebook-zone cells as
+    (row, col), row 0 = bottom third / col 0 = catcher's-view left, or None
+    if outside the zone box or the location is missing."""
+    if side_ft is None or height_ft is None or pd.isna(side_ft) or pd.isna(height_ft):
+        return None
+    x = float(side_ft) * -12.0
+    y = float(height_ft) * 12.0 - 30.0
+    if not (-10.0 <= x <= 10.0 and -13.0 <= y <= 13.0):
+        return None
+    col = 0 if x < -3.33 else (2 if x > 3.33 else 1)
+    row = 0 if y < -4.33 else (2 if y > 4.33 else 1)
+    return (row, col)
+
+
+def _empty_zone9_grid() -> list:
+    return [[{"value": None, "n": 0} for _ in range(3)] for _ in range(3)]
+
+
+def _narrow_zone_pop(d: pd.DataFrame, *, pitch_group: str, throws: str) -> pd.DataFrame:
+    """Shared pitch_group/throws narrowing for the Zone Frequency tab's
+    grids -- "All" is the no-filter sentinel for both."""
+    if pitch_group != "All" and "PitchCat" in d.columns:
+        d = d[d["PitchCat"] == pitch_group]
+    if throws != "All" and "PitcherThrows" in d.columns:
+        d = d[d["PitcherThrows"] == throws]
+    return d
+
+
+def zone_frequency_grid(df: pd.DataFrame, *, metric: str = "ev",
+                        pitch_group: str = "All", throws: str = "All") -> list:
+    """3x3 grid (see `zone9_cell`) of {"value": float|None, "n": int} for one
+    damage metric, narrowed by pitch group ("All"/"Fastball"/"Offspeed",
+    matching the `PitchCat` column) and pitcher throws ("All"/"Right"/
+    "Left", matching the raw `PitcherThrows` column):
+
+      * "ev"/"distance" -- Avg ExitSpeed/Distance of batted balls
+        (PitchCall=='InPlay') whose OWN pitch lands in a cell; pitch_group/
+        throws filter those rows directly since each batted ball is a
+        complete, independent event.
+      * "avg" -- Batting average (H/AB, `_pa_outcome`'s definitions) over
+        plate-appearance-ending pitches. `qab_frame` is computed on the
+        UNFILTERED df first so the true last pitch of every PA is always
+        found correctly, and pitch_group/throws are applied to the
+        resulting one-row-per-PA frame afterward (both columns are on that
+        row already) -- filtering pitch-level rows first would let
+        `PitchofPA.idxmax()` pick a non-final pitch as if it ended the PA.
+    """
+    grid = _empty_zone9_grid()
+    if df is None or df.empty:
+        return grid
+
+    if metric in ("ev", "distance"):
+        col = "ExitSpeed" if metric == "ev" else "Distance"
+        bip = df[(df["PitchCall"] == "InPlay") & df[col].notna()]
+        bip = _narrow_zone_pop(bip, pitch_group=pitch_group, throws=throws)
+        buckets: dict = {}
+        for _, r in bip.iterrows():
+            cell = zone9_cell(r.get("PlateLocSide"), r.get("PlateLocHeight"))
+            if cell is None:
+                continue
+            buckets.setdefault(cell, []).append(float(r[col]))
+        for (row, c), vals in buckets.items():
+            grid[row][c] = {"value": round(sum(vals) / len(vals), 1), "n": len(vals)}
+        return grid
+
+    pas = qab_frame(df)
+    if pas.empty:
+        return grid
+    pas = _narrow_zone_pop(pas, pitch_group=pitch_group, throws=throws)
+    buckets = {}
+    for _, r in pas.iterrows():
+        cell = zone9_cell(r.get("PlateLocSide"), r.get("PlateLocHeight"))
+        if cell is None:
+            continue
+        outcome = _pa_outcome(r)
+        if outcome not in ("hit", "ab_out"):
+            continue  # not an AB -- no zone credit either way
+        ab, h = buckets.get(cell, (0, 0))
+        buckets[cell] = (ab + 1, h + (1 if outcome == "hit" else 0))
+    for (row, c), (ab, h) in buckets.items():
+        grid[row][c] = {"value": round(h / ab, 3) if ab else None, "n": ab}
+    return grid
+
+
+def zone_pitch_frequency_grid(df: pd.DataFrame, *, pitch_group: str = "All",
+                              throws: str = "All") -> list:
+    """3x3 grid (see `zone9_cell`) of {"value": int, "n": int} raw PITCH
+    COUNT per cell -- every pitch with a placeable location, regardless of
+    `PitchCall` (unlike `zone_frequency_grid`'s "ev"/"distance", which only
+    count contact). Answers a question the damage grids can't: is a "cold"
+    cell actually attacked often, or just rarely thrown there at all. Both
+    `value` and `n` are the same count (kept for shape parity with
+    `zone_frequency_grid`'s cells)."""
+    grid = _empty_zone9_grid()
+    if df is None or df.empty:
+        return grid
+    d = _narrow_zone_pop(df, pitch_group=pitch_group, throws=throws)
+    counts: dict = {}
+    for _, r in d.iterrows():
+        cell = zone9_cell(r.get("PlateLocSide"), r.get("PlateLocHeight"))
+        if cell is None:
+            continue
+        counts[cell] = counts.get(cell, 0) + 1
+    for (row, c), n in counts.items():
+        grid[row][c] = {"value": n, "n": n}
+    return grid
 
 
 def season_qab_rate(batter_id: int, since: str = "2025-02-14") -> float | None:

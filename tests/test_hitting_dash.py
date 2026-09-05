@@ -711,6 +711,44 @@ def test_hitting_tabs_include_bip_and_last27():
     assert '"last27"' in src and "Last 27 PA" in src
 
 
+def test_zone_frequency_renders_for_real_and_empty(game_df):
+    from app.dashboards.hitting.tabs import zone_frequency as zf
+    from dash import html
+    out = zf.render(game_df)
+    assert isinstance(out, html.Div)
+    s = str(out)
+    assert "zf-pitchgroup" in s and "zf-throws" in s and "zf-body" in s
+    assert isinstance(zf.render(pd.DataFrame()), html.Div)
+
+
+def test_zone_frequency_body_renders_four_panels_in_a_2x2_grid():
+    """No metric dropdown -- EV/Distance/AVG/Pitches Seen all render together
+    in a 2x2 grid (paw-chart-grid collapses to one column on phone)."""
+    from app.dashboards.hitting.tabs import zone_frequency as zf
+    from dash import html, dcc
+    out = zf.body(pd.DataFrame())
+    assert isinstance(out, html.Div)
+    assert out.className == "paw-chart-grid"
+    graphs = [c for c in out.children if isinstance(c.children, dcc.Graph)]
+    assert len(graphs) == 4
+    titles = {g.children.figure.layout.title.text for g in graphs}
+    assert titles == {"Avg Exit Velocity", "Avg Distance", "Batting Average", "Pitches Seen"}
+
+
+def test_zone_frequency_body_applies_filters(game_df):
+    from app.dashboards.hitting.tabs import zone_frequency as zf
+    from dash import html
+    assert isinstance(zf.body(game_df, pitch_group="Fastball"), html.Div)
+    assert isinstance(zf.body(game_df, throws="Right"), html.Div)
+
+
+def test_hitting_tabs_include_zone_frequency():
+    import inspect
+    from app.dashboards.hitting import layout
+    src = inspect.getsource(layout.serve_layout)
+    assert '"zonefreq"' in src and "Zone Frequency" in src
+
+
 def test_dev_plan_render_prompt_coach_player():
     from app.dashboards.hitting.tabs import dev_plan
     # no hitter selected -> prompt

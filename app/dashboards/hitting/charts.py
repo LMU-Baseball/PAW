@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from app.data.hitting import PITCH_ABBR
+from app.data.hitting import PITCH_ABBR, _fmt_avg
 from app.data import pitching as _pitching
 
 PITCH_COLORS = _pitching.PITCH_COLORS  # single source of truth (matches pitchers)
@@ -199,14 +199,14 @@ _HIT_COLORS = {"FlyBall": "#c0392b", "GroundBall": "#4a7fb5", "LineDrive": "#e08
                "PopUp": "#6b8e23", "Undefined": "#888888"}
 
 
-def _empty_bip_fig(title: str) -> go.Figure:
+def _empty_bip_fig(title: str, message: str = "No balls in play for this selection.") -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
         title=title, height=440, margin=dict(l=10, r=10, t=50, b=10),
         xaxis=dict(visible=False), yaxis=dict(visible=False),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
-        annotations=[dict(text="No balls in play for this selection.",
+        annotations=[dict(text=message,
                           showarrow=False, font=dict(size=18, family="Teko, sans-serif"))])
     return fig
 
@@ -292,4 +292,110 @@ def spray_fig(bip_df) -> go.Figure:
                    constrain="domain"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"))
+    return fig
+
+
+# Cell centers (inches, catcher's view) for the Zone Frequency 9-pocket grid --
+# midpoints of _SZ split by _VLINES/_HLINES above, so this chart's cells line
+# up exactly with zone_scatter's zone box/gridlines.
+_ZONE9_COL_X = (-6.665, 0.0, 6.665)
+_ZONE9_ROW_Y = (-8.665, 0.0, 8.665)
+
+_ZONE_FREQ_LABELS = {
+    "ev": ("Avg Exit Velocity", lambda v: f"{v:.1f} mph"),
+    "distance": ("Avg Distance", lambda v: f"{v:.0f} ft"),
+    "avg": ("Batting Average", _fmt_avg),
+}
+
+# Muted diverging scale (cool blue -> warm cream -> muted red) for the Zone
+# Frequency damage heatmaps -- stock Plotly "RdBu" runs to near-black at both
+# ends (contrast ~1.3:1 against the #1a1a1a cell text, i.e. unreadable);
+# every stop here keeps at least ~4.9:1 contrast against that same text
+# color so the numbers stay legible at full color intensity, not just at
+# the lighter middle of the range.
+_ZONE_FREQ_COLORSCALE = [
+    [0.0, "#6a94c4"], [0.25, "#b7cbe4"], [0.5, "#f2ede3"],
+    [0.75, "#e8bcb2"], [1.0, "#d16a5a"],
+]
+
+# Sequential (light->dark) crimson ramp for the Pitches Seen panel -- volume,
+# not a good/bad damage metric, so one hue rather than the diverging scale
+# above (per the app's brand crimson family; capped short of full-saturation
+# "#9A0021" for the same ~4.9:1 text-contrast reason as _ZONE_FREQ_COLORSCALE).
+_ZONE_PITCH_FREQ_COLORSCALE = [[0.0, "#fdeaee"], [1.0, "#ce6c7d"]]
+
+
+def _zone9_shapes(fig: go.Figure) -> None:
+    """Rulebook zone-box outline + 3x3 gridlines, matching zone_scatter's
+    own _SZ/_VLINES/_HLINES box exactly."""
+    fig.add_shape(type="rect", x0=-10, y0=-13, x1=10, y1=13,
+                  line=dict(color="#1a1a1a", width=2), fillcolor="rgba(0,0,0,0)")
+    for vx in (-3.33, 3.33):
+        fig.add_shape(type="line", x0=vx, y0=-13, x1=vx, y1=13,
+                      line=dict(color="#1a1a1a", width=1))
+    for hy in (-4.33, 4.33):
+        fig.add_shape(type="line", x0=-10, y0=hy, x1=10, y1=hy,
+                      line=dict(color="#1a1a1a", width=1))
+
+
+def _zone9_layout(fig: go.Figure, title: str, *, compact: bool) -> None:
+    fig.update_layout(
+        title=title, height=340 if compact else 460,
+        margin=dict(l=6, r=6, t=36, b=6) if compact else dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(range=[-15, 15], visible=False, constrain="domain"),
+        yaxis=dict(range=[-19, 19], visible=False, scaleanchor="x", scaleratio=1,
+                   constrain="domain"),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
+        font=dict(family="Teko, sans-serif"))
+
+
+def zone_frequency_fig(grid, metric: str = "ev", *, compact: bool = False) -> go.Figure:
+    """9-pocket (3x3) rulebook-zone hot/cold chart, catcher's view. `grid` is
+    `hitting.zone_frequency_grid`'s row-major (row 0=bottom, col 0=left) 3x3
+    list of {"value", "n"} cells. Color is scaled to THIS grid's own min/max
+    (per-player relative: always red=this player's hottest cell here, blue=
+    coldest). `compact=True` (multiple panels in one grid) shrinks the
+    title/colorbar/margins so several fit comfortably together."""
+    title, fmt = _ZONE_FREQ_LABELS.get(metric, _ZONE_FREQ_LABELS["ev"])
+    z = [[cell["value"] for cell in row] for row in grid]
+    if all(v is None for row in z for v in row):
+        return _empty_bip_fig(title, "No data for these filters.")
+    text = [[("—<br>n=0" if cell["value"] is None
+              else f"{fmt(cell['value'])}<br>n={cell['n']}") for cell in row]
+            for row in grid]
+    fig = go.Figure(go.Heatmap(
+        x=list(_ZONE9_COL_X), y=list(_ZONE9_ROW_Y), z=z,
+        colorscale=_ZONE_FREQ_COLORSCALE,
+        text=text, texttemplate="%{text}",
+        textfont=dict(size=12 if compact else 14, color="#1a1a1a", family="Teko, sans-serif"),
+        hovertemplate="%{text}<extra></extra>",
+        xgap=3, ygap=3, showscale=not compact,
+        colorbar=None if compact else dict(title=title.split()[-1]),
+    ))
+    _zone9_shapes(fig)
+    _zone9_layout(fig, title if compact else f"Zone Frequency — {title}", compact=compact)
+    return fig
+
+
+def zone_pitch_frequency_fig(grid, *, compact: bool = False) -> go.Figure:
+    """Sequential (light->dark crimson) 9-pocket heatmap of raw pitch COUNT
+    per cell (`hitting.zone_pitch_frequency_grid`) -- volume, not a damage
+    metric, so a single-hue ramp rather than zone_frequency_fig's diverging
+    red/blue, and no per-player-relative "hot/cold" story."""
+    title = "Pitches Seen"
+    z = [[cell["value"] for cell in row] for row in grid]
+    if all(not v for row in z for v in row):
+        return _empty_bip_fig(title, "No data for these filters.")
+    text = [[str(int(v)) if v else "0" for v in row] for row in z]
+    fig = go.Figure(go.Heatmap(
+        x=list(_ZONE9_COL_X), y=list(_ZONE9_ROW_Y), z=z,
+        colorscale=_ZONE_PITCH_FREQ_COLORSCALE,
+        text=text, texttemplate="%{text}",
+        textfont=dict(size=12 if compact else 14, color="#1a1a1a", family="Teko, sans-serif"),
+        hovertemplate="Pitches: %{text}<extra></extra>",
+        xgap=3, ygap=3, showscale=not compact,
+        colorbar=None if compact else dict(title="Pitches"),
+    ))
+    _zone9_shapes(fig)
+    _zone9_layout(fig, title if compact else f"Zone Frequency — {title}", compact=compact)
     return fig

@@ -14,7 +14,7 @@ from app.dashboards import background_warm, date_range as dr, notes_ui, video as
 from app.dashboards.hitting import layout, selectors
 from app.dashboards.hitting.tabs import (game_level, plate_appearances as pa,
                                          zone_location as zl, balls_in_play, last_27,
-                                         dev_plan)
+                                         dev_plan, zone_frequency as zf)
 
 
 def _resolve_gids(sel):
@@ -271,6 +271,8 @@ def register_callbacks(dash_app) -> None:
         df = _read_game_df(data_json)
         if tab == "game":
             return game_tab_body(df)
+        if tab == "zonefreq":
+            return zf.render(df)
         return html.Div()
 
     # PA dropdown -> per-PA breakdown.
@@ -290,6 +292,16 @@ def register_callbacks(dash_app) -> None:
     def _zone_body(zone_choice, data_json):
         df = _read_game_df(data_json)
         return zl.render(df, zone_choice or "All Swings")
+
+    # Zone Frequency filter bar -> re-render the 9-pocket charts.
+    @dash_app.callback(
+        Output("zf-body", "children"),
+        Input("zf-pitchgroup", "value"), Input("zf-throws", "value"),
+        State("game-data", "data"),
+    )
+    def _zone_freq_body(pitch_group, throws, data_json):
+        df = _read_game_df(data_json)
+        return zf.body(df, pitch_group=pitch_group or "All", throws=throws or "All")
 
     @dash_app.callback(
         Output("bip-active", "data"),

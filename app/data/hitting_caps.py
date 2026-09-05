@@ -19,11 +19,13 @@ LMU_BATTER_TEAM = "LOY_LIO"
 LMU_TEAM_ID = 78
 
 # GAMES columns the transforms consume (already correctly named).
+# PitcherThrows feeds the Zone Frequency tab's RHP/LHP filter
+# (app/data/hitting.py:zone_frequency_grid).
 _PITCH_COLS = (
     "PlateLocSide, PlateLocHeight, PitchCall, PlayResult, KorBB, TaggedHitType, "
     "TaggedPitchType, ExitSpeed, Distance, Bearing, HangTime, Inning, PAofInning, "
     "PitchofPA, PitchNo, Balls, Strikes, RunsScored, OutsOnPlay, BatterSide, "
-    "Pitcher, GameID, Angle"
+    "Pitcher, GameID, Angle, PitcherThrows"
 )
 
 @cached
