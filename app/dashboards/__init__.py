@@ -36,6 +36,8 @@ def register_dashboards(server):
     build_velo_board_dash(server)
     from app.dashboards.cauldron.index import build_cauldron_dash
     build_cauldron_dash(server)
+    from app.dashboards.splash_report.index import build_splash_report_dash
+    build_splash_report_dash(server)
 
     # Best-effort: seed cauldron_scoring so a fresh deploy's board isn't inert
     # (empty scoring config -> no grid columns, score_day is a no-op). The

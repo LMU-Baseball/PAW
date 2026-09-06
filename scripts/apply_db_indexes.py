@@ -23,6 +23,14 @@ catcher-page load, and PitcherTeam is shared by both the pitching and catching
 dashboards (a catcher is on the pitching team), so one composite index serves
 both.
 
+Measured 2026-09-06 (Splash Report speed investigation): `app.data.hitting.
+_roster_lookup` (class_year/position by name -- now also called from
+`pitching_caps.pitcher_profile`, which the Splash Report page's sidebar reads)
+queries `roster_players` (2,760 rows) with `WHERE season LIKE ... AND
+player_name = :n` against a table that had indexes on (school_id, season) and
+scraped_date only -- no player_name index at all. `EXPLAIN` showed a full
+table scan (`type: ALL`, `rows: 2662`) on every call.
+
 TEXT columns need a prefix length. `Date` is stored as TEXT holding ISO
 `YYYY-MM-DD`, so prefix 10 covers the whole date — the same choice the existing
 `ix_games_date` already made.
@@ -62,6 +70,10 @@ INDEXES = [
      "hitting_caps.lmu_hitters has the identical BatterTeam + date-range "
      "filter shape with no composite index. Prefix 16 matches the existing "
      "single-column ix_games_batterteam's own prefix length"),
+    ("roster_players", "ix_roster_players_name_season", "player_name(48), season",
+     "hitting._roster_lookup (class_year/position by name, now also called "
+     "from pitching_caps.pitcher_profile) filters player_name + season with "
+     "no supporting index at all -- full 2,662-row scan every call"),
 ]
 
 

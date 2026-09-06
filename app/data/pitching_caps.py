@@ -390,9 +390,19 @@ def pitcher_tm_id_for(pitcher_id):
 
 @cached
 def pitcher_profile(pitcher_id) -> dict:
-    """Name + throws (from GAMES) + jersey/photo (roster_media, by raw id
-    directly -- no pitcher_tm_id_for mapping needed, unlike the oracle)."""
+    """Name + class_year/position + throws (from GAMES) + jersey/photo
+    (roster_media, by raw id directly -- no pitcher_tm_id_for mapping
+    needed, unlike the oracle).
+
+    class_year/position are a best-effort `roster_players` lookup (the same
+    nationwide-recruiting-scrape table `hitting._roster_lookup` reads for
+    hitters), keyed off GAMES's raw "Last, First" name -- this used to be
+    hardcoded to "" here (a real gap: the pitching dashboard's own header
+    has never shown a pitcher's class), so a placeholder id with no GAMES
+    row still gets "" for both, same as before.
+    """
     from app.data import roster_media
+    from app.data.hitting import _roster_lookup
     name = pitcher_name(pitcher_id)
     thr = query_df(
         "SELECT PitcherThrows FROM GAMES WHERE PitcherId = :p "
@@ -400,8 +410,11 @@ def pitcher_profile(pitcher_id) -> dict:
         {"p": int(pitcher_id)},
     )
     throws = "" if thr.empty else str(thr.iloc[0]["PitcherThrows"])
+    raw = query_df("SELECT Pitcher FROM GAMES WHERE PitcherId = :p LIMIT 1",
+                   {"p": int(pitcher_id)})
+    class_year, position = ("", "") if raw.empty else _roster_lookup(str(raw.iloc[0]["Pitcher"]))
     media = roster_media.player_media(int(pitcher_id))
-    return {"name": name, "class_year": "", "position": "",
+    return {"name": name, "class_year": class_year, "position": position,
             "throws": throws, "jersey": media.get("jersey", ""),
             "photo": media.get("photo_url", "")}
 
