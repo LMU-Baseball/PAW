@@ -260,6 +260,55 @@ def _key_where(alias_prefix=""):
             f"{alias_prefix}season_label = :season_label AND {alias_prefix}cycle = :cycle")
 
 
+def _multi_row_upsert(table: str, key_cols: tuple, value_cols: tuple, rows: list[dict],
+                      updated_by=None) -> None:
+    """One `INSERT ... VALUES (row1), (row2), ... ON DUPLICATE KEY UPDATE`
+    for N rows in a SINGLE round trip, instead of N separate `execute()`
+    calls each paying the same RDS round-trip latency.
+
+    Each dict in `rows` must carry every column in `key_cols` (e.g.
+    player_id/season_label/cycle/script_number, already fully resolved by
+    the caller -- passed through as-is, never scrubbed, since a key is
+    never optional) and may carry columns in `value_cols` (the actual
+    editable fields, `_clean()`-scrubbed the usual way). No-op on an empty
+    `rows` (a valid, common case: nothing to save for this section).
+
+    Measured against this DB: 72 individual per-row upserts (6 scripts x 12
+    pitch rows) cost ~6.3s; the equivalent single multi-row statement costs
+    a small fraction of that -- this was the dominant cost of the page's
+    Save button."""
+    if not rows:
+        return
+    ensure_tables()
+    now = _now()
+    cols = key_cols + value_cols
+    value_groups, params = [], {}
+    for i, row in enumerate(rows):
+        placeholders = []
+        for c in key_cols:
+            key = f"{c}_{i}"
+            params[key] = row[c]
+            placeholders.append(f":{key}")
+        for c in value_cols:
+            key = f"{c}_{i}"
+            params[key] = _clean(row.get(c))
+            placeholders.append(f":{key}")
+        params[f"updated_by_{i}"] = _clean(updated_by)
+        params[f"updated_at_{i}"] = now
+        placeholders.append(f":updated_by_{i}")
+        placeholders.append(f":updated_at_{i}")
+        value_groups.append("(" + ", ".join(placeholders) + ")")
+    set_clause = ", ".join(f"{c} = VALUES({c})" for c in value_cols) + \
+        ", updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)"
+    sql = text(f"""
+        INSERT INTO {table} ({', '.join(cols)}, updated_by, updated_at)
+        VALUES {', '.join(value_groups)}
+        ON DUPLICATE KEY UPDATE {set_clause}
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, params)
+
+
 # ============================ PLAN (text sections) ==========================
 
 def read_plan(player_id, season_label, cycle) -> dict:
@@ -322,30 +371,13 @@ def upsert_engine_metrics(player_id, season_label, cycle, rows: list[dict],
                           updated_by=None) -> None:
     """`rows`: [{"metric_key", "base_value", "now_value"}, ...]. Rows for a
     metric outside ENGINE_METRIC_KEYS are ignored."""
-    ensure_tables()
-    sql = text(f"""
-        INSERT INTO {ENGINE_TABLE}
-            (player_id, season_label, cycle, metric_key, base_value, now_value,
-             updated_by, updated_at)
-        VALUES
-            (:player_id, :season_label, :cycle, :metric_key, :base_value, :now_value,
-             :updated_by, :updated_at)
-        ON DUPLICATE KEY UPDATE base_value = VALUES(base_value),
-            now_value = VALUES(now_value), updated_by = VALUES(updated_by),
-            updated_at = VALUES(updated_at)
-    """)
-    now = _now()
-    with get_engine().begin() as conn:
-        for row in rows:
-            key = row.get("metric_key")
-            if key not in ENGINE_METRIC_KEYS:
-                continue
-            conn.execute(sql, {
-                "player_id": int(player_id), "season_label": season_label, "cycle": cycle,
-                "metric_key": key, "base_value": _clean(row.get("base_value")),
-                "now_value": _clean(row.get("now_value")),
-                "updated_by": _clean(updated_by), "updated_at": now,
-            })
+    pid, sl = int(player_id), season_label
+    resolved = [{"player_id": pid, "season_label": sl, "cycle": cycle,
+                "metric_key": row["metric_key"], "base_value": row.get("base_value"),
+                "now_value": row.get("now_value")}
+               for row in rows if row.get("metric_key") in ENGINE_METRIC_KEYS]
+    _multi_row_upsert(ENGINE_TABLE, ("player_id", "season_label", "cycle", "metric_key"),
+                      ("base_value", "now_value"), resolved, updated_by)
 
 
 # ============================ VARIABLE-ROW TABLES ===========================
@@ -356,23 +388,38 @@ def upsert_engine_metrics(player_id, season_label, cycle, rows: list[dict],
 
 def _replace_rows(table: str, extra_cols: tuple, player_id, season_label, cycle,
                   rows: list[dict], updated_by=None) -> None:
+    """DELETE then INSERT every row in ONE multi-row statement (one round
+    trip for the insert, regardless of row count), both in the same
+    transaction as the delete."""
     ensure_tables()
     now = _now()
-    cols = ", ".join(extra_cols)
-    placeholders = ", ".join(f":{c}" for c in extra_cols)
-    insert_sql = text(f"""
-        INSERT INTO {table} (player_id, season_label, cycle, {cols}, updated_by, updated_at)
-        VALUES (:player_id, :season_label, :cycle, {placeholders}, :updated_by, :updated_at)
-    """)
+    pid = int(player_id)
     with get_engine().begin() as conn:
         conn.execute(text(f"DELETE FROM {table} WHERE {_key_where()}"),
-                     {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
-        for row in rows:
-            params = {"player_id": int(player_id), "season_label": season_label,
-                      "cycle": cycle, "updated_by": _clean(updated_by), "updated_at": now}
+                     {"player_id": pid, "season_label": season_label, "cycle": cycle})
+        if not rows:
+            return
+        cols = ("player_id", "season_label", "cycle") + extra_cols
+        value_groups, params = [], {}
+        for i, row in enumerate(rows):
+            placeholders = [f":player_id_{i}", f":season_label_{i}", f":cycle_{i}"]
+            params[f"player_id_{i}"] = pid
+            params[f"season_label_{i}"] = season_label
+            params[f"cycle_{i}"] = cycle
             for c in extra_cols:
-                params[c] = _clean(row.get(c))
-            conn.execute(insert_sql, params)
+                key = f"{c}_{i}"
+                params[key] = _clean(row.get(c))
+                placeholders.append(f":{key}")
+            params[f"updated_by_{i}"] = _clean(updated_by)
+            params[f"updated_at_{i}"] = now
+            placeholders.append(f":updated_by_{i}")
+            placeholders.append(f":updated_at_{i}")
+            value_groups.append("(" + ", ".join(placeholders) + ")")
+        insert_sql = text(f"""
+            INSERT INTO {table} ({', '.join(cols)}, updated_by, updated_at)
+            VALUES {', '.join(value_groups)}
+        """)
+        conn.execute(insert_sql, params)
 
 
 def read_gas_station(player_id, season_label, cycle) -> pd.DataFrame:
@@ -447,29 +494,14 @@ def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
 
 def upsert_scripts(player_id, season_label, cycle, rows: list[dict], updated_by=None) -> None:
     """`rows`: [{"script_number","goal","measurable"}, ...]."""
-    ensure_tables()
-    sql = text(f"""
-        INSERT INTO {SCRIPTS_TABLE}
-            (player_id, season_label, cycle, script_number, goal, measurable,
-             updated_by, updated_at)
-        VALUES
-            (:player_id, :season_label, :cycle, :script_number, :goal, :measurable,
-             :updated_by, :updated_at)
-        ON DUPLICATE KEY UPDATE goal = VALUES(goal), measurable = VALUES(measurable),
-            updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)
-    """)
-    now = _now()
-    with get_engine().begin() as conn:
-        for row in rows:
-            n = row.get("script_number")
-            if n is None or not (1 <= int(n) <= N_SCRIPTS):
-                continue
-            conn.execute(sql, {
-                "player_id": int(player_id), "season_label": season_label, "cycle": cycle,
-                "script_number": int(n), "goal": _clean(row.get("goal")),
-                "measurable": _clean(row.get("measurable")),
-                "updated_by": _clean(updated_by), "updated_at": now,
-            })
+    pid, sl = int(player_id), season_label
+    resolved = [{"player_id": pid, "season_label": sl, "cycle": cycle,
+                "script_number": int(row["script_number"]), "goal": row.get("goal"),
+                "measurable": row.get("measurable")}
+               for row in rows
+               if row.get("script_number") is not None and 1 <= int(row["script_number"]) <= N_SCRIPTS]
+    _multi_row_upsert(SCRIPTS_TABLE, ("player_id", "season_label", "cycle", "script_number"),
+                      ("goal", "measurable"), resolved, updated_by)
 
 
 def _reindex_script_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -517,34 +549,41 @@ def read_all_script_rows(player_id, season_label, cycle) -> dict:
             for n in range(1, N_SCRIPTS + 1)}
 
 
+def _resolve_script_rows(player_id, season_label, cycle, script_number, rows: list[dict]) -> list:
+    pid = int(player_id)
+    return [{"player_id": pid, "season_label": season_label, "cycle": cycle,
+             "script_number": int(script_number), "row_num": int(row["row_num"]),
+             "pitch_type": row.get("pitch_type"), "ball_info": row.get("ball_info"),
+             "info": row.get("info")}
+            for row in rows
+            if row.get("row_num") is not None and 1 <= int(row["row_num"]) <= N_SCRIPT_ROWS]
+
+
 def upsert_script_rows(player_id, season_label, cycle, script_number, rows: list[dict],
                        updated_by=None) -> None:
-    """`rows`: [{"row_num","pitch_type","ball_info","info"}, ...]."""
-    ensure_tables()
-    sql = text(f"""
-        INSERT INTO {SCRIPT_ROWS_TABLE}
-            (player_id, season_label, cycle, script_number, row_num,
-             pitch_type, ball_info, info, updated_by, updated_at)
-        VALUES
-            (:player_id, :season_label, :cycle, :script_number, :row_num,
-             :pitch_type, :ball_info, :info, :updated_by, :updated_at)
-        ON DUPLICATE KEY UPDATE pitch_type = VALUES(pitch_type),
-            ball_info = VALUES(ball_info), info = VALUES(info),
-            updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)
-    """)
-    now = _now()
-    with get_engine().begin() as conn:
-        for row in rows:
-            n = row.get("row_num")
-            if n is None or not (1 <= int(n) <= N_SCRIPT_ROWS):
-                continue
-            conn.execute(sql, {
-                "player_id": int(player_id), "season_label": season_label, "cycle": cycle,
-                "script_number": int(script_number), "row_num": int(n),
-                "pitch_type": _clean(row.get("pitch_type")),
-                "ball_info": _clean(row.get("ball_info")), "info": _clean(row.get("info")),
-                "updated_by": _clean(updated_by), "updated_at": now,
-            })
+    """`rows`: [{"row_num","pitch_type","ball_info","info"}, ...] for ONE
+    script. Saving all six scripts at once should use
+    `upsert_all_script_rows` instead -- one round trip beats six."""
+    resolved = _resolve_script_rows(player_id, season_label, cycle, script_number, rows)
+    _multi_row_upsert(SCRIPT_ROWS_TABLE,
+                      ("player_id", "season_label", "cycle", "script_number", "row_num"),
+                      ("pitch_type", "ball_info", "info"), resolved, updated_by)
+
+
+def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: dict,
+                           updated_by=None) -> None:
+    """`script_pitch_rows`: {script_number: [12 row dicts]} for ALL scripts
+    being saved at once -- one multi-row statement covering every script's
+    rows together (up to N_SCRIPTS * N_SCRIPT_ROWS = 72 rows), instead of
+    one upsert per script (which was itself already one round trip per row
+    before `_multi_row_upsert` -- see that function's docstring for the
+    measured cost this replaces)."""
+    resolved = []
+    for script_number, rows in script_pitch_rows.items():
+        resolved.extend(_resolve_script_rows(player_id, season_label, cycle, script_number, rows))
+    _multi_row_upsert(SCRIPT_ROWS_TABLE,
+                      ("player_id", "season_label", "cycle", "script_number", "row_num"),
+                      ("pitch_type", "ball_info", "info"), resolved, updated_by)
 
 
 # ============================ ONE-CLICK SAVE ================================
@@ -570,8 +609,7 @@ def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=No
         rows = [{"script_number": n, **fields} for n, fields in script_fields.items()]
         upsert_scripts(player_id, season_label, cycle, rows, updated_by=updated_by)
     if script_pitch_rows is not None:
-        for script_number, rows in script_pitch_rows.items():
-            upsert_script_rows(player_id, season_label, cycle, script_number, rows,
-                              updated_by=updated_by)
+        upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows,
+                               updated_by=updated_by)
     if pen_rows is not None:
         replace_pen_results(player_id, season_label, cycle, pen_rows, updated_by=updated_by)

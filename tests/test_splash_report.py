@@ -159,6 +159,37 @@ def test_read_all_script_rows_matches_per_script_reads_in_one_query():
     assert (all_rows[2]["pitch_type"] == "").all()  # untouched script -> all blank
 
 
+def test_upsert_all_script_rows_writes_every_script_in_one_call():
+    """upsert_all_script_rows (one multi-row statement for up to 72 rows --
+    6 scripts x 12 -- instead of 72 separate upserts) must match what
+    upsert_script_rows called once per script would persist."""
+    SR.upsert_all_script_rows(TEST_PID, SEASON, CYCLE, {
+        1: [{"row_num": 1, "pitch_type": "FB", "ball_info": "5+", "info": "vRHH"}],
+        2: [{"row_num": 12, "pitch_type": "CB", "ball_info": "Reg", "info": ""}],
+    }, updated_by=1)
+    all_rows = SR.read_all_script_rows(TEST_PID, SEASON, CYCLE)
+    assert all_rows[1].iloc[0]["pitch_type"] == "FB"
+    assert all_rows[2].iloc[11]["pitch_type"] == "CB"
+    assert (all_rows[3]["pitch_type"] == "").all()
+
+    # a re-save overwrites in place (upsert), not a duplicate/extra row
+    SR.upsert_all_script_rows(TEST_PID, SEASON, CYCLE,
+                              {1: [{"row_num": 1, "pitch_type": "SL", "ball_info": "", "info": ""}]},
+                              updated_by=1)
+    assert SR.read_all_script_rows(TEST_PID, SEASON, CYCLE)[1].iloc[0]["pitch_type"] == "SL"
+
+
+def test_multi_row_upsert_helpers_are_empty_safe():
+    """An empty rows list (nothing to save for that section) must be a
+    no-op, not a malformed empty-VALUES SQL statement."""
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [], updated_by=1)
+    SR.upsert_scripts(TEST_PID, SEASON, CYCLE, [], updated_by=1)
+    SR.upsert_script_rows(TEST_PID, SEASON, CYCLE, 1, [], updated_by=1)
+    SR.upsert_all_script_rows(TEST_PID, SEASON, CYCLE, {}, updated_by=1)
+    # still safe to read back (all blank, nothing crashed)
+    assert SR.read_engine_metrics(TEST_PID, SEASON, CYCLE)["base_value"].isna().all()
+
+
 def test_pen_results_replace_assigns_sequential_pen_number_per_script():
     SR.replace_pen_results(TEST_PID, SEASON, CYCLE, [
         {"script_number": 1, "pen_date": "2026-09-01", "value": 60.0},

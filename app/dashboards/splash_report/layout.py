@@ -1,8 +1,18 @@
-"""Splash Report page shell: filters, sidebar, and the whole editable body."""
+"""Splash Report page shell: filters, sidebar, and the whole editable body.
+
+Data is loaded ONCE per (player, season, cycle) into a `dcc.Store`
+(`load_data` / `render_from_data`, wired up in `callbacks.py`) instead of on
+every render -- toggling Edit used to re-run every read behind the page
+(profile, KPIs, plan, engine metrics, gas station, scripts, script rows,
+pen results) just to change how the SAME data is drawn, which was most of
+why the Edit button felt slow. Edit now flips a client-side flag and
+re-renders straight from the cached Store -- no new query at all.
+"""
 from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 from dash import dcc, html
 from flask_login import current_user
 
@@ -94,9 +104,9 @@ def checklists_grid(plan: dict, *, editable: bool) -> html.Div:
                     style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"})
 
 
-def engine_and_gas_station(player_id, season_label, cycle, *, editable: bool) -> html.Div:
-    eng = SR.read_engine_metrics(player_id, season_label, cycle)
-    gas = SR.read_gas_station(player_id, season_label, cycle)
+def engine_and_gas_station(engine_records: list, gas_records: list, *, editable: bool) -> html.Div:
+    eng = pd.DataFrame(engine_records)
+    gas = pd.DataFrame(gas_records)
     strength = eng[eng["metric_key"].isin(SR.STRENGTH_METRICS)]
     rom = eng[eng["metric_key"].isin(SR.ROM_METRICS)]
     gas_child = tables.gas_station_table(gas, editable=editable) if (editable or not gas.empty) \
@@ -122,7 +132,7 @@ def engine_and_gas_station(player_id, season_label, cycle, *, editable: bool) ->
     ]))
 
 
-def script_card(script_number, script_row, rows, *, editable: bool) -> html.Div:
+def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
     goal_child = dcc.Input(id=f"splash-script-goal-{script_number}", value=goal,
@@ -137,27 +147,24 @@ def script_card(script_number, script_row, rows, *, editable: bool) -> html.Div:
                   goal_child]),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
-        html.Div(tables.script_pitch_table(rows, script_number, editable=editable),
+        html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number, editable=editable),
                  style={"marginTop": "6px"}),
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
               "padding": "10px", "marginBottom": "12px"})
 
 
-def bullpen_scripts(player_id, season_label, cycle, *, editable: bool) -> html.Div:
-    scripts = SR.read_scripts(player_id, season_label, cycle)
-    # One query for all six scripts' pitch rows instead of one per script.
-    all_rows = SR.read_all_script_rows(player_id, season_label, cycle)
-    cards = [script_card(int(r["script_number"]), r, all_rows[int(r["script_number"])],
+def bullpen_scripts(scripts_records: list, script_rows: dict, *, editable: bool) -> html.Div:
+    cards = [script_card(int(r["script_number"]), r, script_rows[str(int(r["script_number"]))],
                          editable=editable)
-             for _, r in scripts.iterrows()]
+             for r in scripts_records]
     return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts",
                 html.Div(cards, className="paw-chart-grid",
                         style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                                "gap": "12px"}))
 
 
-def script_pen_results(player_id, season_label, cycle, *, editable: bool) -> html.Div:
-    pen = SR.read_pen_results(player_id, season_label, cycle)
+def script_pen_results(pen_records: list, *, editable: bool) -> html.Div:
+    pen = pd.DataFrame(pen_records)
     fig = charts.pen_results_fig(pen)
     children = [dcc.Graph(figure=fig, config={"displayModeBar": False})]
     if editable:
@@ -165,20 +172,12 @@ def script_pen_results(player_id, season_label, cycle, *, editable: bool) -> htm
     return _card("Script Pen Results — Trend", html.Div(children))
 
 
-def sidebar(pitcher_id, season_label, *, editable: bool, plan: dict) -> html.Div:
-    if pitcher_id is None:
-        return html.Div("Select a pitcher.", style={"padding": "12px"})
-    prof = pitching_caps.pitcher_profile(int(pitcher_id))
-    # Scoped to the page's own Season filter -- range_summary(pid) with no
-    # start/end silently defaults to the CURRENT season, which made the K%/
-    # BB%/Barrel% tiles ignore the Season dropdown entirely (a real bug: they
-    # never changed no matter what season was selected).
-    s_b, e_b = seasons.season_bounds(season_label)
-    summ = pitching_caps.range_summary(int(pitcher_id), s_b, e_b)
-    photo = prof["photo"] or PHOTO_PLACEHOLDER
-    jersey = f"#{prof['jersey']} · " if prof["jersey"] else ""
-    meta = " · ".join([x for x in (prof["class_year"],
-                                   f"Throws {prof['throws']}" if prof["throws"] else "") if x])
+def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Div:
+    photo = profile["photo"] or PHOTO_PLACEHOLDER
+    jersey = f"#{profile['jersey']} · " if profile["jersey"] else ""
+    meta = " · ".join([x for x in (profile["class_year"],
+                                   f"Throws {profile['throws']}" if profile["throws"] else "")
+                       if x])
 
     def tile(label, value):
         return html.Div([
@@ -191,11 +190,11 @@ def sidebar(pitcher_id, season_label, *, editable: bool, plan: dict) -> html.Div
         html.Img(src=photo, style={"width": "100%", "borderRadius": "8px",
                                    "border": "4px solid white",
                                    "background": "rgba(255,255,255,0.6)"}),
-        html.Div(f"{jersey}{prof['name'] or '—'}",
+        html.Div(f"{jersey}{profile['name'] or '—'}",
                  style={"fontSize": "24px", "fontWeight": "bold", "marginTop": "8px"}),
         html.Div(meta, style={"fontSize": "15px", "color": "#555"}),
-        html.Div([tile("K%", summ.get("k_pct")), tile("Barrel%", summ.get("barrel_pct")),
-                  tile("BB%", summ.get("bb_pct"))],
+        html.Div([tile("K%", kpis.get("k_pct")), tile("Barrel%", kpis.get("barrel_pct")),
+                  tile("BB%", kpis.get("bb_pct"))],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
     ], style=_CARD)
@@ -227,25 +226,54 @@ def filters(player_id, season_label, cycle) -> html.Div:
              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})
 
 
-def render_body(player_id, season_label, cycle, *, editable: bool) -> html.Div:
+def load_data(player_id, season_label, cycle) -> dict:
+    """Every read the page needs, in ONE call -- cached client-side in the
+    `splash-data` Store so switching Edit on/off (which changes only HOW
+    this data is drawn, not WHAT data to show) never re-queries the DB."""
     if player_id is None:
+        return {}
+    pid = int(player_id)
+    profile = pitching_caps.pitcher_profile(pid)
+    s_b, e_b = seasons.season_bounds(season_label)
+    kpis = pitching_caps.range_summary(pid, s_b, e_b)
+    plan = SR.read_plan(pid, season_label, cycle)
+    engine = SR.read_engine_metrics(pid, season_label, cycle)
+    gas = SR.read_gas_station(pid, season_label, cycle)
+    scripts = SR.read_scripts(pid, season_label, cycle)
+    script_rows = SR.read_all_script_rows(pid, season_label, cycle)
+    pen = SR.read_pen_results(pid, season_label, cycle)
+    return {
+        "profile": profile, "kpis": kpis, "plan": plan,
+        "engine": engine.to_dict("records"), "gas": gas.to_dict("records"),
+        "scripts": scripts.to_dict("records"),
+        # dict keys round-trip through dcc.Store's JSON as strings either way;
+        # use str() up front so in-process (no round trip yet) access matches.
+        "script_rows": {str(n): df.to_dict("records") for n, df in script_rows.items()},
+        "pen": pen.to_dict("records"),
+    }
+
+
+def render_from_data(data: dict, *, editable: bool) -> html.Div:
+    """Pure render: builds the whole body from an already-loaded `data` dict
+    (see `load_data`) -- no DB calls here at all."""
+    if not data:
         return html.Div("Select a pitcher.", style={"padding": "20px"})
-    plan = SR.read_plan(player_id, season_label, cycle)
-    left = html.Div(sidebar(player_id, season_label, editable=editable, plan=plan),
+    plan = data["plan"]
+    left = html.Div(sidebar(data["profile"], data["kpis"], plan, editable=editable),
                     className="paw-dash-sidebar", style={"width": "260px", "flexShrink": "0"})
     center = html.Div([
         _text_section("Vision Statement · Season Focus", plan["vision_statement"],
                      editable=editable, input_id="splash-vision"),
         checklists_grid(plan, editable=editable),
-        engine_and_gas_station(player_id, season_label, cycle, editable=editable),
-        script_pen_results(player_id, season_label, cycle, editable=editable),
+        engine_and_gas_station(data["engine"], data["gas"], editable=editable),
+        script_pen_results(data["pen"], editable=editable),
     ], style={"flex": "1 1 0", "minWidth": "0"})
     # Bullpen Scripts sits alongside the sidebar+center on a wide screen
     # (matching the original mockup's 3-column layout) instead of stacking
     # below everything -- that stacking was what forced most of the extra
     # vertical scrolling on desktop; .paw-dash-row's phone media query still
     # stacks all three into one column on a narrow screen.
-    right = html.Div(bullpen_scripts(player_id, season_label, cycle, editable=editable),
+    right = html.Div(bullpen_scripts(data["scripts"], data["script_rows"], editable=editable),
                      style={"flex": "1 1 0", "minWidth": "0"})
     return html.Div([left, center, right], className="paw-dash-row",
                     style={"display": "flex", "gap": "16px", "flexWrap": "wrap",
@@ -270,12 +298,14 @@ def serve_layout() -> html.Div:
                                  id="splash-coach-section"))
     controls.append(filters(default_player, season, cycle))
 
+    data = load_data(default_player, season, cycle)
     return html.Div([
         dcc.Store(id="splash-editing", data=False),
+        dcc.Store(id="splash-data", data=data),
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div(controls, style={"borderBottom": f"2px solid {CRIMSON}",
                                   "backgroundColor": "rgba(255,255,255,0.55)"}),
         html.Div(id="splash-body",
-                 children=render_body(default_player, season, cycle, editable=False),
+                 children=render_from_data(data, editable=False),
                  style={"padding": "16px"}),
     ])

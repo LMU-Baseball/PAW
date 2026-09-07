@@ -1,12 +1,20 @@
 """Dash callbacks for the Splash Report page.
 
-Body render fires for EVERY account (player or coach) whenever Player/
-Season/Cycle changes -- these are pure VIEW controls, team-transparent like
-every other dashboard. `splash-editing` additionally drives edit-mode
-rendering, but only a coach ever gets the Edit button that can set it True
-(`suppress_callback_exceptions=True`, set in index.py, lets Dash accept the
-Save callback's State ids even though they only exist in the DOM once
-editing=True has actually rendered them).
+Data loading and rendering are deliberately SEPARATE callbacks:
+- `_load_data` re-reads the DB only when Player/Season/Cycle actually change,
+  caching the result in the `splash-data` Store.
+- `_render` draws the body from whatever is currently in that Store, reacting
+  to it AND to `splash-editing` -- so toggling Edit (which changes only HOW
+  the page is drawn, not what data it shows) is a pure client-side re-render,
+  no new query. Before this split, Edit re-ran every read behind the page
+  each time it was clicked, which was most of why it felt slow.
+
+Body render fires for EVERY account (player or coach) -- these are pure VIEW
+controls, team-transparent like every other dashboard. `splash-editing`
+additionally drives edit-mode rendering, but only a coach ever gets the Edit
+button that can set it True (`suppress_callback_exceptions=True`, set in
+index.py, lets Dash accept the Save callback's State ids even though they
+only exist in the DOM once editing=True has actually rendered them).
 """
 from __future__ import annotations
 
@@ -57,14 +65,27 @@ def register_callbacks(dash_app) -> None:
             opts[0]["value"] if opts else None)
         return opts, value
 
+    # Player/Season/Cycle change -> re-read the DB into splash-data. Not
+    # Input("splash-editing", ...) -- toggling Edit must NOT retrigger this.
+    # prevent_initial_call=True: serve_layout() already seeds splash-data for
+    # the first paint; without this the callback would immediately re-run
+    # the exact same load a second time on page load.
+    @dash_app.callback(
+        Output("splash-data", "data"),
+        Input("splash-player", "value"), Input("splash-season", "value"),
+        Input("splash-cycle", "value"),
+        prevent_initial_call=True,
+    )
+    def _load_data(player_id, season, cycle):
+        return layout.load_data(player_id, season, cycle)
+
+    # splash-data OR splash-editing change -> pure re-render, no DB access.
     @dash_app.callback(
         Output("splash-body", "children"),
-        Input("splash-player", "value"), Input("splash-season", "value"),
-        Input("splash-cycle", "value"), Input("splash-editing", "data"),
+        Input("splash-data", "data"), Input("splash-editing", "data"),
     )
-    def _render(player_id, season, cycle, editing):
-        return layout.render_body(player_id, season, cycle,
-                                  editable=bool(editing) and _is_coach())
+    def _render(data, editing):
+        return layout.render_from_data(data, editable=bool(editing) and _is_coach())
 
     @dash_app.callback(
         Output("splash-editing", "data", allow_duplicate=True),
@@ -80,7 +101,9 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("splash-editing", "data"),
         Output("splash-save-status", "children"),
+        Output("splash-data", "data", allow_duplicate=True),
         Input("splash-save", "n_clicks"),
+        State("splash-data", "data"),
         State("splash-player", "value"), State("splash-season", "value"),
         State("splash-cycle", "value"),
         State("splash-vision", "value"), State("splash-goals", "value"),
@@ -94,24 +117,24 @@ def register_callbacks(dash_app) -> None:
         *_script_states(),
         prevent_initial_call=True,
     )
-    def _on_save(n_clicks, player_id, season, cycle, vision, goals, pre, post,
+    def _on_save(n_clicks, current_data, player_id, season, cycle, vision, goals, pre, post,
                 feet_set, feet_moving, work_day, strength_rows, rom_rows, gas_rows,
                 pen_rows, *script_args):
         if not n_clicks or not _is_coach():
-            return no_update, no_update
+            return no_update, no_update, no_update
         if player_id is None:
-            return no_update, "Select a pitcher first."
+            return no_update, "Select a pitcher first.", no_update
 
         # recovery_video_url has no edit control yet (deferred) -- carry the
-        # existing value through so a save never blanks it out.
-        current_plan = SR.read_plan(player_id, season, cycle)
+        # cached value through (no extra DB read) so a save never blanks it.
+        recovery_url = (current_data or {}).get("plan", {}).get("recovery_video_url", "")
         plan_fields = {
             "vision_statement": vision, "training_goals": goals,
             "pre_throw_checklist": pre, "post_throw_checklist": post,
             "feet_set": "\n".join(feet_set or []),
             "feet_moving": "\n".join(feet_moving or []),
             "work_day": "\n".join(work_day or []),
-            "recovery_video_url": current_plan["recovery_video_url"],
+            "recovery_video_url": recovery_url,
         }
         engine_rows = [
             {"metric_key": r.get("metric_key"), "base_value": r.get("base_value"),
@@ -129,4 +152,8 @@ def register_callbacks(dash_app) -> None:
             gas_rows=gas_rows or [], script_fields=script_fields,
             script_pitch_rows=script_pitch_rows, pen_rows=pen_rows or [],
             updated_by=getattr(current_user, "id", None))
-        return False, "Saved."
+        # One fresh load so splash-data (and the view-mode render right
+        # after) reflects exactly what was just persisted -- correctness
+        # over trying to hand-reconstruct it from the Save form's own values.
+        new_data = layout.load_data(player_id, season, cycle)
+        return False, "Saved.", new_data

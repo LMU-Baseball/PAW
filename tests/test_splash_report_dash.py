@@ -71,17 +71,19 @@ def test_serve_layout_hides_edit_save_for_player(server):
     assert "id='splash-edit'" not in s and "id='splash-save'" not in s
 
 
-def test_render_body_view_mode_has_no_editable_inputs():
+def test_render_from_data_view_mode_has_no_editable_inputs():
     from app.dashboards.splash_report import layout
-    out = layout.render_body(TEST_PID, "2099/2100", "Fall", editable=False)
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    out = layout.render_from_data(data, editable=False)
     s = str(out)
     assert "splash-vision" not in s   # view mode renders a bullet list, no Textarea
     assert "splash-engine-strength-table" not in s or "'editable': False" in s
 
 
-def test_render_body_edit_mode_has_editable_inputs():
+def test_render_from_data_edit_mode_has_editable_inputs():
     from app.dashboards.splash_report import layout
-    out = layout.render_body(TEST_PID, "2099/2100", "Fall", editable=True)
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    out = layout.render_from_data(data, editable=True)
     s = str(out)
     assert "splash-vision" in s
     assert "splash-feetset" in s
@@ -89,10 +91,15 @@ def test_render_body_edit_mode_has_editable_inputs():
     assert "splash-pen-table" in s
 
 
-def test_render_body_no_pitcher_selected_is_safe():
+def test_load_data_no_pitcher_selected_is_empty():
+    from app.dashboards.splash_report import layout
+    assert layout.load_data(None, "2099/2100", "Fall") == {}
+
+
+def test_render_from_data_no_data_is_safe():
     from app.dashboards.splash_report import layout
     from dash import html
-    out = layout.render_body(None, "2099/2100", "Fall", editable=False)
+    out = layout.render_from_data({}, editable=False)
     assert isinstance(out, html.Div)
     assert "Select a pitcher" in str(out)
 
