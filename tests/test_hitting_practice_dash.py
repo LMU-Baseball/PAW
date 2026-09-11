@@ -656,5 +656,24 @@ def test_practice_light_helpers_and_scoped_load():
     if on_latest:
         p = on_latest[0]
         df = P.load_pitch_coords(player=p, start=latest, end=latest)  # scoped in SQL
-        if not df.empty:
-            assert set(df["player_name"].unique()) == {p}             # only that player
+        # `on_latest` came from PRACTICE_SESSIONS, so this player has a session
+        # (and therefore rows) on `latest` -- must NOT come back empty. Pins the
+        # bug where this filtered on PRACTICE_PLAYS' own player_name column,
+        # which is permanently NULL, so a player-scoped load always returned
+        # zero rows (the whole practice dashboard's "no data" symptom).
+        assert not df.empty
+        assert set(df["player_name"].unique()) == {p}             # only that player
+
+
+def test_load_plays_scoped_to_a_player_is_not_empty():
+    """Same bug as test_practice_light_helpers_and_scoped_load's
+    load_pitch_coords assertion, but for load_plays -- PRACTICE_PLAYS.
+    player_name is permanently NULL, so filtering on it directly (instead
+    of joining PRACTICE_SESSIONS.user_name) silently returned zero rows
+    for every player, always."""
+    from app.data import practice as P
+    names = P.all_player_names()
+    assert names
+    plays = P.load_plays(player=names[0])
+    assert not plays.empty
+    assert set(plays["player_name"].unique()) == {names[0]}

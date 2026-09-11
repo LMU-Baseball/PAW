@@ -225,26 +225,34 @@ def load_sessions(exclude_test: bool = True, player=None,
 
 def load_plays(exclude_test: bool = True, player=None,
                start=None, end=None) -> pd.DataFrame:
-    where = "WHERE play_timestamp IS NOT NULL" + _test_clause("player_name", exclude_test)
+    """PRACTICE_PLAYS.player_name is permanently NULL for every row (the
+    ingest has no name field to put there -- see app/ingest/hittrax.py's
+    ``player_name = None`` comment); name comes from a join to
+    PRACTICE_SESSIONS.user_name instead, same as `load_pitch_coords` and
+    `load_sessions` already do. Filtering/selecting the bare (always-null)
+    ``player_name`` column here used to make every player-scoped call
+    return zero rows -- the entire practice dashboard's "no data" bug."""
+    where = "WHERE pp.play_timestamp IS NOT NULL" + _test_clause("ps.user_name", exclude_test)
     params: dict = {}
     if player:
-        where += " AND player_name = :player"
+        where += " AND ps.user_name = :player"
         params["player"] = player
     if start and end:
         # Half-open range instead of DATE(play_timestamp) BETWEEN ...: wrapping the
         # column in a function makes MySQL ignore `idx_play_timestamp`. `>= start`
         # with `< end + 1 day` selects exactly the same rows on a DATETIME column.
-        where += (" AND play_timestamp >= :start"
-                  " AND play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
+        where += (" AND pp.play_timestamp >= :start"
+                  " AND pp.play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
         params["start"], params["end"] = str(start), str(end)
     return query_df(f"""
-        SELECT player_name, player_id,
-               DATE(play_timestamp) AS play_date,
-               exit_velocity, distance_feet, horizontal_angle,
-               hit_type, launch_angle, session_id, result
-          FROM PRACTICE_PLAYS
+        SELECT ps.user_name AS player_name, pp.player_id,
+               DATE(pp.play_timestamp) AS play_date,
+               pp.exit_velocity, pp.distance_feet, pp.horizontal_angle,
+               pp.hit_type, pp.launch_angle, pp.session_id, pp.result
+          FROM PRACTICE_PLAYS pp
+          LEFT JOIN PRACTICE_SESSIONS ps ON pp.session_id = ps.session_id
           {where}
-         ORDER BY play_timestamp
+         ORDER BY pp.play_timestamp
     """, params)
 
 
@@ -253,7 +261,9 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
     """Pitch location rows for heatmaps / swing decision (from Swing Decision
     start). `player`/`start`/`end` scope the load in SQL (the dashboard passes
     the selected player + date so it never loads every player's rows); all
-    default None = whole dataset (back-compat)."""
+    default None = whole dataset (back-compat). Player name is resolved via
+    the PRACTICE_SESSIONS join below (ps.user_name), never PRACTICE_PLAYS'
+    own player_name column -- see `load_plays`'s docstring for why."""
     sd = SWING_DECISION_START.strftime("%Y-%m-%d")
     where = (
         "WHERE pp.pitch_location_x IS NOT NULL AND pp.pitch_location_y IS NOT NULL"
@@ -264,10 +274,10 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         # which is what DATE(ts) >= 'YYYY-MM-DD' selected anyway.
         f" AND pp.play_timestamp >= '{sd}'"
     )
-    where += _test_clause("pp.player_name", exclude_test)
+    where += _test_clause("ps.user_name", exclude_test)
     params: dict = {}
     if player:
-        where += " AND pp.player_name = :player"
+        where += " AND ps.user_name = :player"
         params["player"] = player
     if start and end:
         where += (" AND pp.play_timestamp >= :start"
@@ -275,7 +285,7 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         params["start"], params["end"] = str(start), str(end)
     try:
         df = query_df(f"""
-            SELECT pp.player_name, pp.player_id, pp.hand,
+            SELECT ps.user_name AS player_name, pp.player_id, pp.hand,
                    pp.pitch_location_x AS px, pp.pitch_location_y AS py,
                    pp.result, pp.exit_velocity, pp.distance_feet, pp.zone_section,
                    pp.play_timestamp, pp.session_id,
