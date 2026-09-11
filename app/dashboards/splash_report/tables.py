@@ -14,29 +14,47 @@ _TABLE_STYLE = {"overflowX": "auto", "width": "fit-content", "maxWidth": "100%"}
 
 
 def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
-          dropdown=None) -> dash_table.DataTable:
+          dropdown=None, extra_style=None) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=id_, columns=columns, data=data, editable=editable,
         row_deletable=row_deletable, dropdown=dropdown or {},
         style_table=_TABLE_STYLE, style_as_list_view=True,
         style_header=_HEADER_STYLE, style_cell=_CELL_STYLE,
         style_data={"backgroundColor": "rgba(255,255,255,0.85)"},
+        style_data_conditional=extra_style or [],
     )
 
 
-def engine_metrics_table(df: pd.DataFrame, table_id: str, *, editable: bool) -> dash_table.DataTable:
-    """Label (readonly) / Base / Now (editable) / Δ (readonly, computed).
-    Called twice per page (Strength + ROM), so `table_id` must be distinct
-    each time -- a duplicate Dash component id is invalid."""
-    columns = [
-        {"name": "", "id": "label", "editable": False},
-        {"name": "Base", "id": "base_value", "editable": editable, "type": "numeric"},
-        {"name": "Now", "id": "now_value", "editable": editable, "type": "numeric"},
-        {"name": "Δ", "id": "delta", "editable": False},
-    ]
+_FLAG_STYLE = {
+    "yellow": {"backgroundColor": "#fff3cd", "color": "#7a5c00"},
+    "red": {"backgroundColor": "#f8d7da", "color": "#7a1420"},
+}
+
+
+def engine_metrics_table(df: pd.DataFrame, table_id: str) -> dash_table.DataTable:
+    """Label / Base / Now / Δ -- all readonly. Base and Now are DERIVED from
+    the reading history (earliest/latest dated entry -- see
+    `app.data.splash_report.read_engine_metrics`), not directly editable
+    here; a coach logs a new value via the separate Update Readings action,
+    never by typing into this grid. `now_value`'s cell is colored by
+    `flag` ("yellow"/"red"/"ok"/None) against the D1 baseline. Called twice
+    per page (Strength + ROM), so `table_id` must be distinct each time --
+    a duplicate Dash component id is invalid."""
     d = df.copy()
     d["delta"] = d["delta"].map(lambda v: "—" if pd.isna(v) else f"{v:+.1f}")
-    return _table(table_id, columns, d.to_dict("records"), editable=editable)
+    columns = [
+        {"name": "", "id": "label", "editable": False},
+        {"name": "Base", "id": "base_value", "editable": False, "type": "numeric"},
+        {"name": "Now", "id": "now_value", "editable": False, "type": "numeric"},
+        {"name": "Δ", "id": "delta", "editable": False},
+    ]
+    flag_style = [
+        {"if": {"row_index": i, "column_id": "now_value"}, **style}
+        for i, flag in enumerate(d.get("flag", []))
+        for style in ([_FLAG_STYLE[flag]] if flag in _FLAG_STYLE else [])
+    ]
+    return _table(table_id, columns, d.to_dict("records"), editable=False,
+                 extra_style=flag_style)
 
 
 def gas_station_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:

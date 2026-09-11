@@ -47,6 +47,16 @@ def test_serve_layout_shows_edit_save_for_coach(server):
     assert "Please log in" not in s
     assert "splash-edit" in s and "splash-save" in s
     assert "splash-player" in s and "splash-season" in s and "splash-cycle" in s
+    # Update Readings is a coach-only control, separate from Edit/Save --
+    # it must render even in view mode (a coach shouldn't need to click
+    # Edit first to log a new Building-the-Engine reading).
+    assert "splash-update-readings-toggle" in s
+    # Manage Video Library: same deal -- coach-only, always rendered,
+    # independent of the Edit/Save toggle. (Drill add/remove is inline
+    # under each dropdown instead, and dropdowns only render in edit mode
+    # -- see test_drill_catalog_controls_are_inline_and_coach_only below.)
+    assert "splash-manage-videos-toggle" in s
+    assert "splash-video-modal" in s  # the shared popup renders for everyone
 
 
 def test_serve_layout_hides_edit_save_for_player(server):
@@ -69,6 +79,9 @@ def test_serve_layout_hides_edit_save_for_player(server):
     # "splash-editing" (the always-present Store) contains "splash-edit" as a
     # substring, so match the quoted component id exactly, not a bare substring.
     assert "id='splash-edit'" not in s and "id='splash-save'" not in s
+    assert "splash-update-readings-toggle" not in s  # coach-only, a player never sees it
+    assert "splash-manage-videos-toggle" not in s
+    assert "splash-video-modal" in s  # the shared popup still renders (a player can watch clips)
 
 
 def test_render_from_data_view_mode_has_no_editable_inputs():
@@ -89,6 +102,48 @@ def test_render_from_data_edit_mode_has_editable_inputs():
     assert "splash-feetset" in s
     assert "splash-engine-strength-table" in s
     assert "splash-pen-table" in s
+
+
+def test_drill_catalog_controls_are_inline_and_coach_only():
+    """2026-09-10 feedback: drill add/remove must live directly under each
+    dropdown (Feet Set/Feet Moving/Work Day), not a separate "Manage
+    Drills" section -- and only for a coach who's actually editing (the
+    controls sit next to an editable dropdown, which only renders in edit
+    mode to begin with)."""
+    from app.dashboards.splash_report import layout
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+
+    coach_editing = str(layout.render_from_data(data, editable=True, is_coach=True))
+    for section in ("feetset", "feetmoving", "workday"):
+        for control_type in ("splash-drill-add-btn", "splash-drill-add-input",
+                             "splash-drill-remove-select", "splash-drill-remove-btn"):
+            assert f'"index": "{section}"' in coach_editing or f"'index': '{section}'" in coach_editing
+            assert control_type in coach_editing
+
+    player_editing = str(layout.render_from_data(data, editable=True, is_coach=False))
+    assert "splash-drill-add-btn" not in player_editing  # a player never gets catalog controls
+
+    coach_viewing = str(layout.render_from_data(data, editable=False, is_coach=True))
+    assert "splash-drill-add-btn" not in coach_viewing  # only shows next to the live dropdown
+
+
+def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
+    """2026-09-10 planning session: script cards are collapsed behind the
+    "Show Scripts" multi-select ("only show when clicked"), but they must
+    still be IN the DOM (hidden via style, not omitted) so the Save
+    callback's per-script State ids always resolve -- see
+    layout.script_card's docstring."""
+    from app.dashboards.splash_report import layout
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    for editable in (False, True):
+        out = layout.render_from_data(data, editable=editable)
+        s = str(out)
+        assert "splash-pen-graph" in s and "splash-pen-compare" in s
+        assert "splash-script-select" in s
+        assert "splash-engine-cycle-filter" in s  # "View Cycles" multi-select
+        for n in range(1, 7):
+            assert f"splash-script-wrap-{n}" in s
+            assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted
 
 
 def test_load_data_no_pitcher_selected_is_empty():
@@ -187,6 +242,42 @@ def test_season_change_keeps_valid_player_else_falls_back_to_first(server, monke
     # a still-valid id is left untouched
     opts2, value2 = on_season("2025/2026", 111)
     assert value2 == 111
+
+
+def test_splash_video_route_requires_login_and_streams_bytes(server):
+    from app.auth.models import User
+    from app.extensions import db
+    from app.data import splash_report as SR
+    from sqlalchemy import text as _text
+    from app.db import get_engine
+    server.config["WTF_CSRF_ENABLED"] = False
+    with server.app_context():
+        u = User(email="splashvid@lmu.edu", name="Coach", role="coach")
+        u.set_password("x")
+        db.session.add(u)
+        db.session.commit()
+        vid_id = SR.add_video("__test_sandbox_route_clip__", "Recovery", "video/mp4",
+                              b"fake-bytes", created_by=1)
+    try:
+        client = server.test_client()
+
+        anon = client.get(f"/splash-video/{vid_id}")
+        assert anon.status_code == 302 and "/login" in anon.headers.get("Location", "")
+
+        client.post("/login", data={"email": "splashvid@lmu.edu", "password": "x"})
+        rv = client.get(f"/splash-video/{vid_id}")
+        assert rv.status_code == 200 and rv.data == b"fake-bytes"
+
+        rv2 = client.get(f"/splash-video/{vid_id + 999999}")
+        assert rv2.status_code == 404
+
+        with server.app_context():
+            SR.deactivate_video(vid_id)
+        rv3 = client.get(f"/splash-video/{vid_id}")
+        assert rv3.status_code == 404  # deactivated -> not servable
+    finally:
+        with get_engine().begin() as conn:
+            conn.execute(_text(f"DELETE FROM {SR.VIDEOS_TABLE} WHERE id = :id"), {"id": vid_id})
 
 
 def test_pitching_hub_has_splash_report_card(server):

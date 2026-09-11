@@ -18,8 +18,8 @@ CYCLE = "Fall"
 def _clean_sandbox():
     yield
     with get_engine().begin() as conn:
-        for t in (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.GAS_TABLE, SR.SCRIPTS_TABLE,
-                 SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE):
+        for t in (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
+                 SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE):
             conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": TEST_PID})
 
 
@@ -76,18 +76,93 @@ def test_engine_metrics_reindexed_to_fixed_seven_with_computed_delta():
     assert list(grid["metric_key"]) == list(SR.ENGINE_METRIC_KEYS)
     assert grid["base_value"].isna().all() and grid["delta"].isna().all()
 
-    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [
-        {"metric_key": "IR", "base_value": 40, "now_value": 45},
-        {"metric_key": "TotalArc", "base_value": 180, "now_value": 175},
-        {"metric_key": "NotAMetric", "base_value": 1, "now_value": 2},  # ignored
+    # "base" reading (an earlier date), then a later "now" reading for the
+    # same metrics -- base/now/delta are DERIVED from these dated rows, not
+    # stored directly (see READINGS_TABLE docstring).
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01", [
+        {"metric_key": "IR", "value": 40},
+        {"metric_key": "TotalArc", "value": 180},
+        {"metric_key": "NotAMetric", "value": 1},  # ignored
+    ], updated_by=1)
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-15", [
+        {"metric_key": "IR", "value": 45},
+        {"metric_key": "TotalArc", "value": 175},
     ], updated_by=1)
     grid2 = SR.read_engine_metrics(TEST_PID, SEASON, CYCLE)
     assert len(grid2) == 7
     ir = grid2[grid2.metric_key == "IR"].iloc[0]
     assert ir["base_value"] == 40.0 and ir["now_value"] == 45.0 and ir["delta"] == 5.0
+    assert ir["base_date"] == "2026-08-01" and ir["now_date"] == "2026-08-15"
     arc = grid2[grid2.metric_key == "TotalArc"].iloc[0]
     assert arc["delta"] == -5.0  # regression: now < base
-    assert "NotAMetric" not in set(grid2["metric_key"])
+    assert "NotAMetric" not in set(SR.read_engine_history(TEST_PID, SEASON, CYCLE)["metric_key"])
+
+    # re-submitting the SAME reading_date corrects that day's row in place,
+    # not a duplicate/third reading -- a same-day typo fix.
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-15",
+                              [{"metric_key": "IR", "value": 46}], updated_by=1)
+    hist = SR.read_engine_history(TEST_PID, SEASON, CYCLE)
+    ir_hist = hist[hist.metric_key == "IR"]
+    assert len(ir_hist) == 2  # still just base + now, not three rows
+    assert SR.read_engine_metrics(TEST_PID, SEASON, CYCLE) \
+        .set_index("metric_key").loc["IR", "now_value"] == 46.0
+
+    assert SR.latest_engine_reading_date(TEST_PID, SEASON, CYCLE) == "2026-08-15"
+
+
+def test_read_engine_history_accepts_a_list_of_cycles_for_full_year_view():
+    SR.upsert_engine_readings(TEST_PID, SEASON, "Fall", "2026-09-01",
+                              [{"metric_key": "IR", "value": 40}], updated_by=1)
+    SR.upsert_engine_readings(TEST_PID, SEASON, "Winter", "2026-12-01",
+                              [{"metric_key": "IR", "value": 42}], updated_by=1)
+    SR.upsert_engine_readings(TEST_PID, SEASON, "Spring", "2027-03-01",
+                              [{"metric_key": "IR", "value": 46}], updated_by=1)
+
+    fall_only = SR.read_engine_history(TEST_PID, SEASON, "Fall")
+    assert list(fall_only["value"]) == [40.0]
+
+    full_year = SR.read_engine_history(TEST_PID, SEASON, list(SR.CYCLES))
+    assert sorted(full_year["value"]) == [40.0, 42.0, 46.0]
+
+    grid = SR.read_engine_metrics(TEST_PID, SEASON, list(SR.CYCLES))
+    ir = grid.set_index("metric_key").loc["IR"]
+    assert ir["base_value"] == 40.0 and ir["base_date"] == "2026-09-01"
+    assert ir["now_value"] == 46.0 and ir["now_date"] == "2027-03-01"
+
+    # clean up the two non-default-CYCLE rows this test wrote (the autouse
+    # fixture only deletes CYCLE == "Fall")
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SR.READINGS_TABLE} WHERE player_id = :p "
+                          f"AND cycle IN ('Winter', 'Spring')"), {"p": TEST_PID})
+
+
+def test_upsert_engine_readings_drops_blank_values():
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01",
+                              [{"metric_key": "ER", "value": None},
+                               {"metric_key": "Grip", "value": ""}], updated_by=1)
+    assert SR.read_engine_history(TEST_PID, SEASON, CYCLE).empty
+
+
+def test_engine_flag_thresholds():
+    assert SR.engine_flag("IR", None) is None  # no reading yet -> never flags
+    original = SR.D1_BASELINES["IR"]
+    SR.D1_BASELINES["IR"] = 50.0
+    try:
+        assert SR.engine_flag("IR", 49.0) == "ok"       # 1 lb off
+        assert SR.engine_flag("IR", 45.0) == "yellow"    # 5 lb off
+        assert SR.engine_flag("IR", 39.0) == "red"       # 11 lb off
+        assert SR.engine_flag("IR", None) is None        # no reading yet
+    finally:
+        SR.D1_BASELINES["IR"] = original  # don't leak into other tests
+
+
+def test_engine_flag_none_when_baseline_unset():
+    original = SR.D1_BASELINES["IR"]
+    SR.D1_BASELINES["IR"] = None
+    try:
+        assert SR.engine_flag("IR", 10.0) is None  # no baseline -> never flags
+    finally:
+        SR.D1_BASELINES["IR"] = original
 
 
 def test_gas_station_replace_drops_blank_rows_and_removes_stale_ones():
@@ -182,7 +257,7 @@ def test_upsert_all_script_rows_writes_every_script_in_one_call():
 def test_multi_row_upsert_helpers_are_empty_safe():
     """An empty rows list (nothing to save for that section) must be a
     no-op, not a malformed empty-VALUES SQL statement."""
-    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [], updated_by=1)
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01", [], updated_by=1)
     SR.upsert_scripts(TEST_PID, SEASON, CYCLE, [], updated_by=1)
     SR.upsert_script_rows(TEST_PID, SEASON, CYCLE, 1, [], updated_by=1)
     SR.upsert_all_script_rows(TEST_PID, SEASON, CYCLE, {}, updated_by=1)
@@ -214,12 +289,16 @@ def test_pen_results_replace_assigns_sequential_pen_number_per_script():
 
 
 def test_save_all_persists_every_section_in_one_call():
+    # Building the Engine is saved separately via upsert_engine_readings
+    # (its own "Update Readings" action, not part of save_all -- see
+    # save_all's docstring), so exercise that here too for full coverage.
+    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-09-01",
+                              [{"metric_key": "ER", "value": 35}], updated_by=1)
     SR.save_all(
         TEST_PID, SEASON, CYCLE,
         plan_fields={"vision_statement": "Focus", "training_goals": "", "pre_throw_checklist": "",
                     "post_throw_checklist": "", "feet_set": "", "feet_moving": "",
                     "work_day": "", "recovery_video_url": ""},
-        engine_rows=[{"metric_key": "ER", "base_value": 30, "now_value": 35}],
         gas_rows=[{"need": "Mass", "exercise": "Squat", "sets_reps": "3x5", "notes": ""}],
         script_fields={1: {"goal": "G1", "measurable": "M1"}},
         script_pitch_rows={1: [{"row_num": 1, "pitch_type": "FB", "ball_info": "", "info": ""}]},
@@ -238,3 +317,71 @@ def test_save_all_persists_every_section_in_one_call():
 def test_feet_drill_and_strength_need_options_are_nonempty_and_deduped():
     assert len(SR.FEET_DRILL_OPTIONS) == len(set(SR.FEET_DRILL_OPTIONS)) > 50
     assert len(SR.STRENGTH_NEED_OPTIONS) == 8
+
+
+_TEST_DRILL_NAME = "__test_sandbox_drill__"
+
+
+@pytest.fixture
+def _clean_drill_catalog():
+    yield
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SR.DRILL_CATALOG_TABLE} WHERE name = :n"),
+                    {"n": _TEST_DRILL_NAME})
+
+
+def test_drill_catalog_seeded_add_deactivate_roundtrip(_clean_drill_catalog):
+    # Seeded from the original FEET_DRILL_OPTIONS on first read.
+    seeded = SR.read_drill_options()
+    assert set(SR.FEET_DRILL_OPTIONS).issubset(set(seeded))
+    assert _TEST_DRILL_NAME not in seeded
+
+    SR.add_drill_option(_TEST_DRILL_NAME, created_by=1)
+    assert _TEST_DRILL_NAME in SR.read_drill_options()
+
+    SR.deactivate_drill_option(_TEST_DRILL_NAME)
+    active = SR.read_drill_options()
+    inactive = SR.read_drill_options(active_only=False)
+    assert _TEST_DRILL_NAME not in active
+    assert _TEST_DRILL_NAME in inactive  # soft-delete, row still exists
+
+    # re-adding reactivates the same row rather than erroring on the
+    # UNIQUE(name) constraint
+    SR.add_drill_option(_TEST_DRILL_NAME, created_by=1)
+    assert _TEST_DRILL_NAME in SR.read_drill_options()
+
+
+def test_add_drill_option_ignores_blank_name(_clean_drill_catalog):
+    before = len(SR.read_drill_options(active_only=False))
+    SR.add_drill_option("   ")
+    assert len(SR.read_drill_options(active_only=False)) == before
+
+
+@pytest.fixture
+def _clean_videos():
+    yield
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SR.VIDEOS_TABLE} WHERE title LIKE '__test_sandbox%'"))
+
+
+def test_video_library_add_get_list_deactivate_roundtrip(_clean_videos):
+    vid_id = SR.add_video("__test_sandbox_clip__", "Recovery", "video/mp4", b"fake-bytes",
+                          created_by=1)
+    fetched = SR.get_video(vid_id)
+    assert fetched["title"] == "__test_sandbox_clip__" and fetched["data"] == b"fake-bytes"
+
+    listed = SR.list_videos(category="Recovery")
+    assert vid_id in set(listed["id"])
+    assert "data" not in listed.columns  # listing never pulls the blob
+
+    SR.deactivate_video(vid_id)
+    assert SR.get_video(vid_id) is None  # get_video only returns active rows
+    assert vid_id not in set(SR.list_videos(category="Recovery")["id"])
+
+
+def test_add_video_rejects_bad_category_and_oversized_file(_clean_videos):
+    with pytest.raises(ValueError):
+        SR.add_video("__test_sandbox_bad_cat__", "NotACategory", "video/mp4", b"x")
+    with pytest.raises(ValueError):
+        SR.add_video("__test_sandbox_too_big__", "Recovery", "video/mp4",
+                     b"x" * (SR.MAX_VIDEO_BYTES + 1))

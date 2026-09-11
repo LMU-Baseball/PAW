@@ -13,9 +13,14 @@ SCRIPT_COLORS = {
 
 
 def _empty_fig() -> go.Figure:
+    # Shorter than the real chart (360px) -- a full-height reserved chart
+    # area with nothing in it but a caption was one of the bigger blank
+    # spots on the page (2026-09-10 planning session: "eliminate as much
+    # white space as possible"); once real data exists the figure grows
+    # back to its normal height.
     fig = go.Figure()
     fig.update_layout(
-        title="Script Pen Results", height=360, margin=dict(l=40, r=20, t=50, b=40),
+        title="Script Pen Results", height=160, margin=dict(l=40, r=20, t=50, b=20),
         xaxis=dict(visible=False), yaxis=dict(visible=False),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),

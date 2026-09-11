@@ -29,11 +29,36 @@ from app.db import get_engine, query_df
 CYCLES: tuple[str, ...] = ("Fall", "Winter", "Spring")
 
 PLANS_TABLE = "splash_plans"
+# Superseded by READINGS_TABLE (2026-09-10 planning session -- one Base/Now
+# pair per metric couldn't represent the every-2-week reassessment cadence
+# coaches actually use). Left in _ALL_DDL/ensure_tables so a pre-existing
+# deployment doesn't error, but no code reads or writes it anymore -- same
+# "known dead table" status as GAMES_v1/v2 (see docs/DATABASE.md). Its rows
+# were migrated into READINGS_TABLE by scripts/migrate_splash_engine_history.py.
 ENGINE_TABLE = "splash_engine_metrics"
+READINGS_TABLE = "splash_engine_readings"
 GAS_TABLE = "splash_gas_station"
 SCRIPTS_TABLE = "splash_scripts"
 SCRIPT_ROWS_TABLE = "splash_script_rows"
 PEN_TABLE = "splash_pen_results"
+DRILL_CATALOG_TABLE = "splash_drill_catalog"
+VIDEOS_TABLE = "splash_videos"
+
+# Video categories for the titled-link library (2026-09-10 planning
+# session): Recovery Protocols and Gas Station each get their own shared
+# list, coach-managed, shown to every player rather than curated per plan
+# (matches "Brad to add to database as named links" -- an admin action, not
+# a per-player one).
+VIDEO_CATEGORIES: tuple[str, ...] = ("Recovery", "Gas Station")
+
+# Video bytes are stored as a DB BLOB for now (splash_videos.data) rather
+# than on local disk -- this app is still on Render's free tier, whose disk
+# is ephemeral and wiped on every redeploy (this repo auto-deploys on every
+# push to main), and has no S3 write access today. Revisit once the AWS
+# Lightsail migration lands a real persistent disk (see memory). Capped
+# per-file to keep a handful of drill/recovery clips from bloating the RDS
+# instance.
+MAX_VIDEO_BYTES = 150 * 1024 * 1024  # 150 MB
 
 N_SCRIPTS = 6
 N_SCRIPT_ROWS = 12
@@ -45,6 +70,52 @@ ENGINE_METRIC_LABELS = {
     "IR": "IR", "ER": "ER", "Scaption": "Scaption", "Grip": "Grip",
     "IROM": "IROM", "EROM": "EROM", "TotalArc": "Total Arc",
 }
+
+# D1-average baseline per metric, the fixed reference line a player's Now
+# value is color-flagged against (2026-09-10 planning session). Strength
+# metrics (IR/ER/Scaption/Grip) are in lb, ROM metrics (IROM/EROM/TotalArc)
+# in degrees -- Brad's rough thresholds ("~1-2 off = fine, ~5 = yellow, 10+
+# = red") were given in lb terms, so the same absolute deltas are applied to
+# ROM here too as a starting point; revisit once real ROM baselines are in
+# hand.
+#
+# PLACEHOLDER VALUES (Brad said "go with those numbers" on 2026-09-10,
+# after being told these are NOT LMU-specific): ballpark figures commonly
+# cited in throwing-shoulder sports-medicine literature for competitive
+# (college-level) overhead throwing athletes -- handheld-dynamometer
+# strength and ROM measured at 90 deg abduction (the standard clinical
+# position for this testing, e.g. Wilk et al.'s "total motion concept" --
+# IROM + EROM totaling ~180 deg is the classic bilateral-symmetry target).
+# These were NOT pulled from LMU's own testing protocol/device and are not
+# validated against this program's actual normative data -- replace with
+# real numbers from LMU's strength/athletic-training staff whenever
+# available; nothing else about the color-flag wiring needs to change when
+# that happens, just these seven values.
+D1_BASELINES: dict[str, float | None] = {
+    "IR": 30.0, "ER": 22.0, "Scaption": 22.0, "Grip": 115.0,
+    "IROM": 50.0, "EROM": 130.0, "TotalArc": 180.0,
+}
+D1_YELLOW_DELTA = 5.0
+D1_RED_DELTA = 10.0
+
+
+def engine_flag(metric_key: str, now_value) -> str | None:
+    """"red" / "yellow" / "ok" against D1_BASELINES[metric_key], or None if
+    either the baseline or the player's Now value isn't known yet."""
+    baseline = D1_BASELINES.get(metric_key)
+    if baseline is None or now_value is None:
+        return None
+    try:
+        if pd.isna(now_value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    off = float(baseline) - float(now_value)
+    if off >= D1_RED_DELTA:
+        return "red"
+    if off >= D1_YELLOW_DELTA:
+        return "yellow"
+    return "ok"
 
 # The sheet's inline Excel data-validation list for "Strength Needs"
 # (PD PLANS - Pitching.xlsx, e.g. cell U12:U14 on the `behrens` tab) --
@@ -133,6 +204,19 @@ _ENGINE_DDL = f"""
         PRIMARY KEY (player_id, season_label, cycle, metric_key)
     )"""
 
+_READINGS_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {READINGS_TABLE} (
+        player_id      BIGINT NOT NULL,
+        season_label   VARCHAR(16) NOT NULL,
+        cycle          VARCHAR(16) NOT NULL,
+        metric_key     VARCHAR(32) NOT NULL,
+        reading_date   VARCHAR(10) NOT NULL,
+        value          FLOAT,
+        updated_by     INT,
+        updated_at     DATETIME,
+        PRIMARY KEY (player_id, season_label, cycle, metric_key, reading_date)
+    )"""
+
 _GAS_DDL = f"""
     CREATE TABLE IF NOT EXISTS {GAS_TABLE} (
         player_id      BIGINT NOT NULL,
@@ -190,7 +274,40 @@ _PEN_DDL = f"""
         PRIMARY KEY (player_id, season_label, cycle, script_number, pen_number)
     )"""
 
-_ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL, _PEN_DDL)
+# Coach-managed catalog backing the Feet Set/Feet Moving/Work Day dropdowns
+# (used to be the hardcoded FEET_DRILL_OPTIONS tuple -- see that constant's
+# docstring). A coach can add new entries and deactivate old ones from the
+# UI; deactivating never deletes the row, so a plan that already picked a
+# now-inactive drill still displays its name (see read_plan/_bullet_view --
+# drill names are stored as plain text on the plan, not a foreign key).
+_DRILL_CATALOG_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {DRILL_CATALOG_TABLE} (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        name         VARCHAR(255) NOT NULL,
+        active       TINYINT(1) NOT NULL DEFAULT 1,
+        created_by   INT,
+        created_at   DATETIME,
+        UNIQUE KEY uq_splash_drill_name (name)
+    )"""
+
+# Shared, coach-managed video library (Recovery Protocols / Gas Station
+# titled links -- see VIDEO_CATEGORIES). `data` holds the raw file bytes
+# (see MAX_VIDEO_BYTES for why: no persistent disk on this deployment yet).
+_VIDEOS_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {VIDEOS_TABLE} (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        title        VARCHAR(255) NOT NULL,
+        category     VARCHAR(32) NOT NULL,
+        mimetype     VARCHAR(64),
+        size_bytes   INT,
+        data         LONGBLOB,
+        active       TINYINT(1) NOT NULL DEFAULT 1,
+        created_by   INT,
+        created_at   DATETIME
+    )"""
+
+_ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
+           _PEN_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
 
 
 _TABLES_ENSURED = False
@@ -346,38 +463,95 @@ def upsert_plan(player_id, season_label, cycle, fields: dict, updated_by=None) -
 
 
 # ============================ BUILDING THE ENGINE ===========================
+# One reading per (metric, date) -- see READINGS_TABLE docstring at the top
+# of this module. "Base" and "Now" are never stored directly; they're always
+# derived from the reading history (earliest/latest in the cycle), so
+# there's no way for a coach's correction to a past date to silently
+# overwrite the trend the way a single mutable Base/Now pair could.
+
+def read_engine_history(player_id, season_label, cycle) -> pd.DataFrame:
+    """Every reading for (player, season, cycle), one row per (metric_key,
+    reading_date) -- columns metric_key/reading_date/value, sorted for a
+    trend chart (metric, then chronological). `cycle` is normally one of
+    CYCLES, but also accepts a list of cycles -- the "View Cycles" multi-
+    select on Building the Engine (2026-09-10 planning session: "fall,
+    winter, spring, or full year") reads across more than one cycle at
+    once this way; selecting all of CYCLES is what gives the "full year"
+    view, so there's no separate literal "Full Year" option to maintain."""
+    ensure_tables()
+    cycles = [cycle] if isinstance(cycle, str) else list(cycle)
+    if not cycles:
+        return pd.DataFrame(columns=["metric_key", "reading_date", "value"])
+    cph = ", ".join(f":c{i}" for i in range(len(cycles)))
+    params = {"player_id": int(player_id), "season_label": season_label}
+    params.update({f"c{i}": c for i, c in enumerate(cycles)})
+    df = query_df(
+        f"SELECT metric_key, reading_date, value FROM {READINGS_TABLE} "
+        f"WHERE player_id = :player_id AND season_label = :season_label "
+        f"AND cycle IN ({cph}) ORDER BY metric_key, reading_date",
+        params)
+    return df
+
 
 def read_engine_metrics(player_id, season_label, cycle) -> pd.DataFrame:
-    """One row per ENGINE_METRIC_KEYS entry (fixed order), base/now/delta.
-    A metric with no saved row yet still shows a blank editable line."""
-    ensure_tables()
-    df = query_df(
-        f"SELECT metric_key, base_value, now_value FROM {ENGINE_TABLE} "
-        f"WHERE {_key_where()}",
-        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
-    by_key = {r["metric_key"]: r for _, r in df.iterrows()} if not df.empty else {}
+    """One row per ENGINE_METRIC_KEYS entry (fixed order): base_value/
+    base_date = earliest reading in `cycle` (or across all of `cycle` when
+    it's a list -- see read_engine_history), now_value/now_date = latest,
+    delta = now - base, flag = color flag on now_value vs D1_BASELINES (see
+    `engine_flag`). A metric with no reading yet still shows a blank line."""
+    hist = read_engine_history(player_id, season_label, cycle)
+    by_key = ({k: g.sort_values("reading_date") for k, g in hist.groupby("metric_key")}
+             if not hist.empty else {})
     rows = []
     for key in ENGINE_METRIC_KEYS:
-        r = by_key.get(key)
-        base = None if r is None or pd.isna(r["base_value"]) else float(r["base_value"])
-        now = None if r is None or pd.isna(r["now_value"]) else float(r["now_value"])
-        delta = round(now - base, 1) if (base is not None and now is not None) else None
+        g = by_key.get(key)
+        if g is None or g.empty:
+            base_v = base_d = now_v = now_d = None
+        else:
+            first, last = g.iloc[0], g.iloc[-1]
+            base_v = None if pd.isna(first["value"]) else float(first["value"])
+            base_d = first["reading_date"]
+            now_v = None if pd.isna(last["value"]) else float(last["value"])
+            now_d = last["reading_date"]
+        delta = round(now_v - base_v, 1) if (base_v is not None and now_v is not None) else None
         rows.append({"metric_key": key, "label": ENGINE_METRIC_LABELS[key],
-                     "base_value": base, "now_value": now, "delta": delta})
+                     "base_value": base_v, "base_date": base_d,
+                     "now_value": now_v, "now_date": now_d, "delta": delta,
+                     "d1_baseline": D1_BASELINES.get(key),
+                     "flag": engine_flag(key, now_v)})
     return pd.DataFrame(rows)
 
 
-def upsert_engine_metrics(player_id, season_label, cycle, rows: list[dict],
-                          updated_by=None) -> None:
-    """`rows`: [{"metric_key", "base_value", "now_value"}, ...]. Rows for a
-    metric outside ENGINE_METRIC_KEYS are ignored."""
+def latest_engine_reading_date(player_id, season_label, cycle) -> str | None:
+    """Most recent reading_date across ALL metrics for (player, season,
+    cycle), or None if nothing's been logged yet -- drives the "last
+    updated N days ago" hint next to the Update Readings control."""
+    hist = read_engine_history(player_id, season_label, cycle)
+    return None if hist.empty else str(hist["reading_date"].max())
+
+
+def upsert_engine_readings(player_id, season_label, cycle, reading_date, rows: list[dict],
+                           updated_by=None) -> None:
+    """`rows`: [{"metric_key", "value"}, ...] for ONE `reading_date` (the
+    Update Readings form submits all metrics for a single day at once).
+    Rows for a metric outside ENGINE_METRIC_KEYS, or with a blank/None
+    value, are dropped -- a coach leaving a field empty shouldn't create a
+    reading for it. Re-submitting the same reading_date upserts that day's
+    row in place (a same-day typo fix); a different reading_date always
+    lands as a new row, so past readings are never touched."""
     pid, sl = int(player_id), season_label
-    resolved = [{"player_id": pid, "season_label": sl, "cycle": cycle,
-                "metric_key": row["metric_key"], "base_value": row.get("base_value"),
-                "now_value": row.get("now_value")}
-               for row in rows if row.get("metric_key") in ENGINE_METRIC_KEYS]
-    _multi_row_upsert(ENGINE_TABLE, ("player_id", "season_label", "cycle", "metric_key"),
-                      ("base_value", "now_value"), resolved, updated_by)
+    resolved = []
+    for row in rows:
+        key = row.get("metric_key")
+        value = _clean(row.get("value"))
+        if key not in ENGINE_METRIC_KEYS or value is None:
+            continue
+        resolved.append({"player_id": pid, "season_label": sl, "cycle": cycle,
+                         "metric_key": key, "reading_date": str(reading_date),
+                         "value": value})
+    _multi_row_upsert(READINGS_TABLE,
+                      ("player_id", "season_label", "cycle", "metric_key", "reading_date"),
+                      ("value",), resolved, updated_by)
 
 
 # ============================ VARIABLE-ROW TABLES ===========================
@@ -586,23 +760,163 @@ def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: di
                       ("pitch_type", "ball_info", "info"), resolved, updated_by)
 
 
+# ============================ DRILL CATALOG ==================================
+
+_DRILL_SEEDED = False
+
+
+def _seed_drill_catalog() -> None:
+    """One-time (per process) INSERT IGNORE of the old hardcoded
+    FEET_DRILL_OPTIONS into the coach-managed catalog table, so switching
+    the dropdown over to a DB-backed list doesn't blank out everyone's
+    existing options on first deploy. Safe to call repeatedly -- IGNORE
+    skips names already present (the UNIQUE KEY on `name`)."""
+    global _DRILL_SEEDED
+    if _DRILL_SEEDED:
+        return
+    ensure_tables()
+    now = _now()
+    value_groups, params = [], {}
+    for i, name in enumerate(FEET_DRILL_OPTIONS):
+        params[f"name_{i}"] = name
+        params[f"created_at_{i}"] = now
+        value_groups.append(f"(:name_{i}, 1, NULL, :created_at_{i})")
+    sql = text(f"""
+        INSERT IGNORE INTO {DRILL_CATALOG_TABLE} (name, active, created_by, created_at)
+        VALUES {', '.join(value_groups)}
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, params)
+    _DRILL_SEEDED = True
+
+
+def read_drill_options(*, active_only: bool = True) -> list[str]:
+    """Names for the Feet Set/Feet Moving/Work Day dropdowns, seeded from
+    the original FEET_DRILL_OPTIONS list on first call, coach-editable
+    (add_drill_option/deactivate_drill_option) after that."""
+    _seed_drill_catalog()
+    where = "WHERE active = 1" if active_only else ""
+    df = query_df(f"SELECT name FROM {DRILL_CATALOG_TABLE} {where} ORDER BY name")
+    return [] if df.empty else list(df["name"])
+
+
+def add_drill_option(name: str, created_by=None) -> None:
+    """Adds a new drill to the shared catalog (or reactivates it, if a
+    coach previously deactivated a drill of the same name). Blank names are
+    ignored."""
+    name = (name or "").strip()
+    if not name:
+        return
+    _seed_drill_catalog()
+    sql = text(f"""
+        INSERT INTO {DRILL_CATALOG_TABLE} (name, active, created_by, created_at)
+        VALUES (:name, 1, :created_by, :created_at)
+        ON DUPLICATE KEY UPDATE active = 1, created_by = VALUES(created_by),
+                                created_at = VALUES(created_at)
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, {"name": name, "created_by": _clean(created_by), "created_at": _now()})
+
+
+def deactivate_drill_option(name: str) -> None:
+    """Soft-delete: hides `name` from future dropdown choices without
+    touching any plan that already saved it as text."""
+    _seed_drill_catalog()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"UPDATE {DRILL_CATALOG_TABLE} SET active = 0 WHERE name = :name"),
+                    {"name": name})
+
+
+# ============================ VIDEO LIBRARY ==================================
+# Shared, coach-managed titled-link library for Recovery Protocols / Gas
+# Station (see VIDEO_CATEGORIES + MAX_VIDEO_BYTES above for why bytes live
+# in the DB for now).
+
+def list_videos(category: str | None = None, *, active_only: bool = True) -> pd.DataFrame:
+    """id/title/category/size_bytes/created_at for the video library --
+    never selects `data` (the blob) so listing stays cheap even with a lot
+    of clips; fetch one clip's bytes with `get_video`."""
+    ensure_tables()
+    where = ["active = 1"] if active_only else []
+    params = {}
+    if category is not None:
+        where.append("category = :category")
+        params["category"] = category
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    return query_df(
+        f"SELECT id, title, category, size_bytes, created_at FROM {VIDEOS_TABLE} "
+        f"{clause} ORDER BY created_at DESC", params)
+
+
+def get_video(video_id) -> dict | None:
+    """{"title","mimetype","data"} (raw bytes) for one video, or None if
+    the id doesn't exist / was deactivated. Used only by the streaming
+    route -- never loaded onto the page itself."""
+    ensure_tables()
+    df = query_df(
+        f"SELECT title, mimetype, data FROM {VIDEOS_TABLE} WHERE id = :id AND active = 1",
+        {"id": int(video_id)})
+    if df.empty:
+        return None
+    r = df.iloc[0]
+    return {"title": r["title"], "mimetype": r["mimetype"] or "video/mp4", "data": r["data"]}
+
+
+def add_video(title: str, category: str, mimetype: str, data: bytes, created_by=None) -> int:
+    """Stores one video's bytes; returns the new row's id. Raises
+    ValueError for an oversized file or an unrecognized category --
+    callers (the upload callback) should catch that and show it as a
+    status message, not a stack trace."""
+    if category not in VIDEO_CATEGORIES:
+        raise ValueError(f"unknown video category: {category!r}")
+    if not data:
+        raise ValueError("no file data")
+    if len(data) > MAX_VIDEO_BYTES:
+        raise ValueError(f"file is {len(data) / 1e6:.0f} MB, over the "
+                         f"{MAX_VIDEO_BYTES / 1e6:.0f} MB limit")
+    ensure_tables()
+    sql = text(f"""
+        INSERT INTO {VIDEOS_TABLE} (title, category, mimetype, size_bytes, data, active,
+                                    created_by, created_at)
+        VALUES (:title, :category, :mimetype, :size_bytes, :data, 1, :created_by, :created_at)
+    """)
+    with get_engine().begin() as conn:
+        result = conn.execute(sql, {
+            "title": (title or "Untitled").strip() or "Untitled", "category": category,
+            "mimetype": mimetype, "size_bytes": len(data), "data": data,
+            "created_by": _clean(created_by), "created_at": _now(),
+        })
+        return int(result.lastrowid)
+
+
+def deactivate_video(video_id) -> None:
+    """Soft-delete: hides the video from the library without dropping the
+    row (mirrors deactivate_drill_option)."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"UPDATE {VIDEOS_TABLE} SET active = 0 WHERE id = :id"),
+                    {"id": int(video_id)})
+
+
 # ============================ ONE-CLICK SAVE ================================
 
-def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=None,
+def save_all(player_id, season_label, cycle, *, plan_fields=None,
             gas_rows=None, script_fields=None, script_pitch_rows=None, pen_rows=None,
             updated_by=None) -> None:
     """Persist every edited section in one call -- the page's single Save
     button. Every argument is optional so a caller/test can persist just one
     section; the callback always passes all of them.
 
+    Building the Engine is deliberately NOT a `save_all` argument -- it has
+    its own "Update Readings" action (`upsert_engine_readings`), separate
+    from this Edit/Save flow, because a reading is a dated historical fact
+    rather than a revisable field (see READINGS_TABLE docstring).
+
     `script_fields`: {script_number: {"goal", "measurable"}}.
     `script_pitch_rows`: {script_number: [12 row dicts]}.
     """
     if plan_fields is not None:
         upsert_plan(player_id, season_label, cycle, plan_fields, updated_by=updated_by)
-    if engine_rows is not None:
-        upsert_engine_metrics(player_id, season_label, cycle, engine_rows,
-                              updated_by=updated_by)
     if gas_rows is not None:
         replace_gas_station(player_id, season_label, cycle, gas_rows, updated_by=updated_by)
     if script_fields is not None:
