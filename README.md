@@ -312,7 +312,7 @@ so it isn't in the repo you cloned — you have to create it.
 
 2. **Get the real values from Brad.** The database credentials are shared
    privately (not over public channels). Brad will send you a filled-in `.env`
-   or the exact values to paste in. Ask him: **bradley.haskell@newrange.com**.
+   or the exact values to paste in. Ask him: **bhaskel2@lion.lmu.edu**.
 
 3. Open `.env` in Cursor and paste in the real values (database host, user,
    password, etc.), then save.
