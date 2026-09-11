@@ -76,7 +76,7 @@ though, so you need a GitHub account and Brad needs to add that account to the
 repo as a collaborator.
 
 1. If you don't have one, create a free account at <https://github.com>.
-2. Send Brad (**bradley.haskell@newrange.com**) your **GitHub username**.
+2. Send Brad (**bhaskel2@lion.lmu.edu**) your **GitHub username**.
 3. Wait for the email invite from GitHub and click **Accept**.
 
 You can clone the code (it's public) before the invite arrives, but you won't
