@@ -1,119 +1,173 @@
-"""Building the Engine's body visual: a simple Da Vinci-style (Vitruvian
-Man) line-art figure with the 7 engine metrics marked at their real
-anatomical spot -- a cluster of 6 dots at the throwing shoulder (IR/ER/
-Scaption/IROM/EROM/TotalArc all measure the same joint) and one dot at the
-throwing hand (Grip). Each dot is colored by that metric's flag (see
-`app.data.splash_report.engine_flag`) so a coach reads weak spots directly
-off the figure instead of only the Base/Now table.
+"""Building the Engine's body visual: five small panels (IR, ER, Scaption,
+Grip, ROM) instead of one combined figure -- 2026-09-11 feedback ("each
+separate visuals, fit on the white space in the left column"). Each strength
+panel pairs the real player-cutout silhouette (a translucent colored blob
+positioned over the tested body region, behind the cutout's outline so it
+reads as a highlighted zone rather than a floating shape) with a donut/ring
+gauge built fresh in CSS (`conic-gradient`, no image) in the site's crimson/
+white/Teko language. The ROM panel shares the same shoulder-highlighted
+cutout with three plain text readouts instead of three separate gauges.
 
-Built as a single inline SVG embedded via a `data:image/svg+xml` URI on an
-`html.Img` -- the same idiom `app.dashboards.velo_board.visual.
-top_gun_header` uses for its banner, since this Dash version (4.4.1) has no
-SVG components in `dash.html` to build one natively. A static image can't
-carry hover tooltips reliably (and never on a phone), so a small color-
-keyed legend renders underneath with the same information as plain text.
+The cutout (`app/static/reports/player-cutout.png`, a transparent-
+background line-art outline, 200x200) is Brad's own asset from last year's
+tool -- swapped in in place of a from-scratch SVG figure because a
+programmatically-drawn body doesn't read as well as reused real art.
+Coordinates below were picked by inspecting the PNG's actual ink (alpha>10)
+per row/column, then confirmed by rendering in a browser -- see this
+module's originating fork report for the pixel analysis.
 """
 from __future__ import annotations
-
-import base64
 
 from dash import html
 
 from app.data import splash_report as SR
+from app.dashboards.shell import CRIMSON
 
-_LINE = "#4a4a4a"
+_CUTOUT_SRC = "/static/reports/player-cutout.png"
+_TRACK_COLOR = "#e6e6e6"
 _FLAG_COLOR = {None: "#c9c9c9", "ok": "#4a8f4a", "yellow": "#d9a400", "red": "#c0193a"}
 
-# (metric_key, offset from the shoulder/hand anchor point) -- six metrics
-# fan out in a small arc around the shoulder anchor, Grip sits alone at the
-# hand anchor. Offsets are in SVG user units, applied AFTER mirroring for
-# a left-handed thrower (see `_anchor_x`).
-_SHOULDER_METRICS = ("IR", "ER", "Scaption", "IROM", "EROM", "TotalArc")
-_SHOULDER_FAN = [(-14, -10), (0, -16), (14, -10), (-14, 8), (0, 14), (14, 8)]
+# Highlight blobs, in PERCENT of the (square) cutout image -- {left, top,
+# width, height} of the box the blob fills, drawn for a RIGHT-handed
+# thrower (throwing arm on the viewer's LEFT, i.e. the smaller-x side of
+# the 200x200 source image; see `_mirror_box`). Picked from the source
+# PNG's actual ink extent: shoulder cap centered ~(80, 62) of 200, hand/
+# forearm centered ~(65, 100) of 200 (the outstretched arm's widest point).
+_SHOULDER_BOX = {"left": 30.0, "top": 22.0, "width": 20.0, "height": 18.0}
+_HAND_BOX = {"left": 24.0, "top": 42.0, "width": 15.0, "height": 15.0}
+
+# (metric_key, panel title, highlight box) for the four strength panels.
+_STRENGTH_PANELS = [
+    ("IR", "Internal Rotation", _SHOULDER_BOX),
+    ("ER", "External Rotation", _SHOULDER_BOX),
+    ("Scaption", "Scaption", _SHOULDER_BOX),
+    ("Grip", "Grip", _HAND_BOX),
+]
 
 
-def _anchor_x(x: float, *, mirror: bool) -> float:
-    """Mirror an x-coordinate across the figure's centerline (120) when the
-    throwing arm is the LEFT one -- the base figure/markers are drawn for a
-    right-handed thrower (throwing side on the viewer's left, x < 120)."""
-    return 240 - x if mirror else x
+def _mirror_box(box: dict, *, mirror: bool) -> dict:
+    """Flip a {left, top, width, height} box across the image's vertical
+    centerline (50%) for a left-handed thrower. All panels are drawn for a
+    right-handed thrower by default (throwing side = smaller x = viewer's
+    left), matching the convention the old single-figure version used."""
+    if not mirror:
+        return box
+    return {**box, "left": 100.0 - box["left"] - box["width"]}
 
 
-def _dot(cx: float, cy: float, color: str, label: str) -> str:
-    return (f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="7" fill="{color}" '
-           f'stroke="#fff" stroke-width="1.5"><title>{label}</title></circle>')
+def _highlighted_cutout(box: dict, color: str, *, size_px: int = 150) -> html.Div:
+    """The cutout image with a translucent colored blob behind it, clipped
+    to sit inside the silhouette -- the blob is a plain rounded rect (not a
+    tight body-part shape; the transparent PNG interior means anything
+    behind it only shows through the areas the outline doesn't cover, so a
+    soft-edged box reads as "this region of the body" without needing a
+    precise anatomical mask). ~55% fill-opacity: strong enough to read as
+    highlighted, translucent enough that the outline stroke drawn on top
+    (and the page background through the image's own transparent parts)
+    both stay visible, per Brad's "opaque enough to see through the body.\""""
+    blob = html.Div(style={
+        "position": "absolute", "left": f"{box['left']}%", "top": f"{box['top']}%",
+        "width": f"{box['width']}%", "height": f"{box['height']}%",
+        "backgroundColor": color, "opacity": "0.55", "borderRadius": "45%",
+        "filter": "blur(1.5px)",
+    })
+    img = html.Img(src=_CUTOUT_SRC, style={
+        "position": "relative", "width": f"{size_px}px", "height": f"{size_px}px",
+        "display": "block",
+    })
+    return html.Div([blob, img], style={
+        "position": "relative", "width": f"{size_px}px", "height": f"{size_px}px",
+        "flexShrink": "0",
+    })
 
 
-def _figure_svg(dots: str) -> str:
-    # Outer circle (the Vitruvian roundel) + a plain arms-out/legs-apart
-    # stick figure inscribed in it -- a nod to the reference without
-    # attempting Da Vinci's double-exposed limbs.
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320">
-  <circle cx="120" cy="150" r="108" fill="none" stroke="#d8d8d8" stroke-width="2"/>
-  <circle cx="120" cy="52" r="20" fill="none" stroke="{_LINE}" stroke-width="3"/>
-  <line x1="120" y1="72" x2="120" y2="185" stroke="{_LINE}" stroke-width="3"/>
-  <line x1="120" y1="95" x2="26" y2="60" stroke="{_LINE}" stroke-width="3"/>
-  <line x1="120" y1="95" x2="214" y2="60" stroke="{_LINE}" stroke-width="3"/>
-  <line x1="120" y1="185" x2="55" y2="295" stroke="{_LINE}" stroke-width="3"/>
-  <line x1="120" y1="185" x2="185" y2="295" stroke="{_LINE}" stroke-width="3"/>
-  {dots}
-</svg>"""
+def _ring_gauge(value, baseline, color, *, size_px: int = 112) -> html.Div:
+    """A donut/ring gauge built from a CSS conic-gradient (no image, no raw
+    SVG -- this Dash version has no SVG components in `dash.html`, and
+    Brad asked for a fresh simplified icon here rather than reusing the
+    cutout art). Fill fraction = value/baseline, clamped to [0, 100]% so a
+    player who exceeds the D1 average still just shows a full ring instead
+    of overflowing it; the raw number is always the actual value, not the
+    clamped fraction."""
+    if value is None or baseline in (None, 0):
+        pct = 0.0
+        text = "—"
+    else:
+        pct = max(0.0, min(1.0, float(value) / float(baseline))) * 100.0
+        text = f"{value:g}"
+    ring_bg = f"conic-gradient({color} {pct:.0f}%, {_TRACK_COLOR} {pct:.0f}%)"
+    return html.Div([
+        html.Div(style={
+            "width": f"{size_px - 10}px", "height": f"{size_px - 10}px",
+            "borderRadius": "50%", "backgroundColor": "#fff",
+            "display": "flex", "alignItems": "center", "justifyContent": "center",
+            "fontFamily": "Teko, sans-serif", "fontSize": "30px", "fontWeight": "bold",
+            "color": CRIMSON,
+        }, children=text),
+    ], style={
+        "width": f"{size_px}px", "height": f"{size_px}px", "borderRadius": "50%",
+        "background": ring_bg, "display": "flex", "alignItems": "center",
+        "justifyContent": "center", "flexShrink": "0",
+    })
 
 
-def _svg_data_uri(svg: str) -> str:
-    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
-
-
-def _legend_row(label: str, flag: str | None, now_value, d1_baseline) -> html.Div:
+def _strength_panel(key: str, title: str, box: dict, row: dict, *, mirror: bool) -> html.Div:
+    flag = row.get("flag")
     color = _FLAG_COLOR.get(flag, _FLAG_COLOR[None])
-    value_text = "—" if now_value is None else f"{now_value:g}"
-    baseline_text = f" · D1 avg {d1_baseline:g}" if d1_baseline is not None else ""
+    cutout = _highlighted_cutout(_mirror_box(box, mirror=mirror), color)
+    gauge = _ring_gauge(row.get("now_value"), row.get("d1_baseline"), color)
+    return html.Div([
+        html.Div(title, style={"fontSize": "14px", "fontWeight": "bold", "color": CRIMSON,
+                               "textTransform": "uppercase", "marginBottom": "6px"}),
+        html.Div([cutout, gauge], style={"display": "flex", "alignItems": "center",
+                                         "gap": "14px"}),
+    ], style={"marginBottom": "20px"})
+
+
+def _rom_readout(label: str, row: dict) -> html.Div:
+    flag = row.get("flag")
+    color = _FLAG_COLOR.get(flag, _FLAG_COLOR[None])
+    now_v = row.get("now_value")
+    text = "—" if now_v is None else f"{now_v:g}°"
     return html.Div([
         html.Span(style={"display": "inline-block", "width": "10px", "height": "10px",
                          "borderRadius": "50%", "backgroundColor": color,
                          "marginRight": "6px"}),
-        html.Span(f"{label}: {value_text}{baseline_text}", style={"fontSize": "12px"}),
-    ], style={"display": "flex", "alignItems": "center", "marginBottom": "2px"})
+        html.Span(f"{label}: {text}", style={"fontSize": "14px"}),
+    ], style={"marginBottom": "4px"})
+
+
+def _rom_panel(by_key: dict, *, mirror: bool) -> html.Div:
+    # Same shoulder region as IR/ER/Scaption -- IROM/EROM/TotalArc test the
+    # same joint. Worst (most severe) flag among the three drives the
+    # highlight color, so the cutout still shows red if any one of them is
+    # red even though the readouts list all three individually.
+    _SEVERITY = {"red": 3, "yellow": 2, "ok": 1, None: 0}
+    rom_keys = ("IROM", "EROM", "TotalArc")
+    worst = max((by_key.get(k, {}).get("flag") for k in rom_keys),
+               key=lambda f: _SEVERITY.get(f, 0), default=None)
+    color = _FLAG_COLOR.get(worst, _FLAG_COLOR[None])
+    cutout = _highlighted_cutout(_mirror_box(_SHOULDER_BOX, mirror=mirror), color)
+    readouts = html.Div([_rom_readout(SR.ENGINE_METRIC_LABELS.get(k, k), by_key.get(k, {}))
+                         for k in rom_keys])
+    return html.Div([
+        html.Div("Range of Motion", style={"fontSize": "14px", "fontWeight": "bold",
+                                           "color": CRIMSON, "textTransform": "uppercase",
+                                           "marginBottom": "6px"}),
+        html.Div([cutout, readouts], style={"display": "flex", "alignItems": "center",
+                                            "gap": "14px"}),
+    ], style={"marginBottom": "20px"})
 
 
 def render(engine_records: list[dict], throws: str | None) -> html.Div:
     """`engine_records` is `data["engine"]` (see `app.data.splash_report.
     read_engine_metrics`) -- already carries `flag`/`now_value`/
     `d1_baseline` per metric, so no DB access here. `throws` ("Left"/
-    "Right"/None) picks which side of the figure the throwing-arm markers
-    land on; unknown defaults to the right-handed side."""
+    "Right"/None) mirrors which side of the cutout gets highlighted;
+    unknown defaults to the right-handed side."""
     by_key = {r["metric_key"]: r for r in (engine_records or [])}
     mirror = str(throws).strip().lower().startswith("l")
-
-    dots = []
-    # Shoulder cluster anchor sits close to the shoulder JOINT (120, 95),
-    # 22% of the way down the upper-arm line toward the hand (26, 60) --
-    # not the line's midpoint, which reads more like an elbow than a
-    # shoulder once the 6-dot fan is drawn around it.
-    anchor_x = _anchor_x(120 - 0.22 * (120 - 26), mirror=mirror)
-    anchor_y = 95 - 0.22 * (95 - 60)
-    for key, (dx, dy) in zip(_SHOULDER_METRICS, _SHOULDER_FAN):
-        r = by_key.get(key, {})
-        color = _FLAG_COLOR.get(r.get("flag"), _FLAG_COLOR[None])
-        now_v = r.get("now_value")
-        label = f"{SR.ENGINE_METRIC_LABELS.get(key, key)}: {'—' if now_v is None else now_v}"
-        mirrored_dx = -dx if mirror else dx
-        dots.append(_dot(anchor_x + mirrored_dx, anchor_y + dy, color, label))
-
-    grip = by_key.get("Grip", {})
-    grip_color = _FLAG_COLOR.get(grip.get("flag"), _FLAG_COLOR[None])
-    grip_now = grip.get("now_value")
-    grip_label = f"Grip: {'—' if grip_now is None else grip_now}"
-    hand_x, hand_y = _anchor_x(26, mirror=mirror), 60
-    dots.append(_dot(hand_x, hand_y, grip_color, grip_label))
-
-    svg = _figure_svg("\n  ".join(dots))
-    img = html.Img(src=_svg_data_uri(svg), alt="Body visual — engine metric zones",
-                   style={"width": "100%", "maxWidth": "220px", "display": "block",
-                          "margin": "0 auto"})
-    legend = html.Div(
-        [_legend_row(SR.ENGINE_METRIC_LABELS.get(k, k), by_key.get(k, {}).get("flag"),
-                    by_key.get(k, {}).get("now_value"), by_key.get(k, {}).get("d1_baseline"))
-         for k in SR.ENGINE_METRIC_KEYS],
-        style={"marginTop": "8px"})
-    return html.Div([img, legend], style={"textAlign": "center"})
+    panels = [_strength_panel(key, title, box, by_key.get(key, {}), mirror=mirror)
+             for key, title, box in _STRENGTH_PANELS]
+    panels.append(_rom_panel(by_key, mirror=mirror))
+    return html.Div(panels)

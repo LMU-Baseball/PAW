@@ -14,15 +14,26 @@ _TABLE_STYLE = {"overflowX": "auto", "width": "fit-content", "maxWidth": "100%"}
 
 
 def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
-          dropdown=None, extra_style=None) -> dash_table.DataTable:
+          dropdown=None, extra_style=None, cell_style=None, header_style=None) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=id_, columns=columns, data=data, editable=editable,
         row_deletable=row_deletable, dropdown=dropdown or {},
         style_table=_TABLE_STYLE, style_as_list_view=True,
-        style_header=_HEADER_STYLE, style_cell=_CELL_STYLE,
+        style_header=header_style or _HEADER_STYLE, style_cell=cell_style or _CELL_STYLE,
         style_data={"backgroundColor": "rgba(255,255,255,0.85)"},
         style_data_conditional=extra_style or [],
     )
+
+
+# Bigger than the shared _CELL_STYLE -- Building the Engine's two tables sit
+# alone in their own card now that the body visual moved to the sidebar
+# (2026-09-11 feedback: "lots of white space on the Building the Engine
+# side"), so a larger, easier-to-read grid helps fill it. Not applied to
+# every table site-wide -- the script/gas-station/pen-results grids are
+# already dense (many rows/columns) and don't have the same spare room.
+_ENGINE_CELL_STYLE = {"textAlign": "center", "padding": "10px 16px",
+                      "fontFamily": "Teko, sans-serif", "fontSize": "19px"}
+_ENGINE_HEADER_STYLE = {**_HEADER_STYLE, "fontSize": "16px", "padding": "8px 16px"}
 
 
 _FLAG_STYLE = {
@@ -54,7 +65,8 @@ def engine_metrics_table(df: pd.DataFrame, table_id: str) -> dash_table.DataTabl
         for style in ([_FLAG_STYLE[flag]] if flag in _FLAG_STYLE else [])
     ]
     return _table(table_id, columns, d.to_dict("records"), editable=False,
-                 extra_style=flag_style)
+                 extra_style=flag_style, cell_style=_ENGINE_CELL_STYLE,
+                 header_style=_ENGINE_HEADER_STYLE)
 
 
 def gas_station_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:

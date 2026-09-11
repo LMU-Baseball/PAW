@@ -19,7 +19,7 @@ from flask_login import current_user
 from app.data import pitching_caps, seasons, splash_report as SR
 from app.dashboards import date_range as dr  # noqa: F401  (kept for parity w/ other shells)
 from app.dashboards.pitching import selectors
-from app.dashboards.shell import BANNER, CRIMSON, PHOTO_PLACEHOLDER, header, edit_save_buttons
+from app.dashboards.shell import BANNER, BLUE, CRIMSON, PHOTO_PLACEHOLDER, header, edit_save_buttons
 from app.dashboards.splash_report import body_visual, charts, tables
 
 # A crimson-tinted wash + thin top accent instead of a flat white box (2026-
@@ -33,6 +33,63 @@ _CARD = {"background": "linear-gradient(160deg, rgba(255,255,255,0.92) 0%, "
                        "rgba(255,255,255,0.85) 55%, rgba(154,0,33,0.10) 100%)",
          "borderRadius": "8px", "borderTop": f"3px solid {CRIMSON}",
          "padding": "10px 12px", "marginBottom": "10px"}
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+# Round 1 of "add more colors... blue... make every box have a different
+# look" (2026-09-11 feedback, explicitly a first pass to react to) -- five
+# translucent corner-wash variants mixing CRIMSON and the site's BLUE
+# (`shell.BLUE`). Still translucent (palm background shows through) and
+# still light enough for dark text to stay legible; only `background` and
+# `borderTop` vary, everything else in `_CARD` (radius/padding/margin)
+# stays constant across variants.
+_CARD_VARIANTS = [
+    {"background": f"linear-gradient(160deg, rgba(255,255,255,0.92) 0%, "
+                   f"rgba(255,255,255,0.85) 55%, {_rgba(CRIMSON, 0.14)} 100%)",
+     "borderTop": f"3px solid {CRIMSON}"},
+    {"background": f"linear-gradient(200deg, rgba(255,255,255,0.92) 0%, "
+                   f"rgba(255,255,255,0.85) 55%, {_rgba(BLUE, 0.18)} 100%)",
+     "borderTop": f"3px solid {BLUE}"},
+    {"background": f"linear-gradient(15deg, {_rgba(CRIMSON, 0.12)} 0%, "
+                   f"rgba(255,255,255,0.88) 45%, {_rgba(BLUE, 0.12)} 100%)",
+     "borderTop": f"3px solid {CRIMSON}"},
+    {"background": f"linear-gradient(340deg, rgba(255,255,255,0.92) 0%, "
+                   f"rgba(255,255,255,0.85) 55%, {_rgba(BLUE, 0.16)} 100%)",
+     "borderTop": f"3px solid {CRIMSON}"},
+    {"background": f"linear-gradient(110deg, {_rgba(BLUE, 0.11)} 0%, "
+                   f"rgba(255,255,255,0.88) 50%, {_rgba(CRIMSON, 0.16)} 100%)",
+     "borderTop": f"3px solid {BLUE}"},
+]
+
+# Explicit per-card assignment (not a hash) so adjacent cards in the actual
+# page layout never land on the same variant by coincidence -- checked by
+# hand against checklists_grid's 3-row x 2-col arrangement and the sidebar's
+# stacked cards. Matched by prefix since a couple of titles carry an
+# interpolated suffix (e.g. "Bullpen Scripts · 6 Scripts"). Anything not
+# listed falls back to a stable hash of its title, so a future/unlisted
+# card still gets *a* variant rather than crashing or defaulting to plain.
+_CARD_VARIANT_BY_PREFIX = [
+    ("Pre-Throw Checklist", 0), ("Post-Throw Checklist", 1),
+    ("Feet Set", 2), ("Feet Moving", 3),
+    ("Work Day", 4), ("Recovery Protocols", 0),
+    ("Player Training Goals", 1), ("Vision Statement", 3),
+    ("Building the Engine", 2), ("Bullpen Scripts", 4),
+]
+
+
+def _card_style(title: str) -> dict:
+    for prefix, idx in _CARD_VARIANT_BY_PREFIX:
+        if title.startswith(prefix):
+            variant = _CARD_VARIANTS[idx]
+            break
+    else:
+        variant = _CARD_VARIANTS[sum(title.encode("utf-8")) % len(_CARD_VARIANTS)]
+    return {**_CARD, **variant}
 _LABEL_STYLE = {"color": CRIMSON, "fontWeight": "bold", "fontSize": "13px",
                 "textTransform": "uppercase", "letterSpacing": "1px",
                 "display": "block", "marginBottom": "4px", "textAlign": "center"}
@@ -48,7 +105,7 @@ def _title(text: str) -> html.H3:
 
 
 def _card(title: str, child, *, card_id=None) -> html.Div:
-    kwargs = {"style": _CARD}
+    kwargs = {"style": _card_style(title)}
     if card_id:
         kwargs["id"] = card_id
     return html.Div([_title(title), child], **kwargs)
@@ -365,7 +422,25 @@ def engine_tables_block(engine_records: list) -> html.Div:
 
 def engine_and_gas_station(engine_records: list, gas_records: list, gas_videos: list[dict], *,
                            editable: bool, is_coach: bool, latest_engine_date: str | None,
-                           cycle: str, throws: str | None) -> html.Div:
+                           cycle: str) -> html.Div:
+    """Body visual moved to the left sidebar (see `sidebar`) -- this card is
+    back to just the Strength/ROM tables + View Cycles + Update Readings +
+    Gas Station. 2026-09-11 feedback ("lots of white space on the Building
+    the Engine side ... fill that in"): the Strength/ROM tables themselves
+    got bigger (`tables._ENGINE_CELL_STYLE`) -- measured live, they now fill
+    ~91% of this card's content width on their own (528px of 579px
+    available at the card's actual rendered size), which is most of what
+    was making the card feel sparse. A "Gas Station beside the tables"
+    layout was tried and dropped: at that width there's only ~50px left in
+    the row, nowhere near enough for a readable 4-column table, so it just
+    wrapped to a second row every time anyway -- no different from stacking
+    it below outright, just with extra flex-layout code pretending
+    otherwise. The remaining sparseness below the tables is Gas Station
+    actually having no rows entered yet, which is a data gap, not a layout
+    one -- see this function's home commit/report for the measurement and
+    the options considered (narrowing the sidebar/right columns to give
+    this card more width; a denser Gas Station table style) if more is
+    wanted."""
     gas = pd.DataFrame(gas_records)
     gas_child = tables.gas_station_table(gas, editable=editable) if (editable or not gas.empty) \
         else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
@@ -381,18 +456,12 @@ def engine_and_gas_station(engine_records: list, gas_records: list, gas_videos: 
                     value=[cycle], style={"fontFamily": "Teko, sans-serif",
                                           "marginBottom": "8px", "maxWidth": "360px"}),
     ])
-    left_col = html.Div(
-        [view_cycles, html.Div(engine_tables_block(engine_records), id="splash-engine-tables-wrap")]
-        + ([_update_readings_panel(latest_engine_date)] if is_coach else []),
-        style={"flex": "1 1 260px", "minWidth": "0"})
-    # "Building Engine section: stack data columns left, body visual to the
-    # right in white space" -- 2026-09-10 planning session.
-    right_col = html.Div(body_visual.render(engine_records, throws),
-                         id="splash-engine-visual-wrap", style={"flex": "0 0 200px"})
-    top_row = html.Div([left_col, right_col], className="paw-chart-row",
-                       style={"display": "flex", "gap": "16px", "flexWrap": "wrap",
-                             "alignItems": "flex-start", "marginBottom": "12px"})
-    children = [top_row]
+    children = [
+        view_cycles,
+        html.Div(engine_tables_block(engine_records), id="splash-engine-tables-wrap"),
+    ]
+    if is_coach:
+        children.append(_update_readings_panel(latest_engine_date))
     children.append(html.Div([html.B("The Gas Station"),
                   html.Div("Tie a specific exercise to whatever the numbers above flag.",
                           style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
@@ -467,7 +536,8 @@ def scripts_section(pen_records: list, scripts_records: list, script_rows: dict,
     return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
 
 
-def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Div:
+def sidebar(profile: dict, kpis: dict, plan: dict, engine_records: list, *,
+           editable: bool) -> html.Div:
     photo = profile["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{profile['jersey']} · " if profile["jersey"] else ""
     meta = " · ".join([x for x in (profile["class_year"],
@@ -502,7 +572,16 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Di
     # rail looking empty next to two much taller columns.
     vision = _text_section("Vision Statement · Season Focus", plan["vision_statement"],
                            editable=editable, input_id="splash-vision")
-    return html.Div([profile_card, goals, vision])
+    # Building the Engine's body visual moved here from the Building the
+    # Engine card (2026-09-11 feedback: "fit on the white space in the left
+    # column") -- five small panels (IR/ER/Scaption/Grip/ROM), see
+    # app.dashboards.splash_report.body_visual. `splash-engine-visual-wrap`
+    # keeps its id here so `_on_engine_cycle_filter` in callbacks.py (which
+    # targets it by id, not position) still refreshes it when a coach
+    # widens the View Cycles selection.
+    visual = html.Div(body_visual.render(engine_records, profile.get("throws")),
+                      id="splash-engine-visual-wrap", style={"marginTop": "10px"})
+    return html.Div([profile_card, goals, vision, visual])
 
 
 def filters(player_id, season_label, cycle) -> html.Div:
@@ -573,7 +652,8 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
     if not data:
         return html.Div("Select a pitcher.", style={"padding": "20px"})
     plan = data["plan"]
-    left = html.Div(sidebar(data["profile"], data["kpis"], plan, editable=editable),
+    left = html.Div(sidebar(data["profile"], data["kpis"], plan, data["engine"],
+                            editable=editable),
                     className="paw-dash-sidebar", style={"width": "290px", "flexShrink": "0"})
     videos = data.get("videos", {})
     center = html.Div([
@@ -583,8 +663,7 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
         engine_and_gas_station(data["engine"], data["gas"], videos.get("Gas Station", []),
                                editable=editable, is_coach=is_coach,
                                latest_engine_date=data.get("latest_engine_date"),
-                               cycle=data.get("cycle"),
-                               throws=(data.get("profile") or {}).get("throws")),
+                               cycle=data.get("cycle")),
     ], style={"flex": "1 1 0", "minWidth": "0"})
     # Bullpen Scripts (pen-results trend on top, the 6 scripts collapsed
     # below it -- see scripts_section) sits alongside the sidebar+center on

@@ -9,8 +9,8 @@ from dash import dcc
 ALL_IN_RANGE = "__all_in_range__"
 
 PRESETS = [
-    ("season", "This Season"), ("week", "Past Week"), ("month", "Past Month"),
-    ("3months", "Past 3 Months"), ("6months", "Past 6 Months"),
+    ("season", "This Season"), ("yesterday", "Yesterday"), ("week", "Past Week"),
+    ("month", "Past Month"), ("3months", "Past 3 Months"), ("6months", "Past 6 Months"),
     ("year", "Past Year"), ("custom", "Custom Range"),
 ]
 _PRESET_DAYS = {"week": 7, "month": 30, "3months": 90, "6months": 181, "year": 365}
@@ -40,6 +40,9 @@ def preset_range(preset, anchor):
     a = _as_date(anchor)
     if preset == "season":
         return season_block(a)
+    if preset == "yesterday":
+        y = a - timedelta(days=1)
+        return y, y
     days = _PRESET_DAYS.get(preset)
     if days is None:
         return None
