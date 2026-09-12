@@ -379,6 +379,25 @@ def register_callbacks(dash_app) -> None:
             pen = pen[pen["script_number"].isin(selected)]
         return charts.pen_results_fig(pen)
 
+    # "Recently Removed" pen results -- Restore is immediate (not part of
+    # the big Save), same "small coach-only action, refresh splash-data
+    # right away" pattern as Manage Drills/Manage Video Library's
+    # add/remove. See SR.save_pen_results'/restore_pen_result's docstrings
+    # for why a deleted pen result is recoverable at all.
+    @dash_app.callback(
+        Output("splash-data", "data", allow_duplicate=True),
+        Input({"type": "splash-pen-restore", "index": ALL}, "n_clicks"),
+        State("splash-player", "value"), State("splash-season", "value"),
+        State("splash-cycle", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_restore_pen_result(n_clicks_list, player_id, season, cycle):
+        trig = ctx.triggered_id
+        if not _is_coach() or not isinstance(trig, dict) or not any(n_clicks_list or []):
+            return no_update
+        SR.restore_pen_result(trig["index"], updated_by=getattr(current_user, "id", None))
+        return layout.load_data(player_id, season, cycle)
+
     # Building the Engine's "View Cycles" -- widens Base/Now/Δ across more
     # than one cycle's readings (e.g. Fall+Winter+Spring = "full year"; see
     # SR.read_engine_history's docstring). Rebuilds the two tables AND the

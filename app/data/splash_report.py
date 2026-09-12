@@ -9,12 +9,27 @@ CYCLES below. Six small tables, one per section of the page; all follow
 explicit composite PRIMARY KEY, `INSERT ... ON DUPLICATE KEY UPDATE` upserts,
 the pooled RDS engine, `ensure_tables()` called lazily (never at import time).
 
-Two tables (`splash_gas_station`, `splash_pen_results`) hold a variable
-number of rows per key (a coach can add/delete rows in the UI), so those are
-persisted by full REPLACE (delete-then-insert) rather than upsert-by-row --
-upserting by row_num would leave stale rows behind whenever a row is
-deleted in the UI. The other four have a fixed row shape (a fixed metric/
-script/pitch-slot count) and are upserted by that fixed key instead.
+`splash_gas_station` holds a variable number of rows per key (a coach can
+add/delete rows in the UI), persisted by full REPLACE (delete-then-insert)
+rather than upsert-by-row -- upserting by row_num would leave stale rows
+behind whenever a row is deleted in the UI. There's no history concept for
+Gas Station (just "what's the current exercise list"), so losing a removed
+row is fine.
+
+`splash_pen_results` is also variable-row, but a coach removing an old pen
+result IS a real, permanent-feeling loss (it's the raw data behind the
+Script Pen Results trend graph) -- so unlike Gas Station, it's never hard-
+deleted. Each reading has a stable surrogate `id` and an `active` flag;
+`save_pen_results` soft-deletes (active=0) whatever the coach removed from
+the table instead of dropping it, and `restore_pen_result` flips one back.
+`pen_number` (the trend chart's x-axis) is derived at read time from each
+script's active rows ordered by date, not stored -- storing it as an
+identity column made a row's "identity" shift every time a sibling row was
+deleted, which is what made safe soft-delete/restore impossible before this.
+
+The other four tables (splash_plans, splash_engine_readings, splash_scripts,
+splash_script_rows) have a fixed row shape (a fixed metric/script/pitch-slot
+count, or a single row per key) and are upserted by that fixed key instead.
 """
 from __future__ import annotations
 
@@ -262,16 +277,17 @@ _SCRIPT_ROWS_DDL = f"""
 
 _PEN_DDL = f"""
     CREATE TABLE IF NOT EXISTS {PEN_TABLE} (
+        id             INT AUTO_INCREMENT PRIMARY KEY,
         player_id      BIGINT NOT NULL,
         season_label   VARCHAR(16) NOT NULL,
         cycle          VARCHAR(16) NOT NULL,
         script_number  TINYINT NOT NULL,
-        pen_number     INT NOT NULL,
         pen_date       VARCHAR(10),
         value          FLOAT,
+        active         TINYINT(1) NOT NULL DEFAULT 1,
         updated_by     INT,
         updated_at     DATETIME,
-        PRIMARY KEY (player_id, season_label, cycle, script_number, pen_number)
+        KEY idx_pen_key (player_id, season_label, cycle, script_number, active)
     )"""
 
 # Coach-managed catalog backing the Feet Set/Feet Moving/Work Day dropdowns
@@ -617,32 +633,120 @@ def replace_gas_station(player_id, season_label, cycle, rows: list[dict],
                  player_id, season_label, cycle, kept, updated_by)
 
 
-def read_pen_results(player_id, season_label, cycle) -> pd.DataFrame:
+def _read_pen_rows(player_id, season_label, cycle, *, active: bool) -> pd.DataFrame:
     ensure_tables()
-    return query_df(
-        f"SELECT script_number, pen_number, pen_date, value FROM {PEN_TABLE} "
-        f"WHERE {_key_where()} ORDER BY script_number, pen_number",
-        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
+    df = query_df(
+        f"SELECT id, script_number, pen_date, value FROM {PEN_TABLE} "
+        f"WHERE {_key_where()} AND active = :active "
+        f"ORDER BY script_number, pen_date, id",
+        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle,
+         "active": 1 if active else 0})
+    if df.empty:
+        return pd.DataFrame(columns=["id", "script_number", "pen_number", "pen_date", "value"])
+    # pen_number is derived, not stored -- the chart's x-axis position within
+    # each script, ranked by date (id breaks ties) among ACTIVE rows only.
+    # Storing it made a row's identity shift whenever a sibling row was
+    # deleted, which is exactly what made safe soft-delete/restore
+    # impossible before this (see this module's docstring).
+    df["pen_number"] = df.groupby("script_number").cumcount() + 1
+    return df[["id", "script_number", "pen_number", "pen_date", "value"]]
 
 
-def replace_pen_results(player_id, season_label, cycle, rows: list[dict],
-                        updated_by=None) -> None:
-    """`rows`: [{"script_number","pen_date","value"}, ...]; pen_number is
-    assigned per-script from row order (1st row for a script = pen 1, etc).
-    A row missing script_number or value is dropped."""
-    counters: dict = {}
-    kept = []
+def read_pen_results(player_id, season_label, cycle, *, active_only: bool = True) -> pd.DataFrame:
+    """Columns: id/script_number/pen_number (derived)/pen_date/value.
+    `active_only=True` (the default, used by the trend chart and the main
+    editable table) excludes soft-deleted rows -- see
+    `read_deleted_pen_results` for those."""
+    return _read_pen_rows(player_id, season_label, cycle, active=bool(active_only))
+
+
+def read_deleted_pen_results(player_id, season_label, cycle) -> pd.DataFrame:
+    """The soft-deleted set for this key (same shape as `read_pen_results`)
+    -- what the "Recently Removed" list / Restore action reads from."""
+    return _read_pen_rows(player_id, season_label, cycle, active=False)
+
+
+def save_pen_results(player_id, season_label, cycle, rows: list[dict],
+                     updated_by=None) -> None:
+    """`rows`: [{"id" (optional -- present for a pre-existing row the coach
+    didn't remove, absent/None for a freshly-typed one), "script_number",
+    "pen_date", "value"}, ...] -- the pen-results table's current `data`,
+    exactly as the coach left it before hitting Save.
+
+    Never hard-deletes. A previously-active row whose id is NOT present in
+    `rows` was removed from the table by the coach -- it gets soft-deleted
+    (active=0), not dropped, so `restore_pen_result` can bring it back. A
+    row with an id IS present gets its fields updated. A row with no id (a
+    blank row the coach filled in) gets inserted new. A row missing
+    script_number or value is dropped from the submission entirely (same as
+    before) -- for an EXISTING row that just means it also gets soft-deleted
+    (its id won't appear as still-present either); a blank never-filled-in
+    padding row simply isn't inserted."""
+    ensure_tables()
+    pid = int(player_id)
+    submitted = []
     for r in rows:
         script_number = r.get("script_number")
         value = _clean(r.get("value"))
         if script_number in (None, "") or value is None:
             continue
-        script_number = int(script_number)
-        counters[script_number] = counters.get(script_number, 0) + 1
-        kept.append({"script_number": script_number, "pen_number": counters[script_number],
-                    "pen_date": r.get("pen_date"), "value": value})
-    _replace_rows(PEN_TABLE, ("script_number", "pen_number", "pen_date", "value"),
-                 player_id, season_label, cycle, kept, updated_by)
+        submitted.append({
+            "id": r.get("id"), "script_number": int(script_number),
+            "pen_date": _clean(r.get("pen_date")), "value": value,
+        })
+
+    existing = query_df(
+        f"SELECT id FROM {PEN_TABLE} WHERE {_key_where()} AND active = 1",
+        {"player_id": pid, "season_label": season_label, "cycle": cycle})
+    existing_ids = set(existing["id"]) if not existing.empty else set()
+    kept_ids = {int(r["id"]) for r in submitted if r.get("id") not in (None, "")}
+    removed_ids = existing_ids - kept_ids
+
+    now = _now()
+    with get_engine().begin() as conn:
+        for r in submitted:
+            if r["id"] in (None, ""):
+                conn.execute(text(f"""
+                    INSERT INTO {PEN_TABLE}
+                        (player_id, season_label, cycle, script_number, pen_date, value,
+                         active, updated_by, updated_at)
+                    VALUES (:player_id, :season_label, :cycle, :script_number, :pen_date,
+                            :value, 1, :updated_by, :updated_at)
+                """), {"player_id": pid, "season_label": season_label, "cycle": cycle,
+                      "script_number": r["script_number"], "pen_date": r["pen_date"],
+                      "value": r["value"], "updated_by": _clean(updated_by),
+                      "updated_at": now})
+            else:
+                conn.execute(text(f"""
+                    UPDATE {PEN_TABLE}
+                       SET script_number = :script_number, pen_date = :pen_date,
+                           value = :value, active = 1,
+                           updated_by = :updated_by, updated_at = :updated_at
+                     WHERE id = :id AND {_key_where()}
+                """), {"id": int(r["id"]), "script_number": r["script_number"],
+                      "pen_date": r["pen_date"], "value": r["value"],
+                      "updated_by": _clean(updated_by), "updated_at": now,
+                      "player_id": pid, "season_label": season_label, "cycle": cycle})
+        if removed_ids:
+            ph = ", ".join(f":rid{i}" for i in range(len(removed_ids)))
+            params = {f"rid{i}": rid for i, rid in enumerate(removed_ids)}
+            params.update({"player_id": pid, "season_label": season_label, "cycle": cycle})
+            conn.execute(text(f"""
+                UPDATE {PEN_TABLE} SET active = 0, updated_by = :updated_by,
+                       updated_at = :updated_at
+                 WHERE id IN ({ph}) AND {_key_where()}
+            """), {**params, "updated_by": _clean(updated_by), "updated_at": now})
+
+
+def restore_pen_result(row_id, updated_by=None) -> None:
+    """Flips one soft-deleted row back to active=1 -- the "Restore" button
+    next to an entry in the "Recently Removed" list."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"""
+            UPDATE {PEN_TABLE} SET active = 1, updated_by = :updated_by, updated_at = :updated_at
+             WHERE id = :id
+        """), {"id": int(row_id), "updated_by": _clean(updated_by), "updated_at": _now()})
 
 
 # ============================ SCRIPTS (fixed 1-6 / 1-12) ====================
@@ -926,4 +1030,4 @@ def save_all(player_id, season_label, cycle, *, plan_fields=None,
         upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows,
                                updated_by=updated_by)
     if pen_rows is not None:
-        replace_pen_results(player_id, season_label, cycle, pen_rows, updated_by=updated_by)
+        save_pen_results(player_id, season_label, cycle, pen_rows, updated_by=updated_by)

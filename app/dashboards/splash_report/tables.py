@@ -103,14 +103,22 @@ def script_pitch_table(df: pd.DataFrame, script_number: int, *,
 
 def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:
     """Script # / Pen Date / Value% -- variable rows, one shared table across
-    all 6 scripts (pen_number is assigned from row order per script on save,
-    so it isn't a user-facing column here)."""
+    all 6 scripts (pen_number is derived at read time, not a user-facing
+    column here). Each row's `data` dict also carries `id` -- not declared
+    in `columns` so it never renders, but Dash round-trips extra keys on a
+    row through edits untouched, which is how `_on_save`
+    (app.dashboards.splash_report.callbacks) tells `SR.save_pen_results`
+    "this is row #N, not a new one" without showing a raw database id to a
+    coach. A freshly-added blank row has no `id` key at all, which
+    `save_pen_results` treats as "insert new." Deleting a row here is safe
+    now -- see that function's docstring -- it soft-deletes rather than
+    destroying it, and it's recoverable from "Recently Removed.\""""
     columns = [
         {"name": "Script #", "id": "script_number", "editable": editable, "type": "numeric"},
         {"name": "Pen Date", "id": "pen_date", "editable": editable},
         {"name": "Value %", "id": "value", "editable": editable, "type": "numeric"},
     ]
-    data = df[["script_number", "pen_date", "value"]].to_dict("records") \
+    data = df[["id", "script_number", "pen_date", "value"]].to_dict("records") \
         if not df.empty else []
     if editable and len(data) < 6:
         data = data + [{"script_number": None, "pen_date": "", "value": None}

@@ -265,8 +265,8 @@ def test_multi_row_upsert_helpers_are_empty_safe():
     assert SR.read_engine_metrics(TEST_PID, SEASON, CYCLE)["base_value"].isna().all()
 
 
-def test_pen_results_replace_assigns_sequential_pen_number_per_script():
-    SR.replace_pen_results(TEST_PID, SEASON, CYCLE, [
+def test_save_pen_results_inserts_new_rows_and_derives_sequential_pen_number():
+    SR.save_pen_results(TEST_PID, SEASON, CYCLE, [
         {"script_number": 1, "pen_date": "2026-09-01", "value": 60.0},
         {"script_number": 1, "pen_date": "2026-09-15", "value": 65.0},
         {"script_number": 2, "pen_date": "2026-09-01", "value": 50.0},
@@ -279,13 +279,65 @@ def test_pen_results_replace_assigns_sequential_pen_number_per_script():
     s1 = pen[pen.script_number == 1].sort_values("pen_number")
     assert list(s1["pen_number"]) == [1, 2]
     assert list(s1["value"]) == [60.0, 65.0]
+    assert s1["id"].notna().all()  # every row has a stable surrogate id
 
-    # replace again with fewer rows -> old ones gone (no stale leftovers)
-    SR.replace_pen_results(TEST_PID, SEASON, CYCLE,
-                           [{"script_number": 1, "pen_date": "2026-10-01", "value": 70.0}],
-                           updated_by=1)
-    pen2 = SR.read_pen_results(TEST_PID, SEASON, CYCLE)
-    assert len(pen2) == 1 and pen2.iloc[0]["value"] == 70.0
+
+def test_save_pen_results_soft_deletes_omitted_rows_and_they_are_restorable():
+    """The whole point of this rework: a pen result a coach removes from the
+    table (by not including its id in the next save) must NOT be gone for
+    good -- it should move to the deleted set and come back via
+    restore_pen_result, never a hard DELETE."""
+    SR.save_pen_results(TEST_PID, SEASON, CYCLE, [
+        {"script_number": 1, "pen_date": "2026-09-01", "value": 60.0},
+        {"script_number": 1, "pen_date": "2026-09-08", "value": 65.0},
+    ], updated_by=1)
+    active = SR.read_pen_results(TEST_PID, SEASON, CYCLE)
+    assert len(active) == 2
+    kept, removed = active.iloc[0], active.iloc[1]
+
+    # resubmit with only the first row's id present (as if the coach deleted
+    # the second row in the UI and hit Save) plus a brand-new third entry
+    SR.save_pen_results(TEST_PID, SEASON, CYCLE, [
+        {"id": int(kept["id"]), "script_number": 1, "pen_date": kept["pen_date"],
+         "value": kept["value"]},
+        {"script_number": 1, "pen_date": "2026-09-15", "value": 70.0},
+    ], updated_by=1)
+
+    still_active = SR.read_pen_results(TEST_PID, SEASON, CYCLE)
+    assert len(still_active) == 2
+    assert int(removed["id"]) not in set(still_active["id"])  # gone from the live view
+
+    deleted = SR.read_deleted_pen_results(TEST_PID, SEASON, CYCLE)
+    assert len(deleted) == 1
+    assert int(deleted.iloc[0]["id"]) == int(removed["id"])
+    assert deleted.iloc[0]["value"] == 65.0  # the actual value is preserved, not wiped
+
+    with get_engine().begin() as conn:
+        row = conn.execute(text(f"SELECT active FROM {SR.PEN_TABLE} WHERE id = :id"),
+                           {"id": int(removed["id"])}).fetchone()
+        assert row is not None and row[0] == 0  # soft-deleted, the DB row still physically exists
+
+    SR.restore_pen_result(int(removed["id"]), updated_by=1)
+    restored = SR.read_pen_results(TEST_PID, SEASON, CYCLE)
+    assert len(restored) == 3
+    assert int(removed["id"]) in set(restored["id"])
+    assert SR.read_deleted_pen_results(TEST_PID, SEASON, CYCLE).empty
+
+
+def test_save_pen_results_updates_an_existing_row_in_place_by_id():
+    SR.save_pen_results(TEST_PID, SEASON, CYCLE,
+                        [{"script_number": 1, "pen_date": "2026-09-01", "value": 60.0}],
+                        updated_by=1)
+    row_id = int(SR.read_pen_results(TEST_PID, SEASON, CYCLE).iloc[0]["id"])
+
+    SR.save_pen_results(TEST_PID, SEASON, CYCLE,
+                        [{"id": row_id, "script_number": 1, "pen_date": "2026-09-01",
+                          "value": 61.0}],
+                        updated_by=1)
+    pen = SR.read_pen_results(TEST_PID, SEASON, CYCLE)
+    assert len(pen) == 1  # updated in place, not a second row
+    assert int(pen.iloc[0]["id"]) == row_id
+    assert pen.iloc[0]["value"] == 61.0
 
 
 def test_save_all_persists_every_section_in_one_call():

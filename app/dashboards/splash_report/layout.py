@@ -500,8 +500,39 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     return html.Div(card, id=f"splash-script-wrap-{script_number}", style={"display": "none"})
 
 
-def scripts_section(pen_records: list, scripts_records: list, script_rows: dict, *,
-                    editable: bool) -> html.Div:
+def _removed_pen_row(row: dict) -> html.Div:
+    value = row.get("value")
+    value_text = "—" if value is None else f"{value:g}%"
+    return html.Div([
+        html.Span(f"Script {row.get('script_number')} · {row.get('pen_date') or '—'} · "
+                 f"{value_text}", style={"fontSize": "12px"}),
+        html.Button("Restore", id={"type": "splash-pen-restore", "index": row["id"]},
+                   n_clicks=0, style={"border": "none", "background": "none", "color": CRIMSON,
+                                      "cursor": "pointer", "fontSize": "12px",
+                                      "marginLeft": "10px", "textDecoration": "underline"}),
+    ], style={"padding": "2px 0", "borderBottom": "1px solid #eee"})
+
+
+def _removed_pen_panel(deleted_records: list) -> html.Div:
+    """Coach-only, always-visible-when-nonempty list of soft-deleted pen
+    results (see `app.data.splash_report.save_pen_results`'s docstring for
+    why deleting a pen result is a soft-delete, not a hard one) with a
+    per-row Restore button. Unlike Manage Drills/Manage Video Library, this
+    one doesn't need an open/closed flag at all -- it simply isn't rendered
+    when there's nothing removed, which sidesteps that whole class of bug
+    (see this session's fix for those two panels re-closing themselves on
+    every edit) by never having state to lose in the first place."""
+    if not deleted_records:
+        return html.Div()
+    return html.Div([
+        html.Div("Recently Removed", style={"fontSize": "12px", "fontWeight": "bold",
+                                            "color": CRIMSON, "marginTop": "8px"}),
+        html.Div([_removed_pen_row(r) for r in deleted_records]),
+    ])
+
+
+def scripts_section(pen_records: list, deleted_pen_records: list, scripts_records: list,
+                    script_rows: dict, *, editable: bool, is_coach: bool) -> html.Div:
     """Script Pen Results trend graph on top, the 6 script cards collapsed
     below it behind a multi-select ("only show when clicked" -- 2026-09-10
     planning session): "Compare Scripts" narrows which lines the graph
@@ -521,6 +552,9 @@ def scripts_section(pen_records: list, scripts_records: list, script_rows: dict,
     ])
     if editable:
         graph_block.children.append(tables.pen_results_table(pen, editable=True))
+    if is_coach:
+        graph_block.children.append(
+            html.Div(_removed_pen_panel(deleted_pen_records), id="splash-pen-removed-wrap"))
 
     cards = [script_card(int(r["script_number"]), r, script_rows[str(int(r["script_number"]))],
                          editable=editable)
@@ -536,8 +570,7 @@ def scripts_section(pen_records: list, scripts_records: list, script_rows: dict,
     return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
 
 
-def sidebar(profile: dict, kpis: dict, plan: dict, engine_records: list, *,
-           editable: bool) -> html.Div:
+def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Div:
     photo = profile["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{profile['jersey']} · " if profile["jersey"] else ""
     meta = " · ".join([x for x in (profile["class_year"],
@@ -572,16 +605,7 @@ def sidebar(profile: dict, kpis: dict, plan: dict, engine_records: list, *,
     # rail looking empty next to two much taller columns.
     vision = _text_section("Vision Statement · Season Focus", plan["vision_statement"],
                            editable=editable, input_id="splash-vision")
-    # Building the Engine's body visual moved here from the Building the
-    # Engine card (2026-09-11 feedback: "fit on the white space in the left
-    # column") -- five small panels (IR/ER/Scaption/Grip/ROM), see
-    # app.dashboards.splash_report.body_visual. `splash-engine-visual-wrap`
-    # keeps its id here so `_on_engine_cycle_filter` in callbacks.py (which
-    # targets it by id, not position) still refreshes it when a coach
-    # widens the View Cycles selection.
-    visual = html.Div(body_visual.render(engine_records, profile.get("throws")),
-                      id="splash-engine-visual-wrap", style={"marginTop": "10px"})
-    return html.Div([profile_card, goals, vision, visual])
+    return html.Div([profile_card, goals, vision])
 
 
 def filters(player_id, season_label, cycle) -> html.Div:
@@ -624,6 +648,7 @@ def load_data(player_id, season_label, cycle) -> dict:
     scripts = SR.read_scripts(pid, season_label, cycle)
     script_rows = SR.read_all_script_rows(pid, season_label, cycle)
     pen = SR.read_pen_results(pid, season_label, cycle)
+    deleted_pen = SR.read_deleted_pen_results(pid, season_label, cycle)
     # Drill catalog + video library are global (coach-managed, not scoped to
     # a player/season/cycle), but loaded here too so render_from_data stays
     # a pure function of `data` with zero DB calls of its own -- these are
@@ -639,7 +664,7 @@ def load_data(player_id, season_label, cycle) -> dict:
         # dict keys round-trip through dcc.Store's JSON as strings either way;
         # use str() up front so in-process (no round trip yet) access matches.
         "script_rows": {str(n): df.to_dict("records") for n, df in script_rows.items()},
-        "pen": pen.to_dict("records"),
+        "pen": pen.to_dict("records"), "deleted_pen": deleted_pen.to_dict("records"),
         "drill_options": drill_options, "videos": videos,
     }
 
@@ -652,11 +677,10 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
     if not data:
         return html.Div("Select a pitcher.", style={"padding": "20px"})
     plan = data["plan"]
-    left = html.Div(sidebar(data["profile"], data["kpis"], plan, data["engine"],
-                            editable=editable),
-                    className="paw-dash-sidebar", style={"width": "290px", "flexShrink": "0"})
+    profile_block = html.Div(sidebar(data["profile"], data["kpis"], plan, editable=editable),
+                             style={"gridArea": "profile"})
     videos = data.get("videos", {})
-    center = html.Div([
+    notes_block = html.Div([
         checklists_grid(plan, editable=editable, is_coach=is_coach,
                         drill_options=data.get("drill_options", []), videos=videos,
                         manage_videos_open=data.get("manage_videos_open", False)),
@@ -664,20 +688,38 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
                                editable=editable, is_coach=is_coach,
                                latest_engine_date=data.get("latest_engine_date"),
                                cycle=data.get("cycle")),
-    ], style={"flex": "1 1 0", "minWidth": "0"})
-    # Bullpen Scripts (pen-results trend on top, the 6 scripts collapsed
-    # below it -- see scripts_section) sits alongside the sidebar+center on
-    # a wide screen (matching the original mockup's 3-column layout)
-    # instead of stacking below everything -- that stacking was what forced
-    # most of the extra vertical scrolling on desktop; .paw-dash-row's
-    # phone media query still stacks all three into one column on a narrow
-    # screen.
-    right = html.Div(scripts_section(data["pen"], data["scripts"], data["script_rows"],
-                                     editable=editable),
-                     style={"flex": "1 1 0", "minWidth": "0"})
-    return html.Div([left, center, right], className="paw-dash-row",
-                    style={"display": "flex", "gap": "12px", "flexWrap": "wrap",
-                           "alignItems": "flex-start"})
+    ], style={"gridArea": "notes", "minWidth": "0"})
+    scripts_block = html.Div(
+        scripts_section(data["pen"], data.get("deleted_pen", []), data["scripts"],
+                       data["script_rows"], editable=editable, is_coach=is_coach),
+        style={"gridArea": "scripts", "minWidth": "0"})
+    # Building the Engine's body visual -- a 4th, independently-orderable
+    # grid area (2026-09-11 feedback: on a phone, player photo/stats needs
+    # to lead, then notes, then scripts, then this) rather than nested
+    # inside `profile_block`, which would have dragged it along with the
+    # photo/stats to wherever THAT block sits. `splash-engine-visual-wrap`
+    # keeps its id here so `_on_engine_cycle_filter` in callbacks.py (which
+    # targets it by id, not position) still refreshes it when a coach
+    # widens the View Cycles selection.
+    visuals_block = html.Div(
+        body_visual.render(data["engine"], (data.get("profile") or {}).get("throws")),
+        id="splash-engine-visual-wrap", style={"gridArea": "visuals"})
+    # CSS Grid, not flexbox: a flex row's `order` can only reorder its own
+    # DIRECT children, so the old 3-column flex layout couldn't let the body
+    # visual (nested inside the sidebar) land in a different phone-stacking
+    # position than the photo/stats it used to be bundled with. Grid's
+    # named `grid-template-areas` places these 4 areas completely
+    # differently per breakpoint instead -- desktop keeps the original
+    # 3-column look (profile+visuals stacked in column 1), the phone
+    # override in shell.py's `@media (max-width: 720px)` block restacks
+    # them profile -> notes -> scripts -> visuals.
+    return html.Div([profile_block, notes_block, scripts_block, visuals_block],
+                    className="paw-splash-grid",
+                    style={"display": "grid",
+                          "gridTemplateColumns": "290px 1fr 1fr",
+                          "gridTemplateAreas": '"profile notes scripts" '
+                                              '"visuals notes scripts"',
+                          "gap": "12px", "alignItems": "start"})
 
 
 def serve_layout() -> html.Div:

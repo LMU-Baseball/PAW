@@ -75,6 +75,17 @@ _INDEX_STRING = """<!DOCTYPE html>
        the second one beats both being unreadable. */
     .paw-chart-row { flex-direction: column !important; }
     .paw-chart-grid { grid-template-columns: 1fr !important; }
+    /* Splash Report's 4-area grid (profile/notes/scripts/visuals -- see
+       app.dashboards.splash_report.layout.render_from_data): desktop keeps
+       profile+visuals stacked in the same left column via
+       grid-template-areas; a phone gets its own explicit stacking order
+       instead of inheriting that column pairing, since a coach wants
+       player photo/stats to lead, then notes, then scripts, then the body
+       visual -- not the desktop grouping. */
+    .paw-splash-grid {
+      grid-template-columns: 1fr !important;
+      grid-template-areas: "profile" "notes" "scripts" "visuals" !important;
+    }
   }
 </style>
 </head>
