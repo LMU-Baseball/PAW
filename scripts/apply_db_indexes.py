@@ -23,9 +23,9 @@ catcher-page load, and PitcherTeam is shared by both the pitching and catching
 dashboards (a catcher is on the pitching team), so one composite index serves
 both.
 
-Measured 2026-09-06 (Splash Report speed investigation): `app.data.hitting.
+Measured 2026-09-06 (Built on the Bluff speed investigation): `app.data.hitting.
 _roster_lookup` (class_year/position by name -- now also called from
-`pitching_caps.pitcher_profile`, which the Splash Report page's sidebar reads)
+`pitching_caps.pitcher_profile`, which the Built on the Bluff page's sidebar reads)
 queries `roster_players` (2,760 rows) with `WHERE season LIKE ... AND
 player_name = :n` against a table that had indexes on (school_id, season) and
 scraped_date only -- no player_name index at all. `EXPLAIN` showed a full

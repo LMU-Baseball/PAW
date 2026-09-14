@@ -1,4 +1,4 @@
-"""Dash callbacks for the Splash Report page.
+"""Dash callbacks for the Built on the Bluff page.
 
 Data loading and rendering are deliberately SEPARATE callbacks:
 - `_load_data` re-reads the DB only when Player/Season/Cycle actually change,
@@ -418,4 +418,8 @@ def register_callbacks(dash_app) -> None:
         eng = SR.read_engine_metrics(player_id, season, selected_cycles)
         records = eng.to_dict("records")
         throws = ((data or {}).get("profile") or {}).get("throws")
-        return layout.engine_tables_block(records), body_visual.render(records, throws)
+        # `compact=True` matches the 2026-09-14 right-wall layout test's 3-col
+        # grid (see layout.render_from_data) -- flip back to the default if
+        # that layout gets reverted.
+        return layout.engine_tables_block(records), body_visual.render(records, throws,
+                                                                       compact=True)

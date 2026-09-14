@@ -1,4 +1,4 @@
-"""Splash Report storage layer (live DB): schema idempotency, fixed-shape
+"""Built on the Bluff storage layer (live DB): schema idempotency, fixed-shape
 reindexing, and REPLACE semantics for the variable-row tables."""
 from __future__ import annotations
 

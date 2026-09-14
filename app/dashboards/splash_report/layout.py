@@ -1,4 +1,4 @@
-"""Splash Report page shell: filters, sidebar, and the whole editable body.
+"""Built on the Bluff page shell: filters, sidebar, and the whole editable body.
 
 Data is loaded ONCE per (player, season, cycle) into a `dcc.Store`
 (`load_data` / `render_from_data`, wired up in `callbacks.py`) instead of on
@@ -19,7 +19,7 @@ from flask_login import current_user
 from app.data import pitching_caps, seasons, splash_report as SR
 from app.dashboards import date_range as dr  # noqa: F401  (kept for parity w/ other shells)
 from app.dashboards.pitching import selectors
-from app.dashboards.shell import BANNER, BLUE, CRIMSON, PHOTO_PLACEHOLDER, header, edit_save_buttons
+from app.dashboards.shell import BLUE, CRIMSON, PHOTO_PLACEHOLDER, header, edit_save_buttons
 from app.dashboards.splash_report import body_visual, charts, tables
 
 # A crimson-tinted wash + thin top accent instead of a flat white box (2026-
@@ -79,17 +79,17 @@ _CARD_VARIANT_BY_PREFIX = [
     ("Work Day", 4), ("Recovery Protocols", 0),
     ("Player Training Goals", 1), ("Vision Statement", 3),
     ("Building the Engine", 2), ("Bullpen Scripts", 4),
+    ("The Gas Station", 0),
 ]
 
 
-def _card_style(title: str) -> dict:
+def _variant_index(title: str) -> int:
     for prefix, idx in _CARD_VARIANT_BY_PREFIX:
         if title.startswith(prefix):
-            variant = _CARD_VARIANTS[idx]
-            break
-    else:
-        variant = _CARD_VARIANTS[sum(title.encode("utf-8")) % len(_CARD_VARIANTS)]
-    return {**_CARD, **variant}
+            return idx
+    return sum(title.encode("utf-8")) % len(_CARD_VARIANTS)
+
+
 _LABEL_STYLE = {"color": CRIMSON, "fontWeight": "bold", "fontSize": "13px",
                 "textTransform": "uppercase", "letterSpacing": "1px",
                 "display": "block", "marginBottom": "4px", "textAlign": "center"}
@@ -98,17 +98,80 @@ _TEXTAREA_STYLE = {"width": "100%", "minHeight": "80px", "padding": "8px",
                    "fontSize": "15px", "border": "1px solid #ccc"}
 
 
-def _title(text: str) -> html.H3:
-    return html.H3(text, style={"color": CRIMSON, "margin": "0 0 8px",
-                                "fontSize": "18px", "textTransform": "uppercase",
-                                "letterSpacing": "1px"})
+# 2026-09-13 planning session: top-level card headers get the same "white
+# text on a translucent red/blue graffiti backdrop" treatment the Velo Board
+# / Competitive Cauldron banners use, scaled down to a slim per-card strip
+# (Brad confirmed top-level titles only -- a table's own sub-label, e.g.
+# "Strength" on the engine tables, instead folds into that table's own red
+# DataTable header bar; see `tables.engine_metrics_table`'s `label_header`).
+# Only 2 backdrop images exist (velo-backdrop.png,
+# cauldron-backdrop.png, both 1080x1080 with alpha already baked in) and
+# Brad doesn't want the same 2 images reused identically everywhere, so each
+# card gets a different crop (`backgroundPosition`) of the same source image
+# -- pure CSS, no new image assets, same idiom as `_CARD_VARIANT_BY_PREFIX`
+# below it (one variant per card index, so adjacent cards never match).
+#
+# Round 2 (Brad's screenshot feedback on round 1): rotating the backdrop hit
+# a real cross-browser bug -- a `transform`-ed child inside a
+# `border-radius` + `overflow:hidden` parent isn't reliably clipped to the
+# rounded corners (worst on Safari/iOS, which is exactly what coaches/
+# players use on mobile per `project-paw` memory), so some headers rendered
+# with a corner poking past the rounded edge -- "not perfectly rectangular."
+# Rotation is dropped entirely now; variety comes from `backgroundPosition`
+# alone. Sizing switched from a fixed zoomed `backgroundSize` percentage
+# (which stretched a SQUARE 1080x1080 source to a wide-short strip's
+# unrelated aspect ratio -- both distorting it and, since the percentages
+# were 200%+, sampling a small, blurry-looking slice of the source) to the
+# `cover` keyword, which preserves the source's aspect ratio and scales it
+# to just barely fill the strip -- sharper, undistorted, and every card uses
+# the identical sizing rule so they're all genuinely "the same shape."
+# Round 3 (Brad: "a bit more blue in the crops"): every header on this page
+# is much WIDER than it is tall, against a SQUARE 1080x1080 source -- with
+# `cover`, that means the image is always scaled to match the strip's WIDTH
+# exactly (height is the excess dimension), so it always shows edge-to-edge
+# at full width with NO horizontal crop at all -- the x half of
+# `backgroundPosition` is a dead value here, it can't do anything. Only the
+# y value actually pans. (Confirmed by rendering both PNGs through the same
+# cover math offline before touching real percentages, rather than tuning
+# blind against a browser again.) So variety + "more blue" now comes purely
+# from y: velo-backdrop's blue lives in a vertical stripe that's ALWAYS
+# visible along the strip's right ~15% (any y works; y just moves the
+# paint-splatter pattern around it); cauldron-backdrop's blue is a
+# horizontal band concentrated in its top ~10-15%, fading to solid crimson
+# below that -- y needs to land inside roughly 0.05-0.09 to show a real
+# red/blue blend instead of almost-solid blue (y<0.05) or almost-solid
+# crimson (y>0.10).
+_HEADER_IMAGES = ["/static/reports/velo-backdrop.png", "/static/reports/cauldron-backdrop.png"]
+_HEADER_VARIANTS = [
+    (0, "50% 5%"),    # velo -- strong blue splatter, upper band
+    (1, "50% 7%"),    # cauldron -- balanced red/blue speckle
+    (0, "50% 20%"),   # velo -- blue splatter concentrated on the right
+    (1, "50% 8.5%"),  # cauldron -- balanced red/blue speckle, slightly redder
+    (0, "50% 60%"),   # velo -- blue splatter through the middle
+]
+
+
+def _graffiti_header(text: str, idx: int) -> html.Div:
+    img_idx, pos = _HEADER_VARIANTS[idx % len(_HEADER_VARIANTS)]
+    label = html.Span(text, style={
+        "color": "#fff", "fontWeight": "bold", "fontSize": "13px",
+        "textTransform": "uppercase", "letterSpacing": "1px",
+        "textShadow": "0 1px 3px rgba(0,0,0,0.65)",
+    })
+    return html.Div(label, style={
+        "background": f"url({_HEADER_IMAGES[img_idx]}) {pos}/cover no-repeat",
+        "borderRadius": "6px", "padding": "6px 10px", "margin": "0 0 8px",
+        "minHeight": "18px", "display": "flex", "alignItems": "center",
+        "justifyContent": "center", "textAlign": "center",
+    })
 
 
 def _card(title: str, child, *, card_id=None) -> html.Div:
-    kwargs = {"style": _card_style(title)}
+    idx = _variant_index(title)
+    kwargs = {"style": {**_CARD, **_CARD_VARIANTS[idx]}}
     if card_id:
         kwargs["id"] = card_id
-    return html.Div([_title(title), child], **kwargs)
+    return html.Div([_graffiti_header(title, idx), child], **kwargs)
 
 
 def _lines(text: str) -> list[str]:
@@ -338,6 +401,48 @@ def checklists_grid(plan: dict, *, editable: bool, is_coach: bool, drill_options
                     style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"})
 
 
+# 2026-09-14 layout test (Brad: "test this out and I will report back if we
+# want to keep it or revert") -- splits `checklists_grid`'s 6 boxes into the
+# 2 "throwing" checklists (stay in the center column, above Bullpen Scripts)
+# and the other 4 (Feet Set/Feet Moving/Work Day/Recovery Protocols, moved
+# to the left column where the skeleton visuals used to sit). See
+# `[[splash-report-right-wall-layout-test]]` memory for the before-state
+# screenshot if this gets reverted.
+def throwing_checklists_row(plan: dict, *, editable: bool) -> html.Div:
+    sections = [
+        _text_section("Pre-Throw Checklist", plan["pre_throw_checklist"],
+                     editable=editable, input_id="splash-pre"),
+        _text_section("Post-Throw Checklist", plan["post_throw_checklist"],
+                     editable=editable, input_id="splash-post"),
+    ]
+    return html.Div(sections, className="paw-chart-grid",
+                    style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"})
+
+
+def training_boxes_column(plan: dict, *, editable: bool, is_coach: bool,
+                          drill_options: list[str], videos: dict,
+                          manage_videos_open: bool = False) -> html.Div:
+    """Feet Set / Feet Moving / Work Day / Recovery Protocols, stacked
+    single-column -- this lands in the narrow (290px) left sidebar, too
+    tight for the 2-column grid `checklists_grid` used in the wider center
+    column."""
+    sections = [
+        _drill_section("Feet Set", plan["feet_set"], editable=editable, is_coach=is_coach,
+                       dd_id="splash-feetset", section_key="feetset",
+                       drill_options=drill_options),
+        _drill_section("Feet Moving", plan["feet_moving"], editable=editable, is_coach=is_coach,
+                       dd_id="splash-feetmoving", section_key="feetmoving",
+                       drill_options=drill_options),
+        _drill_section("Work Day", plan["work_day"], editable=editable, is_coach=is_coach,
+                       dd_id="splash-workday", section_key="workday",
+                       drill_options=drill_options),
+        _recovery_section(videos.get("Recovery", []),
+                          videos.get("Recovery", []) + videos.get("Gas Station", []),
+                          is_coach=is_coach, manage_videos_open=manage_videos_open),
+    ]
+    return html.Div(sections)
+
+
 def _days_ago(iso_date: str | None) -> str:
     if not iso_date:
         return "No readings logged yet."
@@ -410,40 +515,27 @@ def engine_tables_block(engine_records: list) -> html.Div:
     # flex:1 on each table used to stretch it across half of a very wide
     # container, leaving a big blank gap between two content-sized tables
     # -- size to content instead so they sit close together.
+    # 2026-09-14: "Strength" / "Range of Motion" moved into the tables' own
+    # red header bar (white text, top-left cell) instead of a separate black
+    # label above each table -- see `tables.engine_metrics_table`'s
+    # `label_header`.
     return html.Div([
-        html.Div([html.B("Strength · lb"),
-                  tables.engine_metrics_table(strength, "splash-engine-strength-table")],
-                 style={"flex": "0 0 auto"}),
-        html.Div([html.B("Range of Motion · °"),
-                  tables.engine_metrics_table(rom, "splash-engine-rom-table")],
-                 style={"flex": "0 0 auto"}),
+        html.Div(tables.engine_metrics_table(strength, "splash-engine-strength-table",
+                                             label_header="Strength"),
+                style={"flex": "0 0 auto"}),
+        html.Div(tables.engine_metrics_table(rom, "splash-engine-rom-table",
+                                             label_header="Range of Motion"),
+                style={"flex": "0 0 auto"}),
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
 
-def engine_and_gas_station(engine_records: list, gas_records: list, gas_videos: list[dict], *,
-                           editable: bool, is_coach: bool, latest_engine_date: str | None,
-                           cycle: str) -> html.Div:
-    """Body visual moved to the left sidebar (see `sidebar`) -- this card is
-    back to just the Strength/ROM tables + View Cycles + Update Readings +
-    Gas Station. 2026-09-11 feedback ("lots of white space on the Building
-    the Engine side ... fill that in"): the Strength/ROM tables themselves
-    got bigger (`tables._ENGINE_CELL_STYLE`) -- measured live, they now fill
-    ~91% of this card's content width on their own (528px of 579px
-    available at the card's actual rendered size), which is most of what
-    was making the card feel sparse. A "Gas Station beside the tables"
-    layout was tried and dropped: at that width there's only ~50px left in
-    the row, nowhere near enough for a readable 4-column table, so it just
-    wrapped to a second row every time anyway -- no different from stacking
-    it below outright, just with extra flex-layout code pretending
-    otherwise. The remaining sparseness below the tables is Gas Station
-    actually having no rows entered yet, which is a data gap, not a layout
-    one -- see this function's home commit/report for the measurement and
-    the options considered (narrowing the sidebar/right columns to give
-    this card more width; a denser Gas Station table style) if more is
-    wanted."""
-    gas = pd.DataFrame(gas_records)
-    gas_child = tables.gas_station_table(gas, editable=editable) if (editable or not gas.empty) \
-        else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
+def engine_card(engine_records: list, *, is_coach: bool, latest_engine_date: str | None,
+                cycle: str) -> html.Div:
+    """Building the Engine: just the Strength/ROM tables + View Cycles +
+    Update Readings. Gas Station split out into its own card (`gas_station_card`,
+    2026-09-13 -- Brad wants it "its own box like the others", not nested in
+    here) and the body visual lives in its own card too now (see
+    `render_from_data`), so this one holds only the tables/controls."""
     # "Seasonal cycle filter: multi-select (fall, winter, spring, or full
     # year)" -- 2026-09-10 planning session. Defaults to just the page's
     # currently-selected cycle (today's exact display); widening it re-reads
@@ -462,14 +554,26 @@ def engine_and_gas_station(engine_records: list, gas_records: list, gas_videos: 
     ]
     if is_coach:
         children.append(_update_readings_panel(latest_engine_date))
-    children.append(html.Div([html.B("The Gas Station"),
-                  html.Div("Tie a specific exercise to whatever the numbers above flag.",
-                          style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
-                  gas_child]))
-    children.append(html.Div([html.B("Gas Station Videos", style={"fontSize": "13px"}),
-                              _video_list_or_empty(gas_videos)],
-                             style={"marginTop": "10px"}))
     return _card("Building the Engine — Strength · ROM", html.Div(children))
+
+
+def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: bool) -> html.Div:
+    """The Gas Station, split out of `engine_card` into its own card
+    (2026-09-13: Brad wants it "its own box like the others... with the
+    background heading and separate opaque box") -- same `_card()` treatment
+    (graffiti header + opaque gradient box) as every other section."""
+    gas = pd.DataFrame(gas_records)
+    gas_child = tables.gas_station_table(gas, editable=editable) if (editable or not gas.empty) \
+        else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
+    children = [
+        html.Div("Tie a specific exercise to whatever the numbers above flag.",
+                 style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
+        gas_child,
+        html.Div([html.B("Gas Station Videos", style={"fontSize": "13px"}),
+                 _video_list_or_empty(gas_videos)],
+                style={"marginTop": "10px"}),
+    ]
+    return _card("The Gas Station", html.Div(children))
 
 
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
@@ -489,8 +593,21 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   measurable_child], style={"marginTop": "4px"}),
         html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number, editable=editable),
                  style={"marginTop": "6px"}),
+    # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
+    # the card shrinks to fit its content, and in a shrink-to-fit box a
+    # `width: 100%` child (the Goal/Measurable inputs in edit mode) has
+    # nothing real to resolve 100% against -- a fixed width here gives both
+    # the inputs a real anchor and the flex-wrap row a predictable per-card
+    # size to count columns by. `boxSizing: border-box` makes that width the
+    # card's FULL rendered width (padding included) instead of content plus
+    # 20px of padding on top of it. 220px (2026-09-14 round 2, trimmed down
+    # from 280px -- Brad: still white space to the right of the 4-column
+    # #/Type/Ball/Info table, which only needs ~150-160px) -- narrow enough
+    # to fit the table with a little breathing room, wide enough that more
+    # cards fit per row is the actual point of the fix.
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px"})
+              "padding": "10px", "marginBottom": "12px", "width": "220px",
+              "boxSizing": "border-box"})
     # ALWAYS rendered (never conditionally omitted) so its Save-form Inputs
     # stay valid targets for `callbacks._script_states()` regardless of
     # which scripts are currently picked in "splash-script-select" --
@@ -559,18 +676,30 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     cards = [script_card(int(r["script_number"]), r, script_rows[str(int(r["script_number"]))],
                          editable=editable)
              for r in scripts_records]
+    # 2026-09-14 (Brad, matching the skeleton-visuals grid fix): a fixed
+    # 2-column grid stretched every card to half the (now much wider) center
+    # column, leaving a lot of blank space to the right of each card's
+    # actual content (title/goal/measurable/table, all narrow and
+    # content-sized -- see `script_card` and `tables.script_pitch_table`'s
+    # `width: fit-content`). Flex-wrap instead of a fixed column count: each
+    # card sizes to its own content, and the row fits as many as actually
+    # fit -- 3x2 on a wide monitor, 2x3 or 1x6 as the column narrows -- with
+    # no media queries, same technique as `body_visual.render`'s compact
+    # grid.
     select_block = html.Div([
         html.Label("Show Scripts", style={**_LABEL_STYLE, "textAlign": "left"}),
         dcc.Dropdown(id="splash-script-select", options=compare_options, multi=True, value=[],
                     placeholder="Select a script to view or edit...",
                     style={"fontFamily": "Teko, sans-serif", "marginBottom": "8px"}),
-        html.Div(cards, className="paw-chart-grid",
-                style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"}),
+        html.Div(cards, style={"display": "flex", "flexWrap": "wrap",
+                              "justifyContent": "center", "alignItems": "flex-start",
+                              "gap": "14px"}),
     ], style={"marginTop": "16px"})
     return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
 
 
-def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Div:
+def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
+           extra: list | None = None) -> html.Div:
     photo = profile["photo"] or PHOTO_PLACEHOLDER
     jersey = f"#{profile['jersey']} · " if profile["jersey"] else ""
     meta = " · ".join([x for x in (profile["class_year"],
@@ -603,9 +732,16 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool) -> html.Di
     # short reflective text block like Training Goals, and the sidebar was
     # otherwise running much shorter than center/right, leaving the left
     # rail looking empty next to two much taller columns.
-    vision = _text_section("Vision Statement · Season Focus", plan["vision_statement"],
+    # "Season Focus" dropped from the title (2026-09-10 planning session:
+    # remove that field entirely -- it changes every cycle) -- 2026-09-13:
+    # Brad flagged the leftover text in the heading itself.
+    vision = _text_section("Vision Statement", plan["vision_statement"],
                            editable=editable, input_id="splash-vision")
-    return html.Div([profile_card, goals, vision])
+    # `extra` (2026-09-14 layout test): Feet Set/Feet Moving/Work Day/
+    # Recovery Protocols, moved here from the center column -- see
+    # `render_from_data` and `[[splash-report-right-wall-layout-test]]`.
+    # Vision Statement above Player Training Goals (2026-09-14, Brad).
+    return html.Div([profile_card, vision, goals, *(extra or [])])
 
 
 def filters(player_id, season_label, cycle) -> html.Div:
@@ -677,49 +813,102 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
     if not data:
         return html.Div("Select a pitcher.", style={"padding": "20px"})
     plan = data["plan"]
-    profile_block = html.Div(sidebar(data["profile"], data["kpis"], plan, editable=editable),
-                             style={"gridArea": "profile"})
     videos = data.get("videos", {})
-    notes_block = html.Div([
-        checklists_grid(plan, editable=editable, is_coach=is_coach,
-                        drill_options=data.get("drill_options", []), videos=videos,
-                        manage_videos_open=data.get("manage_videos_open", False)),
-        engine_and_gas_station(data["engine"], data["gas"], videos.get("Gas Station", []),
-                               editable=editable, is_coach=is_coach,
-                               latest_engine_date=data.get("latest_engine_date"),
-                               cycle=data.get("cycle")),
-    ], style={"gridArea": "notes", "minWidth": "0"})
-    scripts_block = html.Div(
+
+    # 2026-09-14 layout test (Brad: "test this out and I will report back if
+    # we want to keep it or revert the layout back again") -- see
+    # `[[splash-report-right-wall-layout-test]]` memory for the before-state
+    # screenshot and a plain description of this arrangement. Design-only:
+    # every block below is the same component as before, just regrouped
+    # into 3 columns instead of 4 grid areas.
+    #   left ("profile"):  photo/stats + goals + vision (unchanged), PLUS
+    #                       Feet Set/Feet Moving/Work Day/Recovery Protocols
+    #                       (moved here from the center column, where the
+    #                       skeleton visuals used to sit).
+    #   center ("center"): Pre-Throw/Post-Throw Checklist, then Bullpen
+    #                       Scripts underneath (moved here from the right
+    #                       column).
+    #   right ("right"):   skeleton visuals on top as a compact 3-col grid
+    #                       (`body_visual.render(..., compact=True)`), then
+    #                       Building the Engine (unchanged internally) and
+    #                       Gas Station stacked underneath.
+    profile_block = html.Div(
+        sidebar(data["profile"], data["kpis"], plan, editable=editable,
+               extra=[training_boxes_column(
+                   plan, editable=editable, is_coach=is_coach,
+                   drill_options=data.get("drill_options", []), videos=videos,
+                   manage_videos_open=data.get("manage_videos_open", False))]),
+        style={"gridArea": "profile"})
+    center_block = html.Div([
+        throwing_checklists_row(plan, editable=editable),
         scripts_section(data["pen"], data.get("deleted_pen", []), data["scripts"],
                        data["script_rows"], editable=editable, is_coach=is_coach),
-        style={"gridArea": "scripts", "minWidth": "0"})
-    # Building the Engine's body visual -- a 4th, independently-orderable
-    # grid area (2026-09-11 feedback: on a phone, player photo/stats needs
-    # to lead, then notes, then scripts, then this) rather than nested
-    # inside `profile_block`, which would have dragged it along with the
-    # photo/stats to wherever THAT block sits. `splash-engine-visual-wrap`
-    # keeps its id here so `_on_engine_cycle_filter` in callbacks.py (which
+    ], style={"gridArea": "center", "minWidth": "0"})
+    # `splash-engine-visual-wrap` keeps its id here (moved column, but still
+    # the one element) so `_on_engine_cycle_filter` in callbacks.py (which
     # targets it by id, not position) still refreshes it when a coach
     # widens the View Cycles selection.
     visuals_block = html.Div(
-        body_visual.render(data["engine"], (data.get("profile") or {}).get("throws")),
-        id="splash-engine-visual-wrap", style={"gridArea": "visuals"})
-    # CSS Grid, not flexbox: a flex row's `order` can only reorder its own
-    # DIRECT children, so the old 3-column flex layout couldn't let the body
-    # visual (nested inside the sidebar) land in a different phone-stacking
-    # position than the photo/stats it used to be bundled with. Grid's
-    # named `grid-template-areas` places these 4 areas completely
-    # differently per breakpoint instead -- desktop keeps the original
-    # 3-column look (profile+visuals stacked in column 1), the phone
-    # override in shell.py's `@media (max-width: 720px)` block restacks
-    # them profile -> notes -> scripts -> visuals.
-    return html.Div([profile_block, notes_block, scripts_block, visuals_block],
+        body_visual.render(data["engine"], (data.get("profile") or {}).get("throws"),
+                          compact=True),
+        id="splash-engine-visual-wrap", style={**_CARD})
+    right_block = html.Div([
+        visuals_block,
+        engine_card(data["engine"], is_coach=is_coach,
+                   latest_engine_date=data.get("latest_engine_date"), cycle=data.get("cycle")),
+        gas_station_card(data["gas"], videos.get("Gas Station", []), editable=editable),
+    ], style={"gridArea": "right", "minWidth": "0"})
+    # 3 named areas, one row on desktop; the phone override in shell.py's
+    # `@media (max-width: 720px)` block restacks them profile -> center ->
+    # right.
+    return html.Div([profile_block, center_block, right_block],
                     className="paw-splash-grid",
                     style={"display": "grid",
                           "gridTemplateColumns": "290px 1fr 1fr",
-                          "gridTemplateAreas": '"profile notes scripts" '
-                                              '"visuals notes scripts"',
+                          "gridTemplateAreas": '"profile center right"',
                           "gap": "12px", "alignItems": "start"})
+
+
+# Slim page-title banner, "Built on the Bluff" (this page's planned rename
+# -- 2026-09-13 planning session confirmed this graffiti banner IS that
+# title, not a separate element). Sits above the Edit/Save row.
+#
+# Round 2 (Brad's screenshot feedback): round 1 stretched the backdrop
+# across the FULL page width with no contained box, which read as a plain
+# background wash rather than a banner. Rebuilt to match the Velo Board /
+# Competitive Cauldron idiom Brad pointed at -- a CONTAINED box (capped
+# width, centered, rounded corners, drop shadow) with the page's own
+# grey/palms background showing on either side, not a full-bleed strip.
+# Kept shorter than those banners (no crest/logo, just the title line) per
+# the brief ("should not dominate the page; keep it narrow/skinny").
+def _page_title_banner() -> html.Div:
+    # Round 3 (Brad: "looks a little small and pathetic", wants an
+    # "aggressive cursive font" + an LMU logo in the box). Font switched
+    # from Alfa Slab One (a blocky poster face, all-caps) to "Cauldron
+    # Script" -- Kaushan Script (OFL), the same cursive TTF the Competitive
+    # Cauldron banner already embeds for its "Cauldron" wordmark, now
+    # registered as a normal page font in shell.py's @font-face block so it
+    # can be used here too without a new asset. Cursive scripts read as
+    # connected strokes, so this drops the uppercase+letterSpacing treatment
+    # (both fight a script face) in favor of title case and tight spacing.
+    # Kaushan Script is a flowing signature style, not a harsh/tagging
+    # script -- "aggressive" may want something blockier; swap the font-face
+    # src in shell.py for a different script TTF if this one doesn't read
+    # aggressive enough once seen live.
+    logo = html.Img(src="/static/reports/lmu.png", alt="LMU", style={
+        "display": "block", "margin": "0 auto 2px", "height": "56px", "width": "auto",
+    })
+    title = html.Div("Built on the Bluff", style={
+        "textAlign": "center", "color": "#fff",
+        "fontFamily": "'Cauldron Script', cursive", "fontSize": "46px",
+        "lineHeight": "1.1", "textShadow": "0 2px 6px rgba(0,0,0,0.65)",
+    })
+    box = html.Div([logo, title], style={
+        "background": "url(/static/reports/velo-backdrop.png) center/cover no-repeat",
+        "borderRadius": "10px", "maxWidth": "720px", "margin": "16px auto 8px",
+        "padding": "14px 20px 18px", "boxShadow": "0 2px 8px rgba(0,0,0,0.18)",
+    })
+    return html.Div(box, style={"padding": "0 20px"})
 
 
 def serve_layout() -> html.Div:
@@ -745,6 +934,7 @@ def serve_layout() -> html.Div:
         dcc.Store(id="splash-editing", data=False),
         dcc.Store(id="splash-data", data=data),
         header(back_href="/pitching", back_label="← Pitching"),
+        _page_title_banner(),
         html.Div(controls, style={"borderBottom": f"2px solid {CRIMSON}",
                                   "backgroundColor": "rgba(255,255,255,0.55)"}),
         html.Div(id="splash-body",

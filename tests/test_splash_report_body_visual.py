@@ -18,12 +18,12 @@ def test_render_is_safe_with_no_data_at_all():
     out = body_visual.render([], None)
     s = str(out)
     assert "player-cutout.png" in s  # the real cutout image, every panel
-    assert "Internal Rotation" in s and "Range of Motion" in s  # all 5 panel titles present
+    assert "Internal Strength" in s and "Range of Motion" in s  # all 5 panel titles present
 
 
 def test_all_five_panel_titles_present():
     s = str(body_visual.render(_records(IR="red"), "Right"))
-    for title in ("Internal Rotation", "External Rotation", "Scaption", "Grip",
+    for title in ("Internal Strength", "External Strength", "Scaption", "Grip",
                  "Range of Motion"):
         assert title in s
 
@@ -44,6 +44,13 @@ def test_rom_panel_uses_worst_flag_among_the_three_rom_metrics():
     assert out.count(body_visual._FLAG_COLOR["red"]) >= 1
 
 
+def test_rom_panel_includes_scaption_rom_readout():
+    # 2026-09-14: Scaption ROM is a 4th readout line in the SAME ROM panel
+    # (dot + label, no separate skeleton) -- not a 6th panel.
+    out = str(body_visual.render(_records(EROM="ok"), "Right"))
+    assert "Scaption ROM" in out
+
+
 def test_unknown_or_missing_throws_defaults_to_right_handed_side():
     right = str(body_visual.render(_records(IR="red"), "Right"))
     default = str(body_visual.render(_records(IR="red"), None))
@@ -55,7 +62,7 @@ def test_left_handed_mirrors_the_highlight_positions():
     left = str(body_visual.render(_records(IR="red"), "Left"))
     assert right != left  # highlight box 'left' percentages differ once mirrored
     # same panel titles either way -- only the highlight position changes
-    assert "Internal Rotation" in right and "Internal Rotation" in left
+    assert "Internal Strength" in right and "Internal Strength" in left
 
 
 def test_mirror_box_flips_across_centerline():

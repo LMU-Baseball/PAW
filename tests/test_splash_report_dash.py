@@ -1,4 +1,4 @@
-"""Tests for the assembled Splash Report Dash app: route registration, auth
+"""Tests for the assembled Built on the Bluff Dash app: route registration, auth
 gate, and role-branched layout (coach gets Edit/Save controls, player doesn't
 -- both see the same view content, team-transparent like every other
 dashboard)."""
@@ -292,4 +292,4 @@ def test_pitching_hub_has_splash_report_card(server):
     client = server.test_client()
     client.post("/login", data={"email": "splashhub@lmu.edu", "password": "x"})
     body = client.get("/pitching").get_data(as_text=True)
-    assert "Splash Report" in body and "/dash/splash_report/" in body
+    assert "Built on the Bluff" in body and "/dash/splash_report/" in body

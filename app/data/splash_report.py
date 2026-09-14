@@ -1,4 +1,4 @@
-"""Splash Report storage layer: coach-editable per-pitcher development plan.
+"""Built on the Bluff storage layer: coach-editable per-pitcher development plan.
 
 Migrated from the "PD PLANS - Pitching" Google Sheet (one tab per pitcher per
 training cycle: Fall/Winter/Spring, three times a season). Everything here is
@@ -79,11 +79,16 @@ N_SCRIPTS = 6
 N_SCRIPT_ROWS = 12
 
 STRENGTH_METRICS: tuple[str, ...] = ("IR", "ER", "Scaption", "Grip")
-ROM_METRICS: tuple[str, ...] = ("IROM", "EROM", "TotalArc")
+# "ScaptionROM" added 2026-09-14 (Brad: "we will be measuring Scaption ROM
+# as well, not just strength") -- placed after EROM, matching where Brad
+# wants it read in both the Building the Engine table and the body-visual
+# readout list.
+ROM_METRICS: tuple[str, ...] = ("IROM", "EROM", "ScaptionROM", "TotalArc")
 ENGINE_METRIC_KEYS: tuple[str, ...] = STRENGTH_METRICS + ROM_METRICS
 ENGINE_METRIC_LABELS = {
     "IR": "IR", "ER": "ER", "Scaption": "Scaption", "Grip": "Grip",
-    "IROM": "IROM", "EROM": "EROM", "TotalArc": "Total Arc",
+    "IROM": "IROM", "EROM": "EROM", "ScaptionROM": "Scaption ROM",
+    "TotalArc": "Total Arc",
 }
 
 # D1-average baseline per metric, the fixed reference line a player's Now
@@ -108,7 +113,14 @@ ENGINE_METRIC_LABELS = {
 # that happens, just these seven values.
 D1_BASELINES: dict[str, float | None] = {
     "IR": 30.0, "ER": 22.0, "Scaption": 22.0, "Grip": 115.0,
-    "IROM": 50.0, "EROM": 130.0, "TotalArc": 180.0,
+    "IROM": 50.0, "EROM": 130.0,
+    # No placeholder baseline for Scaption ROM yet (2026-09-14, new metric --
+    # unlike the other seven, Brad hasn't OK'd a starting number for this
+    # one) -- `engine_flag`/the table/body-visual dot all already handle a
+    # None baseline (no color flag, "-" shown) exactly like an unlogged
+    # reading, so this is safe to leave blank until real guidance comes in.
+    "ScaptionROM": None,
+    "TotalArc": 180.0,
 }
 D1_YELLOW_DELTA = 5.0
 D1_RED_DELTA = 10.0
@@ -330,7 +342,7 @@ _TABLES_ENSURED = False
 
 
 def ensure_tables(engine=None) -> None:
-    """Idempotently create all six Splash Report tables -- but only pay for
+    """Idempotently create all six Built on the Bluff tables -- but only pay for
     it once per process. Every read/write function below calls this first
     (same idiom as `app.data.velo_board`), and a `CREATE TABLE IF NOT EXISTS`
     is a full RDS round trip even when the table already exists (measured
