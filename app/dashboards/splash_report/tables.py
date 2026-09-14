@@ -1,4 +1,4 @@
-"""DataTable builders for Splash Report's editable grids."""
+"""DataTable builders for Built on the Bluff's editable grids."""
 from __future__ import annotations
 
 import pandas as pd
@@ -42,7 +42,8 @@ _FLAG_STYLE = {
 }
 
 
-def engine_metrics_table(df: pd.DataFrame, table_id: str) -> dash_table.DataTable:
+def engine_metrics_table(df: pd.DataFrame, table_id: str, *,
+                         label_header: str = "") -> dash_table.DataTable:
     """Label / Base / Now / Δ -- all readonly. Base and Now are DERIVED from
     the reading history (earliest/latest dated entry -- see
     `app.data.splash_report.read_engine_metrics`), not directly editable
@@ -50,11 +51,14 @@ def engine_metrics_table(df: pd.DataFrame, table_id: str) -> dash_table.DataTabl
     never by typing into this grid. `now_value`'s cell is colored by
     `flag` ("yellow"/"red"/"ok"/None) against the D1 baseline. Called twice
     per page (Strength + ROM), so `table_id` must be distinct each time --
-    a duplicate Dash component id is invalid."""
+    a duplicate Dash component id is invalid. `label_header` (2026-09-14,
+    Brad: fold "Strength"/"Range of Motion" into the red header bar as white
+    text instead of a separate black label above the table) fills the
+    otherwise-blank top-left header cell."""
     d = df.copy()
     d["delta"] = d["delta"].map(lambda v: "—" if pd.isna(v) else f"{v:+.1f}")
     columns = [
-        {"name": "", "id": "label", "editable": False},
+        {"name": label_header, "id": "label", "editable": False},
         {"name": "Base", "id": "base_value", "editable": False, "type": "numeric"},
         {"name": "Now", "id": "now_value", "editable": False, "type": "numeric"},
         {"name": "Δ", "id": "delta", "editable": False},

@@ -39,6 +39,14 @@ _INDEX_STRING = """<!DOCTYPE html>
     font-family: "Alfa Slab One"; font-weight: 400; font-display: swap;
     src: url("/static/brand/AlfaSlabOne-Regular.ttf") format("truetype");
   }
+  @font-face {
+    /* Kaushan Script (OFL), same file the Competitive Cauldron banner embeds
+       into its SVG -- registered here as a normal page font too so any
+       regular HTML text (not just an SVG wordmark) can use an aggressive
+       cursive/script look, e.g. Built on the Bluff's page title. */
+    font-family: "Cauldron Script"; font-weight: 400; font-display: swap;
+    src: url("/static/brand/CauldronScript.ttf") format("truetype");
+  }
   body {
     margin: 0; min-height: 100vh;
     background-color: #f5f5f5;
@@ -75,16 +83,16 @@ _INDEX_STRING = """<!DOCTYPE html>
        the second one beats both being unreadable. */
     .paw-chart-row { flex-direction: column !important; }
     .paw-chart-grid { grid-template-columns: 1fr !important; }
-    /* Splash Report's 4-area grid (profile/notes/scripts/visuals -- see
-       app.dashboards.splash_report.layout.render_from_data): desktop keeps
-       profile+visuals stacked in the same left column via
-       grid-template-areas; a phone gets its own explicit stacking order
-       instead of inheriting that column pairing, since a coach wants
-       player photo/stats to lead, then notes, then scripts, then the body
-       visual -- not the desktop grouping. */
+    /* Built on the Bluff's 3-area grid (profile/center/right -- see
+       app.dashboards.splash_report.layout.render_from_data, 2026-09-14
+       right-wall layout test): a phone gets an explicit single-column
+       stacking order instead of the desktop's 3-column row, since a coach
+       wants player photo/stats to lead, then the throwing checklists +
+       scripts, then the skeleton visuals + Building the Engine + Gas
+       Station. */
     .paw-splash-grid {
       grid-template-columns: 1fr !important;
-      grid-template-areas: "profile" "notes" "scripts" "visuals" !important;
+      grid-template-areas: "profile" "center" "right" !important;
     }
   }
 </style>

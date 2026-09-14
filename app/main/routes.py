@@ -34,11 +34,11 @@ def catching():
 @main_bp.route("/splash-video/<int:video_id>")
 @login_required
 def splash_video(video_id: int):
-    """Streams one Splash Report video's bytes (Recovery/Gas Station titled
-    links -- see app.data.splash_report). Login-gated like every other page
-    in the app; not otherwise access-controlled (same team-transparent
-    model as the rest of Splash Report -- any signed-in coach or player can
-    view any clip)."""
+    """Streams one Built on the Bluff video's bytes (Recovery/Gas Station
+    titled links -- see app.data.splash_report). Login-gated like every
+    other page in the app; not otherwise access-controlled (same
+    team-transparent model as the rest of Built on the Bluff -- any
+    signed-in coach or player can view any clip)."""
     from app.data import splash_report as SR
     video = SR.get_video(video_id)
     if video is None:

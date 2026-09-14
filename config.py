@@ -116,7 +116,7 @@ class Config:
     # to /login are unaffected; app/__init__.py re-derives it from TESTING.
     RATELIMIT_ENABLED = True
 
-    # Safety net for the Splash Report video upload (dcc.Upload posts the
+    # Safety net for the Built on the Bluff video upload (dcc.Upload posts the
     # whole file as base64 in the request body -- ~33% bigger than the raw
     # file). Set well above app.data.splash_report.MAX_VIDEO_BYTES (150 MB)
     # so that check is what actually produces the friendly error; this just
