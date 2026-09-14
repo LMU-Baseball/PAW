@@ -150,15 +150,17 @@ def serve_layout() -> html.Div:
         header(back_href="/hitting", back_label="← Hitting"),
         html.Div([
             html.Div(id="prac-sidebar", children=sidebar(pitch0, default_player),
-                     className="paw-dash-sidebar", style={"width": "240px", "flexShrink": "0"}),
+                     className="paw-dash-sidebar"),
             html.Div([
                 html.H2("HitTrax Practice Analytics",
                         style={"color": "#9A0021", "margin": "0 0 4px"}),
                 html.Div("Ported from the Streamlit batting-practice dashboard. "
                          "Data refreshes via the HitTrax ELT pipeline (Mon–Sat).",
                          style={"color": "#555", "marginBottom": "8px"}),
-                filters, tabs,
-                html.Div(id="prac-tab-content", style={"padding": "8px 16px"}),
-            ], className="paw-dash-content", style={"flexGrow": "1"}),
-        ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px", "alignItems": "flex-start"}),
+                filters,
+            ], className="paw-dash-filters"),
+            html.Div([tabs,
+                      html.Div(id="prac-tab-content", style={"padding": "8px 16px"})],
+                     className="paw-dash-content"),
+        ], className="paw-dash-row", style={"gridTemplateColumns": "240px 1fr"}),
     ])

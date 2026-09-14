@@ -123,10 +123,10 @@ def serve_layout() -> html.Div:
         header(back_href="/pitching", back_label="← Pitching"),
         html.Div([
             html.Div(id="bp-sidebar", children=sidebar(default_pitcher, start_d, end_d),
-                     className="paw-dash-sidebar", style={"width": "240px", "flexShrink": "0"}),
-            html.Div([selector_row, tabs,
+                     className="paw-dash-sidebar"),
+            html.Div([selector_row], className="paw-dash-filters"),
+            html.Div([tabs,
                       html.Div(id="bp-tab-content", style={"padding": "8px 16px"})],
-                     className="paw-dash-content", style={"flexGrow": "1"}),
-        ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px",
-                  "alignItems": "flex-start"}),
+                     className="paw-dash-content"),
+        ], className="paw-dash-row", style={"gridTemplateColumns": "240px 1fr"}),
     ])

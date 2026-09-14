@@ -55,17 +55,33 @@ _INDEX_STRING = """<!DOCTYPE html>
     background-size: cover; background-attachment: fixed;
     font-family: 'Teko', sans-serif;
   }
-  /* Phone-only overrides (tablet/laptop/desktop untouched). The dashboards'
-     sidebar+content shell is a fixed-width flex row with no wrap, which just
-     squeezes on a phone instead of reflowing -- stack it, and let the fixed-
-     width sidebar go full width. Banner crest/title get a touch smaller so
-     the branded headers don't overflow a narrow box. */
+  /* Dashboard shell (hitting/pitching/bullpen/catching/HitTrax practice):
+     sidebar (player photo/KPIs) as one left column, filters and the
+     tab/visuals area stacked in a right column -- as a grid (not flex) so
+     phone can independently reorder title -> filters -> player info ->
+     visuals below, rather than only being able to swap two flex items. See
+     .paw-splash-grid below for the same technique on Built on the Bluff. */
+  .paw-dash-row {
+    display: grid;
+    grid-template-areas: "sidebar filters" "sidebar content";
+    align-items: start;
+    gap: 16px;
+    padding: 16px;
+  }
+  .paw-dash-sidebar { grid-area: sidebar; }
+  .paw-dash-filters { grid-area: filters; }
+  .paw-dash-content { grid-area: content; }
+  /* Phone-only overrides (tablet/laptop/desktop untouched). Banner
+     crest/title get a touch smaller so the branded headers don't overflow a
+     narrow box. */
   @media (max-width: 720px) {
-    /* Filters/tabs first, profile+KPIs below -- opening a dashboard on a
-       phone should show what to pick, not a face. */
-    .paw-dash-row { flex-direction: column !important; align-items: stretch !important; }
-    .paw-dash-sidebar { width: 100% !important; order: 2; }
-    .paw-dash-content { order: 1; }
+    /* Coach wants: title, then filters (what to pick), then player
+       info/KPIs, then the visuals -- a phone showing the same order the
+       page defaults to on the way down. */
+    .paw-dash-row {
+      grid-template-columns: 1fr !important;
+      grid-template-areas: "filters" "sidebar" "content" !important;
+    }
     .paw-banner-crest { height: 72px !important; }
     .paw-banner-title { font-size: 20px !important; letter-spacing: 4px !important; }
     /* Site header: let the user-info block drop to its own row instead of

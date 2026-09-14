@@ -192,10 +192,10 @@ def serve_layout() -> html.Div:
             html.Div([
                 html.Div(id="sidebar", children=sidebar(default_catcher, season, start_d, end_d)),
                 notes_ui.note_card("catching"),
-            ], className="paw-dash-sidebar", style={"width": "260px", "flexShrink": "0"}),
-            html.Div([selector_row, tabs,
+            ], className="paw-dash-sidebar"),
+            html.Div([selector_row], className="paw-dash-filters"),
+            html.Div([tabs,
                       html.Div(id="tab-content", style={"padding": "8px 16px"})],
-                     className="paw-dash-content", style={"flexGrow": "1"}),
-        ], className="paw-dash-row", style={"display": "flex", "gap": "16px", "padding": "16px",
-                  "alignItems": "flex-start"}),
+                     className="paw-dash-content"),
+        ], className="paw-dash-row", style={"gridTemplateColumns": "260px 1fr"}),
     ])
