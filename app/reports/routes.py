@@ -14,6 +14,7 @@ import logging
 import re
 import zipfile
 
+import pandas as pd
 from flask import Blueprint, Response, abort, render_template, request
 from flask_login import current_user, login_required
 
@@ -181,6 +182,12 @@ def bullpen_landing():
     from app.data import lmu_roster
     pitchers = lmu_roster.union_with_roster(
         pitchers, season, ("pitcher",), "pitcher_id", "pitcher")
+    # union_with_roster's placeholder rows have no `sessions` column, so the
+    # concat upcasts the whole column to float (NaN for placeholders, "1.0"
+    # instead of "1" for real counts) -- both show wrong in the dropdown.
+    if not pitchers.empty:
+        pitchers["sessions"] = pd.to_numeric(
+            pitchers["sessions"], errors="coerce").fillna(0).astype(int)
     pid = request.args.get("pitcher_id", type=int)
     sessions = None
     selected = None
