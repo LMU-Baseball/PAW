@@ -273,10 +273,11 @@ def test_change_password_success_updates_login(client):
 
 # --------------------------- registration ----------------------------------
 
-def _register(client, name, email, password, confirm=None):
+def _register(client, name, email, password, confirm=None, team_code=""):
     return client.post("/register", data={
         "name": name, "email": email, "password": password,
         "confirm": confirm if confirm is not None else password,
+        "team_code": team_code,
     }, follow_redirects=True)
 
 
@@ -331,3 +332,29 @@ def test_register_email_case_and_whitespace_normalized(app, client):
     _register(client, "New Kid", "  Mixed.Case@LMU.edu  ", "a-real-password")
     with app.app_context():
         assert User.query.filter_by(email="mixed.case@lmu.edu").first() is not None
+
+
+def test_register_allows_no_code_when_team_code_unset(app, client, monkeypatch):
+    monkeypatch.delenv("PAW_TEAM_CODE", raising=False)
+    resp = _register(client, "New Kid", "nocode@lmu.edu", "a-real-password")
+    assert b"Account created." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="nocode@lmu.edu").first() is not None
+
+
+def test_register_rejects_wrong_team_code_when_configured(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_TEAM_CODE", "GoLions26")
+    resp = _register(client, "New Kid", "wrongcode@lmu.edu", "a-real-password",
+                     team_code="nope")
+    assert b"Incorrect team code." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="wrongcode@lmu.edu").first() is None
+
+
+def test_register_accepts_correct_team_code_case_insensitive(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_TEAM_CODE", "GoLions26")
+    resp = _register(client, "New Kid", "rightcode@lmu.edu", "a-real-password",
+                     team_code="  golions26  ")
+    assert b"Account created." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="rightcode@lmu.edu").first() is not None

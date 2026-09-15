@@ -42,6 +42,34 @@ def register_cli(server):
         db.session.commit()
         click.echo(f"Password updated for {email}.")
 
+    @server.cli.command("set-role")
+    @click.option("--email", required=True)
+    @click.option("--role", type=click.Choice(ROLES), required=True)
+    def set_role(email, role):
+        """Change an existing user's role (e.g. fix a mis-assigned self-registration)."""
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        user.role = role
+        db.session.commit()
+        click.echo(f"Set {email} role to {role}.")
+
+    @server.cli.command("set-active")
+    @click.option("--email", required=True)
+    @click.option("--active/--inactive", "active", required=True,
+                  help="--inactive blocks login without deleting the account "
+                       "(e.g. a graduated player); --active restores it.")
+    def set_active(email, active):
+        """Activate or deactivate a user account."""
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        user.is_active = active
+        db.session.commit()
+        click.echo(f"Account {'activated' if active else 'deactivated'}: {email}.")
+
     @server.cli.command("set-trackman-id")
     @click.option("--email", required=True)
     @click.option("--trackman-id", type=int, required=True)

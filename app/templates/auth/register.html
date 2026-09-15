@@ -11,6 +11,10 @@
     <label for="email">Email</label>
     {{ form.email(id="email", type="text") }}
     {% for e in form.email.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <label for="team_code">Team code</label>
+    {{ form.team_code(id="team_code", type="text") }}
+    <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">Ask a coach for this season's team code.</div>
+    {% for e in form.team_code.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
     <label for="password">Password</label>
     {{ form.password(id="password") }}
     {% for e in form.password.errors %}<div class="flash error">{{ e }}</div>{% endfor %}

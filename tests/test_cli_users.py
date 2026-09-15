@@ -59,3 +59,37 @@ def test_set_trackman_id_missing_user_errors(runner):
                                  "--trackman-id", "1"])
     assert result.exit_code != 0
     assert "No user with email: nobody@lmu.edu" in result.output
+
+
+def test_set_role_updates_existing_user(app, runner):
+    result = runner.invoke(args=["set-role", "--email", "player@lmu.edu", "--role", "coach"])
+    assert result.exit_code == 0
+    assert "Set player@lmu.edu role to coach." in result.output
+    with app.app_context():
+        assert User.query.filter_by(email="player@lmu.edu").first().role == "coach"
+
+
+def test_set_role_missing_user_errors(runner):
+    result = runner.invoke(args=["set-role", "--email", "nobody@lmu.edu", "--role", "coach"])
+    assert result.exit_code != 0
+    assert "No user with email: nobody@lmu.edu" in result.output
+
+
+def test_set_active_can_deactivate_and_reactivate(app, runner):
+    result = runner.invoke(args=["set-active", "--email", "player@lmu.edu", "--inactive"])
+    assert result.exit_code == 0
+    assert "Account deactivated: player@lmu.edu." in result.output
+    with app.app_context():
+        assert User.query.filter_by(email="player@lmu.edu").first().is_active is False
+
+    result = runner.invoke(args=["set-active", "--email", "player@lmu.edu", "--active"])
+    assert result.exit_code == 0
+    assert "Account activated: player@lmu.edu." in result.output
+    with app.app_context():
+        assert User.query.filter_by(email="player@lmu.edu").first().is_active is True
+
+
+def test_set_active_missing_user_errors(runner):
+    result = runner.invoke(args=["set-active", "--email", "nobody@lmu.edu", "--active"])
+    assert result.exit_code != 0
+    assert "No user with email: nobody@lmu.edu" in result.output

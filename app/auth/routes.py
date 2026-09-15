@@ -1,4 +1,5 @@
 """Login / logout / change password."""
+import os
 from urllib.parse import urlparse
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
@@ -33,9 +34,21 @@ class LoginForm(FlaskForm):
     submit = SubmitField("Sign in")
 
 
+def _team_code(form, field):
+    # PAW_TEAM_CODE unset/blank = gate disabled (today's domain-only behavior).
+    # Read live rather than at import time so a deployed env-var change takes
+    # effect without a restart-triggering code change.
+    required = (os.getenv("PAW_TEAM_CODE") or "").strip()
+    if not required:
+        return
+    if (field.data or "").strip().lower() != required.lower():
+        raise ValidationError("Incorrect team code.")
+
+
 class RegisterForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired()])
     email = StringField("Email", validators=[DataRequired(), _lmu_email])
+    team_code = StringField("Team code", validators=[_team_code])
     password = PasswordField(
         "Password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
     confirm = PasswordField("Confirm password", validators=[
