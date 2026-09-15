@@ -27,6 +27,7 @@
   .session-row .name { font-family: var(--font-display); font-weight: 600; font-size: 22px; }
   .empty { color: #777; font-style: italic; }
   .hint { color: #777; font-size: 14px; margin: 0 0 14px; }
+  .dl-btn.generating { opacity: .65; pointer-events: none; }
 </style>
 
 <div class="hero">
@@ -70,7 +71,8 @@
     {% for s in sessions %}
       <div class="session-row">
         <span class="name">{{ s.date }}</span>
-        <a class="btn" target="_blank" rel="noopener"
+        <a class="btn dl-btn" target="_blank" rel="noopener"
+           data-label="{{ s.pitches }} pitches · Download ↓"
            href="{{ url_for('reports.bullpen_pdf', pitcher_id=pitcher_id, date=s.date) }}">
           {{ s.pitches }} pitches · Download ↓
         </a>
@@ -81,4 +83,18 @@
   {% endif %}
 </div>
 {% endif %}
+<script>
+  document.querySelectorAll('.dl-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.classList.contains('generating')) return;
+      var original = btn.textContent;
+      btn.textContent = 'Generating… (opens in a new tab)';
+      btn.classList.add('generating');
+      setTimeout(function () {
+        btn.textContent = original;
+        btn.classList.remove('generating');
+      }, 20000);
+    });
+  });
+</script>
 {% endblock %}
