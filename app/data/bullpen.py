@@ -17,8 +17,6 @@ import pandas as pd
 
 from app.db import query_df
 
-LMU_BULLPEN_TEAMS = ("LOY_MAR", "LOY_LIO")
-
 # Strike zone (ft, plate-center coords) + a one-ball edge buffer.
 _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)
 _EDGE = 0.24  # one-ball buffer (ft); provisional
@@ -35,24 +33,26 @@ _COLMAP = {
 }
 
 
-def _teams_clause():
-    marks = ", ".join(f":t{i}" for i in range(len(LMU_BULLPEN_TEAMS)))
-    params = {f"t{i}": v for i, v in enumerate(LMU_BULLPEN_TEAMS)}
-    return f"PitcherTeam IN ({marks})", params
-
-
 def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
     """LMU pitchers present in BULLPEN, newest-session first.
+
+    No `PitcherTeam` filter: BULLPEN is fed solely by LMU's own practice
+    Trackman unit (unlike GAMES, which comes off a conference-shared SFTP),
+    so every row is an LMU pitcher regardless of whether that session's
+    `PitcherTeam` tag was set on the device. Relying on the tag used to
+    silently drop untagged sessions from the dropdown entirely -- see the
+    2026-09-14 bullpen (6 pitchers, all `PitcherTeam IS NULL`) that never
+    showed up until this filter was removed.
 
     When both `start` and `end` are given, only pitchers with a bullpen
     session in [start, end] are returned (scopes the Pitcher dropdown to the
     selected date range). No args = unscoped, unchanged behavior.
     """
-    clause, params = _teams_clause()
-    where = f"{clause} AND PitcherId IS NOT NULL"
+    where = "PitcherId IS NOT NULL"
+    params: dict = {}
     if start is not None and end is not None:
         where += " AND `Date` BETWEEN :start AND :end"
-        params = {**params, "start": str(start), "end": str(end)}
+        params = {"start": str(start), "end": str(end)}
     return query_df(
         f"""
         SELECT PitcherId AS pitcher_id, MAX(Pitcher) AS pitcher,
