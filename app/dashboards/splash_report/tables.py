@@ -141,3 +141,23 @@ def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTab
                       for _ in range(6 - len(data))]
     return _table("splash-pen-table", columns, data, editable=editable,
                  row_deletable=editable)
+
+
+def movement_table(df: pd.DataFrame, script_number: int, *, editable: bool) -> dash_table.DataTable:
+    """Pitch Type / Pen Date / HB / IVB -- variable rows, ONE script's
+    movement entries (unlike pen_results_table, not shared across all 6 --
+    see `app.data.splash_report.save_movement`). Same `id`-round-tripping/
+    soft-delete idiom as `pen_results_table`."""
+    columns = [
+        {"name": "Pitch Type", "id": "pitch_type", "editable": editable},
+        {"name": "Pen Date", "id": "pen_date", "editable": editable},
+        {"name": "HB", "id": "hb", "editable": editable, "type": "numeric"},
+        {"name": "IVB", "id": "ivb", "editable": editable, "type": "numeric"},
+    ]
+    data = df[["id", "pitch_type", "pen_date", "hb", "ivb"]].to_dict("records") \
+        if not df.empty else []
+    if editable and len(data) < 4:
+        data = data + [{"pitch_type": "", "pen_date": "", "hb": None, "ivb": None}
+                      for _ in range(4 - len(data))]
+    return _table(f"splash-script-movement-table-{script_number}", columns, data,
+                 editable=editable, row_deletable=editable)
