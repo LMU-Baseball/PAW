@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from app.data import splash_report as SR
+from app.dashboards.splash_report import charts as SC
 from app.db import get_engine
 
 TEST_PID = -999101  # sandboxed fake player id; never collides with real GAMES data
@@ -152,14 +153,17 @@ def test_scripts_reindexed_to_fixed_six():
     scripts = SR.read_scripts(TEST_PID, SEASON, CYCLE)
     assert list(scripts["script_number"]) == list(range(1, 7))
     assert (scripts["goal"] == "").all()
+    assert (scripts["script_type"] == "").all()
 
     SR.upsert_scripts(TEST_PID, SEASON, CYCLE,
-                      [{"script_number": 1, "goal": "FB command", "measurable": "Zone%"},
+                      [{"script_number": 1, "goal": "FB command", "measurable": "Zone%",
+                        "script_type": "Pitch Design"},
                        {"script_number": 99, "goal": "ignored", "measurable": "x"}],
                       updated_by=1)
     scripts2 = SR.read_scripts(TEST_PID, SEASON, CYCLE)
     row1 = scripts2[scripts2.script_number == 1].iloc[0]
     assert row1["goal"] == "FB command" and row1["measurable"] == "Zone%"
+    assert row1["script_type"] == "Pitch Design"
     assert len(scripts2) == 6  # the out-of-range script_number=99 was ignored
 
 
@@ -400,3 +404,26 @@ def test_add_video_rejects_bad_category_and_oversized_file(_clean_videos):
     with pytest.raises(ValueError):
         SR.add_video("__test_sandbox_too_big__", "Recovery", "video/mp4",
                      b"x" * (SR.MAX_VIDEO_BYTES + 1))
+
+
+def test_pen_results_fig_plots_by_date_not_pen_number():
+    """2026-09-16: chart x-axis switched from the sequential pen_number to
+    the real pen_date -- confirm the trace actually carries dates, and that
+    a row with no pen_date is excluded rather than crashing the chart."""
+    df = pd.DataFrame([
+        {"script_number": 1, "pen_number": 1, "pen_date": "2026-09-01", "value": 60.0},
+        {"script_number": 1, "pen_number": 2, "pen_date": "2026-09-15", "value": 70.0},
+        {"script_number": 2, "pen_number": 1, "pen_date": None, "value": 40.0},  # dropped
+    ])
+    fig = SC.pen_results_fig(df)
+    assert len(fig.data) == 1  # only script 1 has a usable (dated) point
+    trace = fig.data[0]
+    assert list(trace.x) == ["2026-09-01", "2026-09-15"]
+    assert list(trace.y) == [60.0, 70.0]
+    assert fig.layout.xaxis.title.text == "Date"
+
+
+def test_pen_results_fig_empty_when_no_dated_rows():
+    df = pd.DataFrame([{"script_number": 1, "pen_number": 1, "pen_date": None, "value": 60.0}])
+    fig = SC.pen_results_fig(df)
+    assert fig.layout.annotations[0].text == "No pen results for this cycle yet."
