@@ -32,24 +32,30 @@ def _empty_fig() -> go.Figure:
 def pen_results_fig(df: pd.DataFrame) -> go.Figure:
     """`df`: columns script_number/pen_number/pen_date/value (see
     `app.data.splash_report.read_pen_results`). One line per script that has
-    at least one recorded value; x = pen_number (sequential within that
-    script), y = value (%)."""
+    at least one recorded value; x = pen_date (2026-09-16: switched from the
+    sequential pen_number -- Brad wanted real calendar progression, not an
+    arbitrary 1st/2nd/3rd count), y = value (%). A row with no pen_date is
+    dropped from the chart (nothing to plot it against on a date axis) but
+    stays in the underlying data/table untouched."""
     if df is None or df.empty:
         return _empty_fig()
+    dated = df.dropna(subset=["pen_date"])
+    dated = dated[dated["pen_date"] != ""]
+    if dated.empty:
+        return _empty_fig()
     fig = go.Figure()
-    for script_number, sub in df.sort_values("pen_number").groupby("script_number"):
+    for script_number, sub in dated.sort_values("pen_date").groupby("script_number"):
         color = SCRIPT_COLORS.get(int(script_number), "#888")
         fig.add_trace(go.Scatter(
-            x=sub["pen_number"], y=sub["value"], mode="lines+markers",
+            x=sub["pen_date"], y=sub["value"], mode="lines+markers",
             name=f"Script {int(script_number)}",
             line=dict(color=color, width=2), marker=dict(color=color, size=7),
-            customdata=sub["pen_date"].fillna("").to_numpy(),
-            hovertemplate=(f"Script {int(script_number)}<br>Pen %{{x}}"
-                           "<br>%{customdata}<br>%{y:.0f}%<extra></extra>"),
+            hovertemplate=(f"Script {int(script_number)}"
+                           "<br>%{x}<br>%{y:.0f}%<extra></extra>"),
         ))
     fig.update_layout(
         title="Script Pen Results", height=360, margin=dict(l=40, r=20, t=50, b=40),
-        xaxis=dict(title="Pen #", dtick=1), yaxis=dict(title="Result (%)"),
+        xaxis=dict(title="Date", type="date"), yaxis=dict(title="Result (%)"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
         legend=dict(orientation="h", y=-0.15))

@@ -503,16 +503,28 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
+    script_type = script_row.get("script_type") or ""
     goal_child = dcc.Input(id=f"splash-script-goal-{script_number}", value=goal,
                            type="text", style={"width": "100%"}) if editable \
         else html.Div(goal or "—")
     measurable_child = dcc.Input(id=f"splash-script-measurable-{script_number}",
                                  value=measurable, type="text", style={"width": "100%"}) \
         if editable else html.Div(measurable or "—")
+    # Drives the Pen Results value's meaning (velo/execution = raw result %,
+    # pitch design = % in the target movement window) and which scripts feed
+    # the pitch-design movement plot (2026-09-16 coaches' meeting).
+    type_child = dcc.Dropdown(
+        id=f"splash-script-type-{script_number}",
+        options=[{"label": t, "value": t} for t in SR.SCRIPT_TYPES],
+        value=script_type or None, clearable=True,
+        style={"fontFamily": "Teko, sans-serif"}) if editable \
+        else html.Div(script_type or "—")
     card = html.Div([
         html.Div(f"Script #{script_number}", style={"fontWeight": "bold", "color": CRIMSON}),
+        html.Div([html.Span("Type ", style={"fontSize": "11px", "color": "#666"}),
+                  type_child]),
         html.Div([html.Span("Goal ", style={"fontSize": "11px", "color": "#666"}),
-                  goal_child]),
+                  goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
         html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number, editable=editable),

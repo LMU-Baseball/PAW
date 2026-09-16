@@ -22,10 +22,12 @@ Script Pen Results trend graph) -- so unlike Gas Station, it's never hard-
 deleted. Each reading has a stable surrogate `id` and an `active` flag;
 `save_pen_results` soft-deletes (active=0) whatever the coach removed from
 the table instead of dropping it, and `restore_pen_result` flips one back.
-`pen_number` (the trend chart's x-axis) is derived at read time from each
-script's active rows ordered by date, not stored -- storing it as an
-identity column made a row's "identity" shift every time a sibling row was
-deleted, which is what made safe soft-delete/restore impossible before this.
+`pen_number` (that script's Nth active pen entry, ordered by date -- the
+trend chart's x-axis until 2026-09-16, now plots by `pen_date` directly
+instead) is derived at read time from each script's active rows, not
+stored -- storing it as an identity column made a row's "identity" shift
+every time a sibling row was deleted, which is what made safe soft-
+delete/restore impossible before this.
 
 The other four tables (splash_plans, splash_engine_readings, splash_scripts,
 splash_script_rows) have a fixed row shape (a fixed metric/script/pitch-slot
@@ -77,6 +79,13 @@ MAX_VIDEO_BYTES = 150 * 1024 * 1024  # 150 MB
 
 N_SCRIPTS = 6
 N_SCRIPT_ROWS = 12
+
+# A script's type (2026-09-16 coaches' meeting) drives what the Pen Results
+# "value" % on that script actually means and whether pitch-design's
+# movement plot applies to it -- see `app.dashboards.splash_report.tables`'s
+# script_card for the dropdown. Blank ("") is a valid, unset default, same
+# as goal/measurable.
+SCRIPT_TYPES: tuple[str, ...] = ("Velo", "Pitch Design", "Execution")
 
 STRENGTH_METRICS: tuple[str, ...] = ("IR", "ER", "Scaption", "Grip")
 # "ScaptionROM" added 2026-09-14 (Brad: "we will be measuring Scaption ROM
@@ -249,6 +258,7 @@ _SCRIPTS_DDL = f"""
         script_number  TINYINT NOT NULL,
         goal           VARCHAR(255),
         measurable     VARCHAR(255),
+        script_type    VARCHAR(16),
         updated_by     INT,
         updated_at     DATETIME,
         PRIMARY KEY (player_id, season_label, cycle, script_number)
@@ -323,6 +333,19 @@ _ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCR
 _TABLES_ENSURED = False
 
 
+def _ensure_column(conn, table, col, coldef) -> None:
+    """Additive, idempotent migration: ADD COLUMN only when it's missing
+    (MySQL has no portable ADD COLUMN IF NOT EXISTS, so gate on
+    information_schema). Mirrors app.data.cauldron's helper of the same
+    name/shape."""
+    exists = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name = :t AND column_name = :c"),
+        {"t": table, "c": col}).scalar()
+    if not exists:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {coldef}"))
+
+
 def ensure_tables(engine=None) -> None:
     """Idempotently create all six Built on the Bluff tables -- but only pay for
     it once per process. Every read/write function below calls this first
@@ -346,6 +369,10 @@ def ensure_tables(engine=None) -> None:
     with engine.begin() as conn:
         for ddl in _ALL_DDL:
             conn.execute(text(ddl))
+        # Additive migration for a deployment whose splash_scripts predates
+        # script_type (2026-09-16) -- _SCRIPTS_DDL above already has it for a
+        # brand-new table, this just backfills an existing one.
+        _ensure_column(conn, SCRIPTS_TABLE, "script_type", "script_type VARCHAR(16)")
     _TABLES_ENSURED = True
 
 
@@ -707,11 +734,12 @@ def restore_pen_result(row_id, updated_by=None) -> None:
 # ============================ SCRIPTS (fixed 1-6 / 1-12) ====================
 
 def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
-    """One row per script_number 1..N_SCRIPTS (fixed order), goal/measurable
-    blank ("") for any script with no saved row yet."""
+    """One row per script_number 1..N_SCRIPTS (fixed order), goal/measurable/
+    script_type blank ("") for any script with no saved row yet."""
     ensure_tables()
     df = query_df(
-        f"SELECT script_number, goal, measurable FROM {SCRIPTS_TABLE} WHERE {_key_where()}",
+        f"SELECT script_number, goal, measurable, script_type FROM {SCRIPTS_TABLE} "
+        f"WHERE {_key_where()}",
         {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
     by_num = {int(r["script_number"]): r for _, r in df.iterrows()} if not df.empty else {}
     rows = []
@@ -721,20 +749,21 @@ def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
             "script_number": n,
             "goal": "" if r is None or pd.isna(r["goal"]) else str(r["goal"]),
             "measurable": "" if r is None or pd.isna(r["measurable"]) else str(r["measurable"]),
+            "script_type": "" if r is None or pd.isna(r["script_type"]) else str(r["script_type"]),
         })
     return pd.DataFrame(rows)
 
 
 def upsert_scripts(player_id, season_label, cycle, rows: list[dict], updated_by=None) -> None:
-    """`rows`: [{"script_number","goal","measurable"}, ...]."""
+    """`rows`: [{"script_number","goal","measurable","script_type"}, ...]."""
     pid, sl = int(player_id), season_label
     resolved = [{"player_id": pid, "season_label": sl, "cycle": cycle,
                 "script_number": int(row["script_number"]), "goal": row.get("goal"),
-                "measurable": row.get("measurable")}
+                "measurable": row.get("measurable"), "script_type": row.get("script_type")}
                for row in rows
                if row.get("script_number") is not None and 1 <= int(row["script_number"]) <= N_SCRIPTS]
     _multi_row_upsert(SCRIPTS_TABLE, ("player_id", "season_label", "cycle", "script_number"),
-                      ("goal", "measurable"), resolved, updated_by)
+                      ("goal", "measurable", "script_type"), resolved, updated_by)
 
 
 def _reindex_script_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -968,7 +997,7 @@ def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=No
 
     `engine_rows`: [{"metric_key", "base_value", "now_value"}, ...] -- see
     `upsert_engine_metrics`.
-    `script_fields`: {script_number: {"goal", "measurable"}}.
+    `script_fields`: {script_number: {"goal", "measurable", "script_type"}}.
     `script_pitch_rows`: {script_number: [12 row dicts]}.
     """
     if plan_fields is not None:

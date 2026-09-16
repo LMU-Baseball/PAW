@@ -38,6 +38,7 @@ def _script_states() -> list:
     for n in range(1, SR.N_SCRIPTS + 1):
         states.append(State(f"splash-script-goal-{n}", "value"))
         states.append(State(f"splash-script-measurable-{n}", "value"))
+        states.append(State(f"splash-script-type-{n}", "value"))
         states.append(State(f"splash-script-rows-{n}", "data"))
     return states
 
@@ -143,8 +144,8 @@ def register_callbacks(dash_app) -> None:
         }
         script_fields, script_pitch_rows = {}, {}
         for i, n in enumerate(range(1, SR.N_SCRIPTS + 1)):
-            goal_v, measurable_v, rows_v = script_args[i * 3:i * 3 + 3]
-            script_fields[n] = {"goal": goal_v, "measurable": measurable_v}
+            goal_v, measurable_v, type_v, rows_v = script_args[i * 4:i * 4 + 4]
+            script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v}
             script_pitch_rows[n] = rows_v or []
         engine_rows = (engine_strength_rows or []) + (engine_rom_rows or [])
 
