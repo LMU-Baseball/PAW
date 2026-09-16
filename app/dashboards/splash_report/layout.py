@@ -553,6 +553,47 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     return html.Div(card, id=f"splash-script-wrap-{script_number}", style={"display": "none"})
 
 
+def script_movement_panel(script_number, script_type: str, movement_records: list, *,
+                          editable: bool) -> html.Div:
+    """Pitch Design's movement plot + entry table (2026-09-16 meeting) --
+    ALWAYS rendered as a sibling of that script's `script_card` in the same
+    flex-wrap row (same "always in the DOM, visibility toggled client-side"
+    reasoning as script_card itself), so it fills the white space Brad
+    pointed at beside the (narrow, 220px) card instead of stacking under the
+    Pen Results graph like the original meeting note described -- Brad
+    corrected that placement live while reviewing the page. Rectangular
+    (wider than tall), not square, per the same note.
+
+    In edit mode the INNER panel (and its movement_table) is always mounted
+    -- just CSS-hidden (`display: none`, not omitted) for a non-Pitch-Design
+    script -- never conditionally OMITTED, even though it's only meaningful
+    for Pitch Design: Dash's client-side State binding hard-fails the whole
+    Save callback the instant ANY State target isn't in the current layout
+    (confirmed live, 2026-09-16 -- `splash-script-movement-table-2` missing
+    for a "Velo" script threw `ReferenceError: A nonexistent object was used
+    in a State...` in the browser console and silently broke every field's
+    save, not just this one). View mode has no Save button to protect, so it
+    can skip the whole panel for a non-Pitch-Design script same as before."""
+    show = script_type == "Pitch Design"
+    if not editable and not show:
+        return html.Div(id=f"splash-script-movement-wrap-{script_number}",
+                        style={"display": "none"})
+    df = pd.DataFrame(movement_records)
+    panel = html.Div([
+        html.Div(f"Script #{script_number} — Movement", style={"fontWeight": "bold",
+                                                                "color": CRIMSON}),
+        dcc.Graph(figure=charts.movement_fig(df), config={"displayModeBar": False},
+                 style={"height": "280px"}),
+        html.Div(tables.movement_table(df, script_number, editable=editable),
+                 style={"marginTop": "6px"}),
+    ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
+              "padding": "10px", "marginBottom": "12px", "width": "460px",
+              "boxSizing": "border-box",
+              **({} if show else {"display": "none"})})
+    return html.Div(panel, id=f"splash-script-movement-wrap-{script_number}",
+                    style={"display": "none"})
+
+
 def _removed_pen_row(row: dict) -> html.Div:
     value = row.get("value")
     value_text = "—" if value is None else f"{value:g}%"
@@ -585,7 +626,8 @@ def _removed_pen_panel(deleted_records: list) -> html.Div:
 
 
 def scripts_section(pen_records: list, deleted_pen_records: list, scripts_records: list,
-                    script_rows: dict, *, editable: bool, is_coach: bool) -> html.Div:
+                    script_rows: dict, movement_records: dict, *, editable: bool,
+                    is_coach: bool) -> html.Div:
     """Script Pen Results trend graph on top, the 6 script cards collapsed
     below it behind a multi-select ("only show when clicked" -- 2026-09-10
     planning session): "Compare Scripts" narrows which lines the graph
@@ -609,9 +651,13 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
         graph_block.children.append(
             html.Div(_removed_pen_panel(deleted_pen_records), id="splash-pen-removed-wrap"))
 
-    cards = [script_card(int(r["script_number"]), r, script_rows[str(int(r["script_number"]))],
-                         editable=editable)
-             for r in scripts_records]
+    cards = []
+    for r in scripts_records:
+        n = int(r["script_number"])
+        cards.append(script_card(n, r, script_rows[str(n)], editable=editable))
+        cards.append(script_movement_panel(
+            n, r.get("script_type") or "", movement_records.get(str(n), []),
+            editable=editable))
     # 2026-09-14 (Brad, matching the skeleton-visuals grid fix): a fixed
     # 2-column grid stretched every card to half the (now much wider) center
     # column, leaving a lot of blank space to the right of each card's
@@ -720,6 +766,7 @@ def load_data(player_id, season_label, cycle) -> dict:
     script_rows = SR.read_all_script_rows(pid, season_label, cycle)
     pen = SR.read_pen_results(pid, season_label, cycle)
     deleted_pen = SR.read_deleted_pen_results(pid, season_label, cycle)
+    movement = SR.read_all_movement(pid, season_label, cycle)
     # Drill catalog + video library are global (coach-managed, not scoped to
     # a player/season/cycle), but loaded here too so render_from_data stays
     # a pure function of `data` with zero DB calls of its own -- these are
@@ -736,6 +783,7 @@ def load_data(player_id, season_label, cycle) -> dict:
         # use str() up front so in-process (no round trip yet) access matches.
         "script_rows": {str(n): df.to_dict("records") for n, df in script_rows.items()},
         "pen": pen.to_dict("records"), "deleted_pen": deleted_pen.to_dict("records"),
+        "movement": {str(n): df.to_dict("records") for n, df in movement.items()},
         "drill_options": drill_options, "videos": videos,
     }
 
@@ -777,7 +825,8 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
     center_block = html.Div([
         throwing_checklists_row(plan, editable=editable),
         scripts_section(data["pen"], data.get("deleted_pen", []), data["scripts"],
-                       data["script_rows"], editable=editable, is_coach=is_coach),
+                       data["script_rows"], data.get("movement", {}),
+                       editable=editable, is_coach=is_coach),
     ], style={"gridArea": "center", "minWidth": "0"})
     visuals_block = html.Div(
         body_visual.render(data["engine"], (data.get("profile") or {}).get("throws"),

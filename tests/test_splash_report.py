@@ -20,7 +20,7 @@ def _clean_sandbox():
     yield
     with get_engine().begin() as conn:
         for t in (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
-                 SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE):
+                 SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE):
             conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": TEST_PID})
 
 
@@ -311,6 +311,54 @@ def test_save_pen_results_updates_an_existing_row_in_place_by_id():
     assert pen.iloc[0]["value"] == 61.0
 
 
+def test_save_movement_inserts_multiple_pitch_types_for_one_script():
+    SR.save_movement(TEST_PID, SEASON, CYCLE, 1, [
+        {"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0},
+        {"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0},
+        {"pitch_type": "", "pen_date": "2026-09-01", "hb": 1.0, "ivb": 1.0},  # dropped
+        {"pitch_type": "Curveball", "pen_date": "2026-09-01", "hb": None, "ivb": None},  # dropped
+    ], updated_by=1)
+    mv = SR.read_movement(TEST_PID, SEASON, CYCLE, 1).sort_values("pitch_type")
+    assert len(mv) == 2
+    assert set(mv["pitch_type"]) == {"Fastball", "Slider"}
+    assert mv["id"].notna().all()
+
+    # a different script_number is a completely separate set
+    assert SR.read_movement(TEST_PID, SEASON, CYCLE, 2).empty
+
+
+def test_save_movement_soft_deletes_omitted_rows_and_they_are_restorable():
+    SR.save_movement(TEST_PID, SEASON, CYCLE, 1, [
+        {"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0},
+        {"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0},
+    ], updated_by=1)
+    active = SR.read_movement(TEST_PID, SEASON, CYCLE, 1)
+    kept, removed = active.iloc[0], active.iloc[1]
+
+    SR.save_movement(TEST_PID, SEASON, CYCLE, 1, [
+        {"id": int(kept["id"]), "pitch_type": kept["pitch_type"], "pen_date": kept["pen_date"],
+         "hb": kept["hb"], "ivb": kept["ivb"]},
+    ], updated_by=1)
+    still_active = SR.read_movement(TEST_PID, SEASON, CYCLE, 1)
+    assert len(still_active) == 1 and still_active.iloc[0]["id"] == kept["id"]
+    deleted = SR.read_deleted_movement(TEST_PID, SEASON, CYCLE, 1)
+    assert len(deleted) == 1 and deleted.iloc[0]["id"] == removed["id"]
+
+    SR.restore_movement_row(int(removed["id"]), updated_by=1)
+    assert len(SR.read_movement(TEST_PID, SEASON, CYCLE, 1)) == 2
+    assert SR.read_deleted_movement(TEST_PID, SEASON, CYCLE, 1).empty
+
+
+def test_read_all_movement_batches_all_six_scripts():
+    SR.save_movement(TEST_PID, SEASON, CYCLE, 1,
+                     [{"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0}],
+                     updated_by=1)
+    by_script = SR.read_all_movement(TEST_PID, SEASON, CYCLE)
+    assert set(by_script) == set(range(1, SR.N_SCRIPTS + 1))
+    assert len(by_script[1]) == 1
+    assert by_script[2].empty
+
+
 def test_save_all_persists_every_section_in_one_call():
     SR.save_all(
         TEST_PID, SEASON, CYCLE,
@@ -322,6 +370,8 @@ def test_save_all_persists_every_section_in_one_call():
         script_fields={1: {"goal": "G1", "measurable": "M1"}},
         script_pitch_rows={1: [{"row_num": 1, "pitch_type": "FB", "ball_info": "", "info": ""}]},
         pen_rows=[{"script_number": 1, "pen_date": "2026-09-01", "value": 55.0}],
+        movement_rows={1: [{"pitch_type": "Fastball", "pen_date": "2026-09-01",
+                            "hb": 8.0, "ivb": 15.0}]},
         updated_by=1,
     )
     assert SR.read_plan(TEST_PID, SEASON, CYCLE)["vision_statement"] == "Focus"
@@ -331,6 +381,7 @@ def test_save_all_persists_every_section_in_one_call():
     assert SR.read_scripts(TEST_PID, SEASON, CYCLE).iloc[0]["goal"] == "G1"
     assert SR.read_script_rows(TEST_PID, SEASON, CYCLE, 1).iloc[0]["pitch_type"] == "FB"
     assert len(SR.read_pen_results(TEST_PID, SEASON, CYCLE)) == 1
+    assert len(SR.read_movement(TEST_PID, SEASON, CYCLE, 1)) == 1
 
 
 def test_feet_drill_and_strength_need_options_are_nonempty_and_deduped():
@@ -427,3 +478,24 @@ def test_pen_results_fig_empty_when_no_dated_rows():
     df = pd.DataFrame([{"script_number": 1, "pen_number": 1, "pen_date": None, "value": 60.0}])
     fig = SC.pen_results_fig(df)
     assert fig.layout.annotations[0].text == "No pen results for this cycle yet."
+
+
+def test_movement_fig_one_trace_per_pitch_type():
+    df = pd.DataFrame([
+        {"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0},
+        {"pitch_type": "Fastball", "pen_date": "2026-09-08", "hb": 9.0, "ivb": 16.0},
+        {"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0},
+    ])
+    fig = SC.movement_fig(df)
+    assert len(fig.data) == 2  # one trace per pitch type
+    names = sorted(t.name for t in fig.data)
+    assert names == ["Fastball", "Slider"]
+    fb = next(t for t in fig.data if t.name == "Fastball")
+    assert list(fb.x) == [8.0, 9.0] and list(fb.y) == [15.0, 16.0]
+    assert fig.layout.xaxis.title.text == "HB (in)"
+    assert fig.layout.yaxis.title.text == "IVB (in)"
+
+
+def test_movement_fig_empty_when_no_rows():
+    fig = SC.movement_fig(pd.DataFrame(columns=["pitch_type", "pen_date", "hb", "ivb"]))
+    assert fig.layout.annotations[0].text == "No movement logged for this script yet."

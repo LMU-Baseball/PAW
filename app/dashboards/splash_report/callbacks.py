@@ -40,6 +40,7 @@ def _script_states() -> list:
         states.append(State(f"splash-script-measurable-{n}", "value"))
         states.append(State(f"splash-script-type-{n}", "value"))
         states.append(State(f"splash-script-rows-{n}", "data"))
+        states.append(State(f"splash-script-movement-table-{n}", "data"))
     return states
 
 
@@ -142,17 +143,23 @@ def register_callbacks(dash_app) -> None:
             "work_day": "\n".join(work_day or []),
             "recovery_video_url": recovery_url,
         }
-        script_fields, script_pitch_rows = {}, {}
+        script_fields, script_pitch_rows, movement_rows = {}, {}, {}
         for i, n in enumerate(range(1, SR.N_SCRIPTS + 1)):
-            goal_v, measurable_v, type_v, rows_v = script_args[i * 4:i * 4 + 4]
+            goal_v, measurable_v, type_v, rows_v, movement_v = script_args[i * 5:i * 5 + 5]
             script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v}
             script_pitch_rows[n] = rows_v or []
+            # movement_v is None for a script whose movement table isn't
+            # mounted (velo/execution scripts never render one -- see
+            # layout.script_movement_panel) -- nothing to save for those.
+            if movement_v is not None:
+                movement_rows[n] = movement_v
         engine_rows = (engine_strength_rows or []) + (engine_rom_rows or [])
 
         SR.save_all(
             player_id, season, cycle, plan_fields=plan_fields, engine_rows=engine_rows,
             gas_rows=gas_rows or [], script_fields=script_fields,
             script_pitch_rows=script_pitch_rows, pen_rows=pen_rows or [],
+            movement_rows=movement_rows,
             updated_by=getattr(current_user, "id", None))
         # One fresh load so splash-data (and the view-mode render right
         # after) reflects exactly what was just persisted -- correctness
@@ -306,20 +313,29 @@ def register_callbacks(dash_app) -> None:
     # show when clicked"). Every card is ALWAYS in the DOM (see
     # `layout.script_card`'s docstring for why) -- this just toggles each
     # wrapper's display, entirely client-side, so it never touches the
-    # Save form's State values and never needs a server round trip.
+    # Save form's State values and never needs a server round trip. The
+    # movement-wrap siblings (2026-09-16, `layout.script_movement_panel`)
+    # follow the exact same selection, one style output per script alongside
+    # its card's -- toggling display on an empty (non-Pitch-Design) wrapper
+    # is harmless, there's just nothing inside it to show.
     dash_app.clientside_callback(
         """
         function(selected) {
             var sel = selected || [];
             var out = [];
-            for (var n = 1; n <= %d; n++) {
+            for (var n = 1; n <= %(n)d; n++) {
+                out.push(sel.indexOf(n) !== -1
+                    ? {display: 'block', marginBottom: '12px'} : {display: 'none'});
+            }
+            for (var n = 1; n <= %(n)d; n++) {
                 out.push(sel.indexOf(n) !== -1
                     ? {display: 'block', marginBottom: '12px'} : {display: 'none'});
             }
             return out;
         }
-        """ % SR.N_SCRIPTS,
+        """ % {"n": SR.N_SCRIPTS},
         *[Output(f"splash-script-wrap-{n}", "style") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[Output(f"splash-script-movement-wrap-{n}", "style") for n in range(1, SR.N_SCRIPTS + 1)],
         Input("splash-script-select", "value"),
     )
 

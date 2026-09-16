@@ -58,6 +58,7 @@ GAS_TABLE = "splash_gas_station"
 SCRIPTS_TABLE = "splash_scripts"
 SCRIPT_ROWS_TABLE = "splash_script_rows"
 PEN_TABLE = "splash_pen_results"
+MOVEMENT_TABLE = "splash_movement"
 DRILL_CATALOG_TABLE = "splash_drill_catalog"
 VIDEOS_TABLE = "splash_videos"
 
@@ -294,6 +295,30 @@ _PEN_DDL = f"""
         KEY idx_pen_key (player_id, season_label, cycle, script_number, active)
     )"""
 
+# Pitch-design scripts' movement plot (2026-09-16 coaches' meeting): one row
+# per (script, pen session, pitch type) -- unlike splash_pen_results' single
+# Value % per script per session, a session can carry several pitch types'
+# average movement at once, so this needs its own variable-row table rather
+# than extra columns bolted onto PEN_TABLE. Same soft-delete shape/reasoning
+# as PEN_TABLE (hand-typed coach data, a delete should be recoverable, not
+# permanent) -- see `save_movement`.
+_MOVEMENT_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {MOVEMENT_TABLE} (
+        id             INT AUTO_INCREMENT PRIMARY KEY,
+        player_id      BIGINT NOT NULL,
+        season_label   VARCHAR(16) NOT NULL,
+        cycle          VARCHAR(16) NOT NULL,
+        script_number  TINYINT NOT NULL,
+        pen_date       VARCHAR(10),
+        pitch_type     VARCHAR(32),
+        hb             FLOAT,
+        ivb            FLOAT,
+        active         TINYINT(1) NOT NULL DEFAULT 1,
+        updated_by     INT,
+        updated_at     DATETIME,
+        KEY idx_movement_key (player_id, season_label, cycle, script_number, active)
+    )"""
+
 # Coach-managed catalog backing the Feet Set/Feet Moving/Work Day dropdowns
 # (used to be the hardcoded FEET_DRILL_OPTIONS tuple -- see that constant's
 # docstring). A coach can add new entries and deactivate old ones from the
@@ -327,7 +352,7 @@ _VIDEOS_DDL = f"""
     )"""
 
 _ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
-           _PEN_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
+           _PEN_DDL, _MOVEMENT_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
 
 
 _TABLES_ENSURED = False
@@ -731,6 +756,128 @@ def restore_pen_result(row_id, updated_by=None) -> None:
         """), {"id": int(row_id), "updated_by": _clean(updated_by), "updated_at": _now()})
 
 
+# ======================== PITCH-DESIGN MOVEMENT (per script) ================
+# Scoped to ONE script_number per call (unlike pen results, which reads all 6
+# scripts at once for the shared trend graph) -- the movement plot/table live
+# right next to that one script's own card, not in a cross-script view.
+
+def _read_movement_rows(player_id, season_label, cycle, script_number, *,
+                        active: bool) -> pd.DataFrame:
+    ensure_tables()
+    df = query_df(
+        f"SELECT id, pitch_type, pen_date, hb, ivb FROM {MOVEMENT_TABLE} "
+        f"WHERE {_key_where()} AND script_number = :script_number AND active = :active "
+        f"ORDER BY pen_date, id",
+        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle,
+         "script_number": int(script_number), "active": 1 if active else 0})
+    return df
+
+
+def read_movement(player_id, season_label, cycle, script_number, *,
+                  active_only: bool = True) -> pd.DataFrame:
+    """One script's movement rows: id/pitch_type/pen_date/hb/ivb.
+    `active_only=True` (the default) excludes soft-deleted rows -- see
+    `read_deleted_movement` for those."""
+    return _read_movement_rows(player_id, season_label, cycle, script_number,
+                               active=bool(active_only))
+
+
+def read_deleted_movement(player_id, season_label, cycle, script_number) -> pd.DataFrame:
+    """The soft-deleted set for this script (same shape as `read_movement`)."""
+    return _read_movement_rows(player_id, season_label, cycle, script_number, active=False)
+
+
+def save_movement(player_id, season_label, cycle, script_number, rows: list[dict],
+                  updated_by=None) -> None:
+    """`rows`: [{"id" (optional), "pitch_type", "pen_date", "hb", "ivb"}, ...] --
+    one script's movement table exactly as the coach left it before Save.
+    Same soft-delete/never-hard-delete semantics as `save_pen_results`: a
+    previously-active row missing from `rows` gets `active=0` (recoverable via
+    `restore_movement_row`), a row with an id gets updated in place, a row
+    with no id is inserted new. A row missing pitch_type or with both hb and
+    ivb blank is dropped from the submission (nothing meaningful to save)."""
+    ensure_tables()
+    pid, sn = int(player_id), int(script_number)
+    submitted = []
+    for r in rows:
+        pitch_type = _clean(r.get("pitch_type"))
+        hb, ivb = _clean(r.get("hb")), _clean(r.get("ivb"))
+        if pitch_type is None or (hb is None and ivb is None):
+            continue
+        submitted.append({"id": r.get("id"), "pitch_type": pitch_type,
+                          "pen_date": _clean(r.get("pen_date")), "hb": hb, "ivb": ivb})
+
+    existing = query_df(
+        f"SELECT id FROM {MOVEMENT_TABLE} WHERE {_key_where()} AND script_number = :sn "
+        f"AND active = 1",
+        {"player_id": pid, "season_label": season_label, "cycle": cycle, "sn": sn})
+    existing_ids = set(existing["id"]) if not existing.empty else set()
+    kept_ids = {int(r["id"]) for r in submitted if r.get("id") not in (None, "")}
+    removed_ids = existing_ids - kept_ids
+
+    now = _now()
+    with get_engine().begin() as conn:
+        for r in submitted:
+            if r["id"] in (None, ""):
+                conn.execute(text(f"""
+                    INSERT INTO {MOVEMENT_TABLE}
+                        (player_id, season_label, cycle, script_number, pen_date, pitch_type,
+                         hb, ivb, active, updated_by, updated_at)
+                    VALUES (:player_id, :season_label, :cycle, :script_number, :pen_date,
+                            :pitch_type, :hb, :ivb, 1, :updated_by, :updated_at)
+                """), {"player_id": pid, "season_label": season_label, "cycle": cycle,
+                      "script_number": sn, "pen_date": r["pen_date"],
+                      "pitch_type": r["pitch_type"], "hb": r["hb"], "ivb": r["ivb"],
+                      "updated_by": _clean(updated_by), "updated_at": now})
+            else:
+                conn.execute(text(f"""
+                    UPDATE {MOVEMENT_TABLE}
+                       SET pen_date = :pen_date, pitch_type = :pitch_type, hb = :hb, ivb = :ivb,
+                           active = 1, updated_by = :updated_by, updated_at = :updated_at
+                     WHERE id = :id AND {_key_where()} AND script_number = :script_number
+                """), {"id": int(r["id"]), "pen_date": r["pen_date"],
+                      "pitch_type": r["pitch_type"], "hb": r["hb"], "ivb": r["ivb"],
+                      "updated_by": _clean(updated_by), "updated_at": now,
+                      "player_id": pid, "season_label": season_label, "cycle": cycle,
+                      "script_number": sn})
+        if removed_ids:
+            ph = ", ".join(f":rid{i}" for i in range(len(removed_ids)))
+            params = {f"rid{i}": rid for i, rid in enumerate(removed_ids)}
+            params.update({"player_id": pid, "season_label": season_label, "cycle": cycle})
+            conn.execute(text(f"""
+                UPDATE {MOVEMENT_TABLE} SET active = 0, updated_by = :updated_by,
+                       updated_at = :updated_at
+                 WHERE id IN ({ph}) AND {_key_where()}
+            """), {**params, "updated_by": _clean(updated_by), "updated_at": now})
+
+
+def read_all_movement(player_id, season_label, cycle) -> dict:
+    """{script_number: DataFrame} of ACTIVE movement rows for ALL N_SCRIPTS
+    scripts in one query -- mirrors `read_all_script_rows`'s batching, since
+    the page loads every script's data at once regardless of which one is
+    currently shown."""
+    ensure_tables()
+    df = query_df(
+        f"SELECT id, script_number, pitch_type, pen_date, hb, ivb FROM {MOVEMENT_TABLE} "
+        f"WHERE {_key_where()} AND active = 1 ORDER BY script_number, pen_date, id",
+        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
+    by_script = ({n: g.drop(columns=["script_number"]).reset_index(drop=True)
+                 for n, g in df.groupby("script_number")} if not df.empty else {})
+    empty = pd.DataFrame(columns=["id", "pitch_type", "pen_date", "hb", "ivb"])
+    return {n: by_script.get(n, empty) for n in range(1, N_SCRIPTS + 1)}
+
+
+def restore_movement_row(row_id, updated_by=None) -> None:
+    """Flips one soft-deleted movement row back to active=1."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"""
+            UPDATE {MOVEMENT_TABLE} SET active = 1, updated_by = :updated_by,
+                   updated_at = :updated_at
+             WHERE id = :id
+        """), {"id": int(row_id), "updated_by": _clean(updated_by), "updated_at": _now()})
+
+
 # ============================ SCRIPTS (fixed 1-6 / 1-12) ====================
 
 def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
@@ -990,7 +1137,7 @@ def deactivate_video(video_id) -> None:
 
 def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=None,
             gas_rows=None, script_fields=None, script_pitch_rows=None, pen_rows=None,
-            updated_by=None) -> None:
+            movement_rows=None, updated_by=None) -> None:
     """Persist every edited section in one call -- the page's single Save
     button. Every argument is optional so a caller/test can persist just one
     section; the callback always passes all of them.
@@ -999,6 +1146,9 @@ def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=No
     `upsert_engine_metrics`.
     `script_fields`: {script_number: {"goal", "measurable", "script_type"}}.
     `script_pitch_rows`: {script_number: [12 row dicts]}.
+    `movement_rows`: {script_number: [movement row dicts]} -- see
+    `save_movement`; only Pitch Design scripts have a movement table in the
+    UI, but any script_number key here is saved the same way.
     """
     if plan_fields is not None:
         upsert_plan(player_id, season_label, cycle, plan_fields, updated_by=updated_by)
@@ -1014,3 +1164,7 @@ def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=No
                                updated_by=updated_by)
     if pen_rows is not None:
         save_pen_results(player_id, season_label, cycle, pen_rows, updated_by=updated_by)
+    if movement_rows is not None:
+        for script_number, rows in movement_rows.items():
+            save_movement(player_id, season_label, cycle, script_number, rows,
+                          updated_by=updated_by)
