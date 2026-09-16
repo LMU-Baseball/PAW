@@ -47,10 +47,6 @@ def test_serve_layout_shows_edit_save_for_coach(server):
     assert "Please log in" not in s
     assert "splash-edit" in s and "splash-save" in s
     assert "splash-player" in s and "splash-season" in s and "splash-cycle" in s
-    # Update Readings is a coach-only control, separate from Edit/Save --
-    # it must render even in view mode (a coach shouldn't need to click
-    # Edit first to log a new Building-the-Engine reading).
-    assert "splash-update-readings-toggle" in s
     # Manage Video Library: same deal -- coach-only, always rendered,
     # independent of the Edit/Save toggle. (Drill add/remove is inline
     # under each dropdown instead, and dropdowns only render in edit mode
@@ -140,7 +136,7 @@ def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
         s = str(out)
         assert "splash-pen-graph" in s and "splash-pen-compare" in s
         assert "splash-script-select" in s
-        assert "splash-engine-cycle-filter" in s  # "View Cycles" multi-select
+        assert "splash-engine-strength-table" in s and "splash-engine-rom-table" in s
         for n in range(1, 7):
             assert f"splash-script-wrap-{n}" in s
             assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted

@@ -26,7 +26,7 @@ from flask_login import current_user
 
 from app.data import splash_report as SR
 from app.dashboards.pitching import selectors
-from app.dashboards.splash_report import body_visual, charts, layout
+from app.dashboards.splash_report import charts, layout
 
 
 def _is_coach() -> bool:
@@ -115,13 +115,16 @@ def register_callbacks(dash_app) -> None:
         State("splash-pre", "value"), State("splash-post", "value"),
         State("splash-feetset", "value"), State("splash-feetmoving", "value"),
         State("splash-workday", "value"),
+        State("splash-engine-strength-table", "data"),
+        State("splash-engine-rom-table", "data"),
         State("splash-gas-table", "data"),
         State("splash-pen-table", "data"),
         *_script_states(),
         prevent_initial_call=True,
     )
     def _on_save(n_clicks, current_data, player_id, season, cycle, vision, goals, pre, post,
-                feet_set, feet_moving, work_day, gas_rows, pen_rows, *script_args):
+                feet_set, feet_moving, work_day, engine_strength_rows, engine_rom_rows,
+                gas_rows, pen_rows, *script_args):
         if not n_clicks or not _is_coach():
             return no_update, no_update, no_update
         if player_id is None:
@@ -143,9 +146,10 @@ def register_callbacks(dash_app) -> None:
             goal_v, measurable_v, rows_v = script_args[i * 3:i * 3 + 3]
             script_fields[n] = {"goal": goal_v, "measurable": measurable_v}
             script_pitch_rows[n] = rows_v or []
+        engine_rows = (engine_strength_rows or []) + (engine_rom_rows or [])
 
         SR.save_all(
-            player_id, season, cycle, plan_fields=plan_fields,
+            player_id, season, cycle, plan_fields=plan_fields, engine_rows=engine_rows,
             gas_rows=gas_rows or [], script_fields=script_fields,
             script_pitch_rows=script_pitch_rows, pen_rows=pen_rows or [],
             updated_by=getattr(current_user, "id", None))
@@ -154,54 +158,6 @@ def register_callbacks(dash_app) -> None:
         # over trying to hand-reconstruct it from the Save form's own values.
         new_data = layout.load_data(player_id, season, cycle)
         return False, "Saved.", new_data
-
-    # Building the Engine's "Update Readings" -- deliberately separate from
-    # the Edit/Save flow above (see app.data.splash_report.save_all's
-    # docstring): it always ADDS a dated reading rather than revising
-    # whatever's currently shown, so the trend survives regardless of how
-    # often a coach clicks it.
-    @dash_app.callback(
-        Output("splash-update-readings-panel", "style"),
-        Output("splash-update-readings-open", "data"),
-        Input("splash-update-readings-toggle", "n_clicks"),
-        State("splash-update-readings-open", "data"),
-        prevent_initial_call=True,
-    )
-    def _toggle_update_readings(n_clicks, is_open):
-        if not n_clicks or not _is_coach():
-            return no_update, no_update
-        now_open = not is_open
-        style = {"display": "block", "marginTop": "8px"} if now_open \
-            else {"display": "none", "marginTop": "8px"}
-        return style, now_open
-
-    @dash_app.callback(
-        Output("splash-update-readings-status", "children"),
-        Output("splash-update-readings-panel", "style", allow_duplicate=True),
-        Output("splash-update-readings-open", "data", allow_duplicate=True),
-        Output("splash-data", "data", allow_duplicate=True),
-        Input("splash-update-readings-save", "n_clicks"),
-        State("splash-player", "value"), State("splash-season", "value"),
-        State("splash-cycle", "value"), State("splash-reading-date", "value"),
-        *[State(f"splash-reading-{k}", "value") for k in SR.ENGINE_METRIC_KEYS],
-        prevent_initial_call=True,
-    )
-    def _on_update_readings(n_clicks, player_id, season, cycle, reading_date, *values):
-        if not n_clicks or not _is_coach():
-            return no_update, no_update, no_update, no_update
-        if player_id is None:
-            return "Select a pitcher first.", no_update, no_update, no_update
-        if not reading_date:
-            return "Enter a date first.", no_update, no_update, no_update
-        rows = [{"metric_key": k, "value": v}
-                for k, v in zip(SR.ENGINE_METRIC_KEYS, values) if v not in (None, "")]
-        if not rows:
-            return "Enter at least one value first.", no_update, no_update, no_update
-        SR.upsert_engine_readings(player_id, season, cycle, reading_date, rows,
-                                  updated_by=getattr(current_user, "id", None))
-        new_data = layout.load_data(player_id, season, cycle)
-        return (f"Saved reading for {reading_date}.", {"display": "none", "marginTop": "8px"},
-                False, new_data)
 
     # ---- Drill catalog add/remove -- inline, directly under each of the
     # Feet Set / Feet Moving / Work Day dropdowns (2026-09-10 feedback: no
@@ -398,28 +354,3 @@ def register_callbacks(dash_app) -> None:
         SR.restore_pen_result(trig["index"], updated_by=getattr(current_user, "id", None))
         return layout.load_data(player_id, season, cycle)
 
-    # Building the Engine's "View Cycles" -- widens Base/Now/Δ across more
-    # than one cycle's readings (e.g. Fall+Winter+Spring = "full year"; see
-    # SR.read_engine_history's docstring). Rebuilds the two tables AND the
-    # body visual (its dot colors are the same now_value/flag the tables
-    # show), not the whole card or splash-data, since nothing else on the
-    # page reads a multi-cycle view.
-    @dash_app.callback(
-        Output("splash-engine-tables-wrap", "children"),
-        Output("splash-engine-visual-wrap", "children"),
-        Input("splash-engine-cycle-filter", "value"),
-        State("splash-player", "value"), State("splash-season", "value"),
-        State("splash-data", "data"),
-        prevent_initial_call=True,
-    )
-    def _on_engine_cycle_filter(selected_cycles, player_id, season, data):
-        if not selected_cycles or player_id is None:
-            return no_update, no_update
-        eng = SR.read_engine_metrics(player_id, season, selected_cycles)
-        records = eng.to_dict("records")
-        throws = ((data or {}).get("profile") or {}).get("throws")
-        # `compact=True` matches the 2026-09-14 right-wall layout test's 3-col
-        # grid (see layout.render_from_data) -- flip back to the default if
-        # that layout gets reverted.
-        return layout.engine_tables_block(records), body_visual.render(records, throws,
-                                                                       compact=True)
