@@ -16,7 +16,8 @@ def body(df, metric):
         return html.Div("No bullpen data in this date range.", style=_MUTED)
     if df["date"].nunique() < 2:
         return html.Div("Only one session in range — trends need ≥2 sessions.", style=_MUTED)
-    return dcc.Graph(figure=charts.trend_small_multiples(df, metric), style={"height": "auto"})
+    return dcc.Graph(figure=charts.trend_small_multiples(df, metric), style={"height": "auto"},
+                     config={"responsive": True})
 
 
 def render(pitcher_id, start, end) -> html.Div:

@@ -82,6 +82,17 @@ _INDEX_STRING = """<!DOCTYPE html>
       grid-template-columns: 1fr !important;
       grid-template-areas: "filters" "sidebar" "content" !important;
     }
+    /* A CSS Grid item defaults to min-width:auto -- it refuses to shrink
+       below its content's natural width. A wide DataTable or chart inside
+       .paw-dash-content (e.g. the bullpen Session Detail stats table, 14
+       columns) was dragging the WHOLE grid row out past the viewport,
+       which is what actually causes a phone to auto-zoom the entire page
+       out to fit rather than just that one table -- overflowX:auto on the
+       table itself doesn't help without this, since there was never a
+       width constraint on its ancestors for that scrolling to kick in
+       against. Mirrors the same fix already applied to .paw-video-media/
+       .paw-video-table below. */
+    .paw-dash-sidebar, .paw-dash-filters, .paw-dash-content { min-width: 0 !important; }
     .paw-banner-crest { height: 72px !important; }
     .paw-banner-title { font-size: 20px !important; letter-spacing: 4px !important; }
     /* Site header: let the user-info block drop to its own row instead of
@@ -98,7 +109,9 @@ _INDEX_STRING = """<!DOCTYPE html>
        chart per row instead of two squeezed side by side -- scrolling to see
        the second one beats both being unreadable. */
     .paw-chart-row { flex-direction: column !important; }
+    .paw-chart-row > * { min-width: 0 !important; }
     .paw-chart-grid { grid-template-columns: 1fr !important; }
+    .paw-chart-grid > * { min-width: 0 !important; }
     /* Built on the Bluff's 3-area grid (profile/center/right -- see
        app.dashboards.splash_report.layout.render_from_data, 2026-09-14
        right-wall layout test): a phone gets an explicit single-column
@@ -110,6 +123,7 @@ _INDEX_STRING = """<!DOCTYPE html>
       grid-template-columns: 1fr !important;
       grid-template-areas: "profile" "center" "right" !important;
     }
+    .paw-splash-grid > * { min-width: 0 !important; }
   }
 </style>
 </head>

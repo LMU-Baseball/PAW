@@ -63,7 +63,12 @@ def render(pitcher_id, date) -> html.Div:
         return html.Div("No pitches for this session.", style=_MUTED)
 
     summ_df = pd.DataFrame(B.summary_by_pitch_type(df))
-    graph = lambda fig: dcc.Graph(figure=fig, style={"height": "340px"})
+    # responsive=True: a phone-width container wasn't shrinking these charts
+    # to fit -- Plotly sizes a graph's SVG once at mount from its container's
+    # width, and without this flag it never re-measures, so it stayed at
+    # whatever width the DOM briefly was before Dash's grid CSS settled.
+    graph = lambda fig: dcc.Graph(figure=fig, style={"height": "340px"},
+                                  config={"responsive": True})
     charts_grid = html.Div(
         [graph(charts.velo_fig(df)), graph(charts.movement_fig(df)),
          graph(charts.release_fig(df)), graph(charts.location_fig(df))],
@@ -84,7 +89,8 @@ def render(pitcher_id, date) -> html.Div:
         html.Div(style={"height": "12px"}),
         html.H4(f"Pitch Frequency (Total {len(df)})",
                 style={"color": "#9A0021", "margin": "4px 0 0"}),
-        dcc.Graph(figure=charts.pitch_freq_bar(df), style={"height": "150px"}),
+        dcc.Graph(figure=charts.pitch_freq_bar(df), style={"height": "150px"},
+                 config={"responsive": True}),
         html.Div(style={"height": "12px"}),
         charts_grid,
         html.H4("All pitches", style={"color": "#9A0021", "marginTop": "14px"}),
