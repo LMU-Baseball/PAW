@@ -443,72 +443,13 @@ def training_boxes_column(plan: dict, *, editable: bool, is_coach: bool,
     return html.Div(sections)
 
 
-def _days_ago(iso_date: str | None) -> str:
-    if not iso_date:
-        return "No readings logged yet."
-    try:
-        d = date.fromisoformat(str(iso_date)[:10])
-    except ValueError:
-        return "No readings logged yet."
-    n = (date.today() - d).days
-    if n <= 0:
-        return "Last updated today."
-    if n == 1:
-        return "Last updated 1 day ago."
-    return f"Last updated {n} days ago."
-
-
-def _update_readings_panel(latest_date: str | None) -> html.Div:
-    """Coach-only control, separate from the page's Edit/Save toggle: logs
-    TODAY's Building-the-Engine reading as a new dated row (see
-    `app.data.splash_report.upsert_engine_readings`) instead of overwriting
-    the existing Base/Now -- so the every-2-week reassessment cadence
-    builds a real trend instead of erasing it. Hidden by default; the
-    toggle button reveals it (`splash-update-readings-open` Store)."""
-    field_style = {"width": "90px", "padding": "4px", "borderRadius": "6px",
-                   "border": "1px solid #ccc", "fontFamily": "Teko, sans-serif"}
-    metric_fields = html.Div([
-        html.Div([
-            html.Label(SR.ENGINE_METRIC_LABELS[k], style={"fontSize": "12px", "color": "#555",
-                                                           "display": "block"}),
-            dcc.Input(id=f"splash-reading-{k}", type="number", placeholder="—",
-                     style=field_style),
-        ]) for k in SR.ENGINE_METRIC_KEYS
-    ], style={"display": "flex", "gap": "10px", "flexWrap": "wrap", "margin": "10px 0"})
-    return html.Div([
-        html.Div([
-            html.Button("Update Readings", id="splash-update-readings-toggle", n_clicks=0,
-                       style={"border": f"2px solid {CRIMSON}", "background": "#fff",
-                              "color": CRIMSON, "borderRadius": "14px", "padding": "4px 14px",
-                              "cursor": "pointer", "fontFamily": "Teko, sans-serif",
-                              "fontSize": "14px"}),
-            html.Span(_days_ago(latest_date), style={"fontSize": "12px", "color": "#666",
-                                                      "marginLeft": "10px"}),
-        ]),
-        html.Div([
-            html.Div("Log today's numbers below -- this adds a new dated reading, it never "
-                    "overwrites a past one.", style={"fontSize": "12px", "color": "#666"}),
-            html.Div([html.Label("Date", style={"fontSize": "12px", "color": "#555"}),
-                      dcc.Input(id="splash-reading-date", type="text",
-                               value=date.today().isoformat(), style=field_style)],
-                     style={"marginTop": "6px"}),
-            metric_fields,
-            html.Button("Save Reading", id="splash-update-readings-save", n_clicks=0,
-                       style={"border": "none", "background": CRIMSON, "color": "#fff",
-                              "borderRadius": "14px", "padding": "6px 16px", "cursor": "pointer",
-                              "fontFamily": "Teko, sans-serif", "fontSize": "14px"}),
-            html.Div(id="splash-update-readings-status",
-                    style={"fontSize": "12px", "color": CRIMSON, "marginTop": "6px"}),
-        ], id="splash-update-readings-panel", style={"display": "none", "marginTop": "8px"}),
-        dcc.Store(id="splash-update-readings-open", data=False),
-    ])
-
-
-def engine_tables_block(engine_records: list) -> html.Div:
-    """Just the Strength/ROM table pair -- factored out so the "View
-    Cycles" filter callback (`_on_engine_cycle_filter` in callbacks.py) can
-    rebuild exactly this and nothing else when a coach widens the view
-    across cycles, instead of re-rendering the whole card."""
+def engine_tables_block(engine_records: list, *, editable: bool = False) -> html.Div:
+    """Just the Strength/ROM table pair. `editable` mirrors the page's
+    Edit/Save toggle (2026-09-16: Base/Now reverted from a derived-reading
+    history back to plain manual cells, at the coaching staff's request --
+    see `app.data.splash_report`'s Building the Engine section docstring),
+    so a coach types straight into these grids like every other section,
+    submitted on the same Save button."""
     eng = pd.DataFrame(engine_records)
     strength = eng[eng["metric_key"].isin(SR.STRENGTH_METRICS)] if not eng.empty else eng
     rom = eng[eng["metric_key"].isin(SR.ROM_METRICS)] if not eng.empty else eng
@@ -521,40 +462,23 @@ def engine_tables_block(engine_records: list) -> html.Div:
     # `label_header`.
     return html.Div([
         html.Div(tables.engine_metrics_table(strength, "splash-engine-strength-table",
-                                             label_header="Strength"),
+                                             label_header="Strength", editable=editable),
                 style={"flex": "0 0 auto"}),
         html.Div(tables.engine_metrics_table(rom, "splash-engine-rom-table",
-                                             label_header="Range of Motion"),
+                                             label_header="Range of Motion", editable=editable),
                 style={"flex": "0 0 auto"}),
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
 
-def engine_card(engine_records: list, *, is_coach: bool, latest_engine_date: str | None,
-                cycle: str) -> html.Div:
-    """Building the Engine: just the Strength/ROM tables + View Cycles +
-    Update Readings. Gas Station split out into its own card (`gas_station_card`,
-    2026-09-13 -- Brad wants it "its own box like the others", not nested in
-    here) and the body visual lives in its own card too now (see
-    `render_from_data`), so this one holds only the tables/controls."""
-    # "Seasonal cycle filter: multi-select (fall, winter, spring, or full
-    # year)" -- 2026-09-10 planning session. Defaults to just the page's
-    # currently-selected cycle (today's exact display); widening it re-reads
-    # Base/Now/Δ across the union of the picked cycles (see
-    # SR.read_engine_history's docstring) via `_on_engine_cycle_filter`.
-    view_cycles = html.Div([
-        html.Label("View Cycles", style={**_LABEL_STYLE, "textAlign": "left"}),
-        dcc.Dropdown(id="splash-engine-cycle-filter",
-                    options=[{"label": c, "value": c} for c in SR.CYCLES], multi=True,
-                    value=[cycle], style={"fontFamily": "Teko, sans-serif",
-                                          "marginBottom": "8px", "maxWidth": "360px"}),
-    ])
-    children = [
-        view_cycles,
-        html.Div(engine_tables_block(engine_records), id="splash-engine-tables-wrap"),
-    ]
-    if is_coach:
-        children.append(_update_readings_panel(latest_engine_date))
-    return _card("Building the Engine — Strength · ROM", html.Div(children))
+def engine_card(engine_records: list, *, editable: bool) -> html.Div:
+    """Building the Engine: just the Strength/ROM tables. Gas Station split
+    out into its own card (`gas_station_card`, 2026-09-13 -- Brad wants it
+    "its own box like the others", not nested in here) and the body visual
+    lives in its own card too now (see `render_from_data`), so this one
+    holds only the tables."""
+    tables_block = html.Div(engine_tables_block(engine_records, editable=editable),
+                            id="splash-engine-tables-wrap")
+    return _card("Building the Engine — Strength · ROM", tables_block)
 
 
 def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: bool) -> html.Div:
@@ -779,7 +703,6 @@ def load_data(player_id, season_label, cycle) -> dict:
     kpis = pitching_caps.range_summary(pid, s_b, e_b)
     plan = SR.read_plan(pid, season_label, cycle)
     engine = SR.read_engine_metrics(pid, season_label, cycle)
-    latest_engine_date = SR.latest_engine_reading_date(pid, season_label, cycle)
     gas = SR.read_gas_station(pid, season_label, cycle)
     scripts = SR.read_scripts(pid, season_label, cycle)
     script_rows = SR.read_all_script_rows(pid, season_label, cycle)
@@ -794,7 +717,7 @@ def load_data(player_id, season_label, cycle) -> dict:
     videos = {cat: SR.list_videos(cat).to_dict("records") for cat in SR.VIDEO_CATEGORIES}
     return {
         "profile": profile, "kpis": kpis, "plan": plan, "cycle": cycle,
-        "engine": engine.to_dict("records"), "latest_engine_date": latest_engine_date,
+        "engine": engine.to_dict("records"),
         "gas": gas.to_dict("records"),
         "scripts": scripts.to_dict("records"),
         # dict keys round-trip through dcc.Store's JSON as strings either way;
@@ -844,18 +767,13 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
         scripts_section(data["pen"], data.get("deleted_pen", []), data["scripts"],
                        data["script_rows"], editable=editable, is_coach=is_coach),
     ], style={"gridArea": "center", "minWidth": "0"})
-    # `splash-engine-visual-wrap` keeps its id here (moved column, but still
-    # the one element) so `_on_engine_cycle_filter` in callbacks.py (which
-    # targets it by id, not position) still refreshes it when a coach
-    # widens the View Cycles selection.
     visuals_block = html.Div(
         body_visual.render(data["engine"], (data.get("profile") or {}).get("throws"),
                           compact=True),
         id="splash-engine-visual-wrap", style={**_CARD})
     right_block = html.Div([
         visuals_block,
-        engine_card(data["engine"], is_coach=is_coach,
-                   latest_engine_date=data.get("latest_engine_date"), cycle=data.get("cycle")),
+        engine_card(data["engine"], editable=editable),
         gas_station_card(data["gas"], videos.get("Gas Station", []), editable=editable),
     ], style={"gridArea": "right", "minWidth": "0"})
     # 3 named areas, one row on desktop; the phone override in shell.py's

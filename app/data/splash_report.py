@@ -92,35 +92,17 @@ ENGINE_METRIC_LABELS = {
 }
 
 # D1-average baseline per metric, the fixed reference line a player's Now
-# value is color-flagged against (2026-09-10 planning session). Strength
-# metrics (IR/ER/Scaption/Grip) are in lb, ROM metrics (IROM/EROM/TotalArc)
-# in degrees -- Brad's rough thresholds ("~1-2 off = fine, ~5 = yellow, 10+
-# = red") were given in lb terms, so the same absolute deltas are applied to
-# ROM here too as a starting point; revisit once real ROM baselines are in
-# hand.
-#
-# PLACEHOLDER VALUES (Brad said "go with those numbers" on 2026-09-10,
-# after being told these are NOT LMU-specific): ballpark figures commonly
-# cited in throwing-shoulder sports-medicine literature for competitive
-# (college-level) overhead throwing athletes -- handheld-dynamometer
-# strength and ROM measured at 90 deg abduction (the standard clinical
-# position for this testing, e.g. Wilk et al.'s "total motion concept" --
-# IROM + EROM totaling ~180 deg is the classic bilateral-symmetry target).
-# These were NOT pulled from LMU's own testing protocol/device and are not
-# validated against this program's actual normative data -- replace with
-# real numbers from LMU's strength/athletic-training staff whenever
-# available; nothing else about the color-flag wiring needs to change when
-# that happens, just these seven values.
+# value would be color-flagged against -- unset (all None) as of 2026-09-16:
+# Brad decided against using generic (non-LMU) D1-average numbers at all, so
+# nothing here is real vs. placeholder anymore, it's just off. `engine_flag`/
+# the table/body-visual dot already treat a None baseline as "no color flag,
+# neutral display" (same path as an unlogged reading), so this fully disables
+# the comparison without touching any of that wiring. If LMU's own
+# strength/athletic-training staff ever supplies real per-metric numbers,
+# set them here -- nothing else needs to change.
 D1_BASELINES: dict[str, float | None] = {
-    "IR": 30.0, "ER": 22.0, "Scaption": 22.0, "Grip": 115.0,
-    "IROM": 50.0, "EROM": 130.0,
-    # No placeholder baseline for Scaption ROM yet (2026-09-14, new metric --
-    # unlike the other seven, Brad hasn't OK'd a starting number for this
-    # one) -- `engine_flag`/the table/body-visual dot all already handle a
-    # None baseline (no color flag, "-" shown) exactly like an unlogged
-    # reading, so this is safe to leave blank until real guidance comes in.
-    "ScaptionROM": None,
-    "TotalArc": 180.0,
+    "IR": None, "ER": None, "Scaption": None, "Grip": None,
+    "IROM": None, "EROM": None, "ScaptionROM": None, "TotalArc": None,
 }
 D1_YELLOW_DELTA = 5.0
 D1_RED_DELTA = 10.0
@@ -491,95 +473,56 @@ def upsert_plan(player_id, season_label, cycle, fields: dict, updated_by=None) -
 
 
 # ============================ BUILDING THE ENGINE ===========================
-# One reading per (metric, date) -- see READINGS_TABLE docstring at the top
-# of this module. "Base" and "Now" are never stored directly; they're always
-# derived from the reading history (earliest/latest in the cycle), so
-# there's no way for a coach's correction to a past date to silently
-# overwrite the trend the way a single mutable Base/Now pair could.
-
-def read_engine_history(player_id, season_label, cycle) -> pd.DataFrame:
-    """Every reading for (player, season, cycle), one row per (metric_key,
-    reading_date) -- columns metric_key/reading_date/value, sorted for a
-    trend chart (metric, then chronological). `cycle` is normally one of
-    CYCLES, but also accepts a list of cycles -- the "View Cycles" multi-
-    select on Building the Engine (2026-09-10 planning session: "fall,
-    winter, spring, or full year") reads across more than one cycle at
-    once this way; selecting all of CYCLES is what gives the "full year"
-    view, so there's no separate literal "Full Year" option to maintain."""
-    ensure_tables()
-    cycles = [cycle] if isinstance(cycle, str) else list(cycle)
-    if not cycles:
-        return pd.DataFrame(columns=["metric_key", "reading_date", "value"])
-    cph = ", ".join(f":c{i}" for i in range(len(cycles)))
-    params = {"player_id": int(player_id), "season_label": season_label}
-    params.update({f"c{i}": c for i, c in enumerate(cycles)})
-    df = query_df(
-        f"SELECT metric_key, reading_date, value FROM {READINGS_TABLE} "
-        f"WHERE player_id = :player_id AND season_label = :season_label "
-        f"AND cycle IN ({cph}) ORDER BY metric_key, reading_date",
-        params)
-    return df
-
+# Base/Now are plain, directly-editable cells (one row per metric in
+# ENGINE_TABLE) -- a coach types a starting ("Base") and current ("Now")
+# number by hand, like every other editable grid on this page. This
+# replaced a dated-reading-history design (Base/Now derived as the
+# earliest/latest logged reading) that shipped 2026-09-10 and was reverted
+# 2026-09-16 at the coaching staff's request: the "Update Readings"/"View
+# Cycles" UI is gone, but the historical READINGS_TABLE rows already
+# collected are left in place untouched, unread, in case that trend view
+# is wanted again later.
 
 def read_engine_metrics(player_id, season_label, cycle) -> pd.DataFrame:
     """One row per ENGINE_METRIC_KEYS entry (fixed order): base_value/
-    base_date = earliest reading in `cycle` (or across all of `cycle` when
-    it's a list -- see read_engine_history), now_value/now_date = latest,
-    delta = now - base, flag = color flag on now_value vs D1_BASELINES (see
-    `engine_flag`). A metric with no reading yet still shows a blank line."""
-    hist = read_engine_history(player_id, season_label, cycle)
-    by_key = ({k: g.sort_values("reading_date") for k, g in hist.groupby("metric_key")}
-             if not hist.empty else {})
+    now_value straight from ENGINE_TABLE, delta = now - base, flag = color
+    flag on now_value vs D1_BASELINES (see `engine_flag`). A metric with no
+    saved row yet still shows a blank line."""
+    ensure_tables()
+    df = query_df(
+        f"SELECT metric_key, base_value, now_value FROM {ENGINE_TABLE} "
+        f"WHERE {_key_where()}",
+        {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
+    by_key = {r["metric_key"]: r for _, r in df.iterrows()} if not df.empty else {}
     rows = []
     for key in ENGINE_METRIC_KEYS:
-        g = by_key.get(key)
-        if g is None or g.empty:
-            base_v = base_d = now_v = now_d = None
-        else:
-            first, last = g.iloc[0], g.iloc[-1]
-            base_v = None if pd.isna(first["value"]) else float(first["value"])
-            base_d = first["reading_date"]
-            now_v = None if pd.isna(last["value"]) else float(last["value"])
-            now_d = last["reading_date"]
+        r = by_key.get(key)
+        base_v = None if r is None or pd.isna(r["base_value"]) else float(r["base_value"])
+        now_v = None if r is None or pd.isna(r["now_value"]) else float(r["now_value"])
         delta = round(now_v - base_v, 1) if (base_v is not None and now_v is not None) else None
         rows.append({"metric_key": key, "label": ENGINE_METRIC_LABELS[key],
-                     "base_value": base_v, "base_date": base_d,
-                     "now_value": now_v, "now_date": now_d, "delta": delta,
+                     "base_value": base_v, "now_value": now_v, "delta": delta,
                      "d1_baseline": D1_BASELINES.get(key),
                      "flag": engine_flag(key, now_v)})
     return pd.DataFrame(rows)
 
 
-def latest_engine_reading_date(player_id, season_label, cycle) -> str | None:
-    """Most recent reading_date across ALL metrics for (player, season,
-    cycle), or None if nothing's been logged yet -- drives the "last
-    updated N days ago" hint next to the Update Readings control."""
-    hist = read_engine_history(player_id, season_label, cycle)
-    return None if hist.empty else str(hist["reading_date"].max())
-
-
-def upsert_engine_readings(player_id, season_label, cycle, reading_date, rows: list[dict],
-                           updated_by=None) -> None:
-    """`rows`: [{"metric_key", "value"}, ...] for ONE `reading_date` (the
-    Update Readings form submits all metrics for a single day at once).
-    Rows for a metric outside ENGINE_METRIC_KEYS, or with a blank/None
-    value, are dropped -- a coach leaving a field empty shouldn't create a
-    reading for it. Re-submitting the same reading_date upserts that day's
-    row in place (a same-day typo fix); a different reading_date always
-    lands as a new row, so past readings are never touched."""
+def upsert_engine_metrics(player_id, season_label, cycle, rows: list[dict],
+                          updated_by=None) -> None:
+    """`rows`: [{"metric_key", "base_value", "now_value"}, ...], one per
+    metric -- straight cell edits from the Strength/ROM tables, submitted
+    together with the rest of the page on Save. Rows for a metric outside
+    ENGINE_METRIC_KEYS are dropped; a blank cell clears that value (stored
+    as NULL, same as every other optional field on this page)."""
+    ensure_tables()
     pid, sl = int(player_id), season_label
-    resolved = []
-    for row in rows:
-        key = row.get("metric_key")
-        value = _clean(row.get("value"))
-        if key not in ENGINE_METRIC_KEYS or value is None:
-            continue
-        resolved.append({"player_id": pid, "season_label": sl, "cycle": cycle,
-                         "metric_key": key, "reading_date": str(reading_date),
-                         "value": value})
-    _multi_row_upsert(READINGS_TABLE,
-                      ("player_id", "season_label", "cycle", "metric_key", "reading_date"),
-                      ("value",), resolved, updated_by)
+    resolved = [
+        {"player_id": pid, "season_label": sl, "cycle": cycle, "metric_key": row["metric_key"],
+         "base_value": row.get("base_value"), "now_value": row.get("now_value")}
+        for row in rows if row.get("metric_key") in ENGINE_METRIC_KEYS
+    ]
+    _multi_row_upsert(ENGINE_TABLE, ("player_id", "season_label", "cycle", "metric_key"),
+                      ("base_value", "now_value"), resolved, updated_by)
 
 
 # ============================ VARIABLE-ROW TABLES ===========================
@@ -1016,23 +959,22 @@ def deactivate_video(video_id) -> None:
 
 # ============================ ONE-CLICK SAVE ================================
 
-def save_all(player_id, season_label, cycle, *, plan_fields=None,
+def save_all(player_id, season_label, cycle, *, plan_fields=None, engine_rows=None,
             gas_rows=None, script_fields=None, script_pitch_rows=None, pen_rows=None,
             updated_by=None) -> None:
     """Persist every edited section in one call -- the page's single Save
     button. Every argument is optional so a caller/test can persist just one
     section; the callback always passes all of them.
 
-    Building the Engine is deliberately NOT a `save_all` argument -- it has
-    its own "Update Readings" action (`upsert_engine_readings`), separate
-    from this Edit/Save flow, because a reading is a dated historical fact
-    rather than a revisable field (see READINGS_TABLE docstring).
-
+    `engine_rows`: [{"metric_key", "base_value", "now_value"}, ...] -- see
+    `upsert_engine_metrics`.
     `script_fields`: {script_number: {"goal", "measurable"}}.
     `script_pitch_rows`: {script_number: [12 row dicts]}.
     """
     if plan_fields is not None:
         upsert_plan(player_id, season_label, cycle, plan_fields, updated_by=updated_by)
+    if engine_rows is not None:
+        upsert_engine_metrics(player_id, season_label, cycle, engine_rows, updated_by=updated_by)
     if gas_rows is not None:
         replace_gas_station(player_id, season_label, cycle, gas_rows, updated_by=updated_by)
     if script_fields is not None:

@@ -37,39 +37,51 @@ _ENGINE_HEADER_STYLE = {**_HEADER_STYLE, "fontSize": "16px", "padding": "8px 16p
 
 
 _FLAG_STYLE = {
+    "ok": {"backgroundColor": "#d4edda", "color": "#1e5b28"},
     "yellow": {"backgroundColor": "#fff3cd", "color": "#7a5c00"},
     "red": {"backgroundColor": "#f8d7da", "color": "#7a1420"},
+}
+_DELTA_STYLE = {
+    "up": {"backgroundColor": "#d4edda", "color": "#1e5b28"},
+    "down": {"backgroundColor": "#f8d7da", "color": "#7a1420"},
 }
 
 
 def engine_metrics_table(df: pd.DataFrame, table_id: str, *,
-                         label_header: str = "") -> dash_table.DataTable:
-    """Label / Base / Now / Δ -- all readonly. Base and Now are DERIVED from
-    the reading history (earliest/latest dated entry -- see
-    `app.data.splash_report.read_engine_metrics`), not directly editable
-    here; a coach logs a new value via the separate Update Readings action,
-    never by typing into this grid. `now_value`'s cell is colored by
-    `flag` ("yellow"/"red"/"ok"/None) against the D1 baseline. Called twice
-    per page (Strength + ROM), so `table_id` must be distinct each time --
-    a duplicate Dash component id is invalid. `label_header` (2026-09-14,
+                         label_header: str = "", editable: bool = False) -> dash_table.DataTable:
+    """Label / Base / Now / Δ. Base and Now are plain manually-typed cells
+    (`editable` -- true only in the page's Edit mode, same as every other
+    grid here; a coach's edits flow through the page's normal Save button
+    into `app.data.splash_report.upsert_engine_metrics`, not a separate
+    action). `now_value` is colored by `flag` ("ok"/"yellow"/"red"/None)
+    against the D1 baseline; Δ is colored green/red by its own sign
+    (positive = green, negative = red, zero/blank = neutral) -- the one
+    piece of this table that's still derived, not typed. Called twice per
+    page (Strength + ROM), so `table_id` must be distinct each time -- a
+    duplicate Dash component id is invalid. `label_header` (2026-09-14,
     Brad: fold "Strength"/"Range of Motion" into the red header bar as white
     text instead of a separate black label above the table) fills the
     otherwise-blank top-left header cell."""
     d = df.copy()
+    delta_sign = d["delta"].map(lambda v: None if pd.isna(v) else ("up" if v > 0 else
+                                                                    "down" if v < 0 else None))
     d["delta"] = d["delta"].map(lambda v: "—" if pd.isna(v) else f"{v:+.1f}")
     columns = [
         {"name": label_header, "id": "label", "editable": False},
-        {"name": "Base", "id": "base_value", "editable": False, "type": "numeric"},
-        {"name": "Now", "id": "now_value", "editable": False, "type": "numeric"},
+        {"name": "Base", "id": "base_value", "editable": editable, "type": "numeric"},
+        {"name": "Now", "id": "now_value", "editable": editable, "type": "numeric"},
         {"name": "Δ", "id": "delta", "editable": False},
     ]
-    flag_style = [
+    extra_style = [
         {"if": {"row_index": i, "column_id": "now_value"}, **style}
         for i, flag in enumerate(d.get("flag", []))
         for style in ([_FLAG_STYLE[flag]] if flag in _FLAG_STYLE else [])
+    ] + [
+        {"if": {"row_index": i, "column_id": "delta"}, **_DELTA_STYLE[sign]}
+        for i, sign in enumerate(delta_sign) if sign in _DELTA_STYLE
     ]
     return _table(table_id, columns, d.to_dict("records"), editable=False,
-                 extra_style=flag_style, cell_style=_ENGINE_CELL_STYLE,
+                 extra_style=extra_style, cell_style=_ENGINE_CELL_STYLE,
                  header_style=_ENGINE_HEADER_STYLE)
 
 

@@ -71,76 +71,43 @@ def test_plan_recovery_url_untouched_when_omitted_by_a_partial_update():
     assert SR.read_plan(TEST_PID, SEASON, CYCLE)["recovery_video_url"] == "https://x/video.mp4"
 
 
-def test_engine_metrics_reindexed_to_fixed_seven_with_computed_delta():
+def test_engine_metrics_shows_every_key_with_computed_delta():
     grid = SR.read_engine_metrics(TEST_PID, SEASON, CYCLE)
     assert list(grid["metric_key"]) == list(SR.ENGINE_METRIC_KEYS)
     assert grid["base_value"].isna().all() and grid["delta"].isna().all()
 
-    # "base" reading (an earlier date), then a later "now" reading for the
-    # same metrics -- base/now/delta are DERIVED from these dated rows, not
-    # stored directly (see READINGS_TABLE docstring).
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01", [
-        {"metric_key": "IR", "value": 40},
-        {"metric_key": "TotalArc", "value": 180},
-        {"metric_key": "NotAMetric", "value": 1},  # ignored
-    ], updated_by=1)
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-15", [
-        {"metric_key": "IR", "value": 45},
-        {"metric_key": "TotalArc", "value": 175},
+    # Base/Now are plain manual cells now (2026-09-16 revert) -- one upsert
+    # sets both directly, no dated-reading history involved.
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [
+        {"metric_key": "IR", "base_value": 40, "now_value": 45},
+        {"metric_key": "TotalArc", "base_value": 180, "now_value": 175},
+        {"metric_key": "NotAMetric", "base_value": 1, "now_value": 1},  # ignored
     ], updated_by=1)
     grid2 = SR.read_engine_metrics(TEST_PID, SEASON, CYCLE)
-    assert len(grid2) == 7
+    assert len(grid2) == len(SR.ENGINE_METRIC_KEYS)
     ir = grid2[grid2.metric_key == "IR"].iloc[0]
     assert ir["base_value"] == 40.0 and ir["now_value"] == 45.0 and ir["delta"] == 5.0
-    assert ir["base_date"] == "2026-08-01" and ir["now_date"] == "2026-08-15"
     arc = grid2[grid2.metric_key == "TotalArc"].iloc[0]
     assert arc["delta"] == -5.0  # regression: now < base
-    assert "NotAMetric" not in set(SR.read_engine_history(TEST_PID, SEASON, CYCLE)["metric_key"])
+    assert "NotAMetric" not in set(grid2["metric_key"])
 
-    # re-submitting the SAME reading_date corrects that day's row in place,
-    # not a duplicate/third reading -- a same-day typo fix.
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-15",
-                              [{"metric_key": "IR", "value": 46}], updated_by=1)
-    hist = SR.read_engine_history(TEST_PID, SEASON, CYCLE)
-    ir_hist = hist[hist.metric_key == "IR"]
-    assert len(ir_hist) == 2  # still just base + now, not three rows
+    # re-submitting the same metric corrects it in place, not a new row.
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "IR", "base_value": 40, "now_value": 46}],
+                             updated_by=1)
     assert SR.read_engine_metrics(TEST_PID, SEASON, CYCLE) \
         .set_index("metric_key").loc["IR", "now_value"] == 46.0
 
-    assert SR.latest_engine_reading_date(TEST_PID, SEASON, CYCLE) == "2026-08-15"
 
-
-def test_read_engine_history_accepts_a_list_of_cycles_for_full_year_view():
-    SR.upsert_engine_readings(TEST_PID, SEASON, "Fall", "2026-09-01",
-                              [{"metric_key": "IR", "value": 40}], updated_by=1)
-    SR.upsert_engine_readings(TEST_PID, SEASON, "Winter", "2026-12-01",
-                              [{"metric_key": "IR", "value": 42}], updated_by=1)
-    SR.upsert_engine_readings(TEST_PID, SEASON, "Spring", "2027-03-01",
-                              [{"metric_key": "IR", "value": 46}], updated_by=1)
-
-    fall_only = SR.read_engine_history(TEST_PID, SEASON, "Fall")
-    assert list(fall_only["value"]) == [40.0]
-
-    full_year = SR.read_engine_history(TEST_PID, SEASON, list(SR.CYCLES))
-    assert sorted(full_year["value"]) == [40.0, 42.0, 46.0]
-
-    grid = SR.read_engine_metrics(TEST_PID, SEASON, list(SR.CYCLES))
-    ir = grid.set_index("metric_key").loc["IR"]
-    assert ir["base_value"] == 40.0 and ir["base_date"] == "2026-09-01"
-    assert ir["now_value"] == 46.0 and ir["now_date"] == "2027-03-01"
-
-    # clean up the two non-default-CYCLE rows this test wrote (the autouse
-    # fixture only deletes CYCLE == "Fall")
-    with get_engine().begin() as conn:
-        conn.execute(text(f"DELETE FROM {SR.READINGS_TABLE} WHERE player_id = :p "
-                          f"AND cycle IN ('Winter', 'Spring')"), {"p": TEST_PID})
-
-
-def test_upsert_engine_readings_drops_blank_values():
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01",
-                              [{"metric_key": "ER", "value": None},
-                               {"metric_key": "Grip", "value": ""}], updated_by=1)
-    assert SR.read_engine_history(TEST_PID, SEASON, CYCLE).empty
+def test_upsert_engine_metrics_blank_cell_clears_stored_value():
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": 22}],
+                             updated_by=1)
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": None}],
+                             updated_by=1)
+    er = SR.read_engine_metrics(TEST_PID, SEASON, CYCLE).set_index("metric_key").loc["ER"]
+    assert er["base_value"] == 20.0 and pd.isna(er["now_value"])
 
 
 def test_engine_flag_thresholds():
@@ -257,7 +224,7 @@ def test_upsert_all_script_rows_writes_every_script_in_one_call():
 def test_multi_row_upsert_helpers_are_empty_safe():
     """An empty rows list (nothing to save for that section) must be a
     no-op, not a malformed empty-VALUES SQL statement."""
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-08-01", [], updated_by=1)
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [], updated_by=1)
     SR.upsert_scripts(TEST_PID, SEASON, CYCLE, [], updated_by=1)
     SR.upsert_script_rows(TEST_PID, SEASON, CYCLE, 1, [], updated_by=1)
     SR.upsert_all_script_rows(TEST_PID, SEASON, CYCLE, {}, updated_by=1)
@@ -341,16 +308,12 @@ def test_save_pen_results_updates_an_existing_row_in_place_by_id():
 
 
 def test_save_all_persists_every_section_in_one_call():
-    # Building the Engine is saved separately via upsert_engine_readings
-    # (its own "Update Readings" action, not part of save_all -- see
-    # save_all's docstring), so exercise that here too for full coverage.
-    SR.upsert_engine_readings(TEST_PID, SEASON, CYCLE, "2026-09-01",
-                              [{"metric_key": "ER", "value": 35}], updated_by=1)
     SR.save_all(
         TEST_PID, SEASON, CYCLE,
         plan_fields={"vision_statement": "Focus", "training_goals": "", "pre_throw_checklist": "",
                     "post_throw_checklist": "", "feet_set": "", "feet_moving": "",
                     "work_day": "", "recovery_video_url": ""},
+        engine_rows=[{"metric_key": "ER", "base_value": 30, "now_value": 35}],
         gas_rows=[{"need": "Mass", "exercise": "Squat", "sets_reps": "3x5", "notes": ""}],
         script_fields={1: {"goal": "G1", "measurable": "M1"}},
         script_pitch_rows={1: [{"row_num": 1, "pitch_type": "FB", "ball_info": "", "info": ""}]},
