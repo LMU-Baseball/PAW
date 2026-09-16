@@ -87,12 +87,19 @@ def _render_loop() -> None:
                     page.close()
                 fut.set_result(pdf)
             except Exception as exc:  # surface real render failures to the caller
-                # Drop a possibly-wedged browser so the next job relaunches clean.
-                try:
-                    if browser is not None and not browser.is_connected():
-                        browser = None
-                except Exception:
-                    browser = None
+                # Drop the browser unconditionally on ANY render failure, not
+                # just a disconnected one -- a page.set_content()/pdf() call
+                # that times out (e.g. Page.set_content: Timeout 30000ms
+                # exceeded, seen live 2026-09-16) leaves a browser that's
+                # still "connected" per Playwright but wedged, and the old
+                # `not browser.is_connected()` check never caught that: the
+                # same stuck browser kept getting reused, so every request
+                # after the first failure timed out the exact same way until
+                # the whole process restarted. No explicit browser.close()
+                # here -- a wedged browser closing can itself hang this
+                # single-threaded render loop, which would be worse than
+                # leaking one Chromium process until the container recycles.
+                browser = None
                 fut.set_exception(exc)
     finally:
         try:
