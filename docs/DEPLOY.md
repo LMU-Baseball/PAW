@@ -171,14 +171,19 @@ This also creates the SQLite user DB at `instance/paw_app.db` on first run.
 **These two are a deliberate fallback, not the primary login path.** Real
 individual accounts come from **self-registration** (`/register`, linked from
 the login page) — any `@lmu.edu`/`@lion.lmu.edu` email can create its own
-account; role is auto-assigned via the `PAW_COACH_EMAILS` allowlist in `.env`.
-Set `PAW_TEAM_CODE` in `.env` before pointing players at it, or anyone with an
-LMU email (not just the roster) can register and see the whole team's data —
-team-transparent view applies to every account. Give the code to the roster
-each season; leaving it unset keeps registration domain-only (today's
-pre-code-gate behavior). Keep `coaches@lmu.edu`/`team@lmu.edu` around as a
-quick fallback for a forgotten password or a first-time visitor, not as the
-account you hand out going forward.
+account; role is auto-assigned via the `PAW_COACH_EMAILS` allowlist in `.env`,
+**or** via the separate `PAW_COACH_CODE` (either is enough on its own — see
+`.env.example`): a coach-only code that self-registers straight into the
+coach role, with no allowlist upkeep needed. Set `PAW_TEAM_CODE` in `.env`
+before pointing players at it, or anyone with an LMU email (not just the
+roster) can register and see the whole team's data — team-transparent view
+applies to every account. Give the team code to the roster and the coach code
+to coaches only, each season; leaving `PAW_TEAM_CODE` unset keeps player
+registration domain-only (today's pre-code-gate behavior) while
+`PAW_COACH_CODE` still works independently of that. Keep
+`coaches@lmu.edu`/`team@lmu.edu` around as a quick fallback for a forgotten
+password or a first-time visitor, not as the account you hand out going
+forward.
 
 Admin commands for managing individual accounts after registration:
 `flask set-trackman-id` (link a player to their own Trackman id — convenience
