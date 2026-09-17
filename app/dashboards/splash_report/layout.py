@@ -517,6 +517,20 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
 
+def movement_card(movement_records: dict) -> html.Div:
+    """Pitch Design's shared HB/IVB movement chart, in its own right-column
+    card (2026-09-16 round 3, Brad: "move the movement insert chart to the
+    red area since there is a ton of whitespace. it clutters the script
+    editing area" -- moved out of `scripts_section`'s center-column
+    graph_block into here). `_on_pen_compare` still targets this component
+    by id and keeps working regardless of where it's mounted in the DOM."""
+    script_numbers = list(range(1, SR.N_SCRIPTS + 1))
+    return _card("Movement", dcc.Graph(
+        id="splash-movement-graph",
+        figure=charts.scripts_movement_fig(movement_records, script_numbers),
+        config={"displayModeBar": False}))
+
+
 def engine_card(engine_records: list, *, editable: bool) -> html.Div:
     """Building the Engine: just the Strength/ROM tables. Gas Station split
     out into its own card (`gas_station_card`, 2026-09-13 -- Brad wants it
@@ -698,14 +712,6 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                     value=script_numbers, style={"fontFamily": "Teko, sans-serif",
                                                  "marginBottom": "8px"}),
         dcc.Graph(id="splash-pen-graph", figure=charts.pen_results_fig(pen),
-                 config={"displayModeBar": False}),
-        # Pitch Design's movement chart (2026-09-16 round 2, Brad: "just
-        # place it right underneath the script pen chart," always visible --
-        # not the earlier per-script panel that only showed up once a
-        # script was picked in "Show Scripts"). Shares "Compare Scripts"
-        # with the graph above it rather than its own selector.
-        dcc.Graph(id="splash-movement-graph",
-                 figure=charts.scripts_movement_fig(movement_records, script_numbers),
                  config={"displayModeBar": False}),
     ])
     if editable:
@@ -897,6 +903,7 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
         id="splash-engine-visual-wrap", style={**_CARD})
     right_block = html.Div([
         visuals_block,
+        movement_card(data.get("movement", {})),
         engine_card(data["engine"], editable=editable),
         gas_station_card(data["gas"], videos.get("Gas Station", []), editable=editable),
     ], style={"gridArea": "right", "minWidth": "0"})
