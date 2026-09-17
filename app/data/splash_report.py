@@ -69,6 +69,19 @@ VIDEOS_TABLE = "splash_videos"
 # a per-player one).
 VIDEO_CATEGORIES: tuple[str, ...] = ("Recovery", "Gas Station")
 
+# Drill sub-categories WITHIN the Gas Station bucket only (2026-09-16
+# meeting) -- layered on top of VIDEO_CATEGORIES's "Gas Station" bucket,
+# not a replacement for it: a Gas Station video still has category="Gas
+# Station" (which upload form/list_videos it belongs to) AND, separately,
+# one of these as drill_category (which filter tab it shows under).
+# Recovery Protocols is unaffected -- it's a short flat list, no filter
+# needed. "Bulletproof" is a real category with no videos uploaded yet as
+# of 2026-09-16, same as any other -- not special-cased.
+GAS_STATION_DRILL_CATEGORIES: tuple[str, ...] = (
+    "Elbow Strength", "Rehab", "Rotator Cuff", "Scap Stability",
+    "Shoulder Mobility", "Bulletproof",
+)
+
 # Video bytes are stored as a DB BLOB for now (splash_videos.data) rather
 # than on local disk -- this app is still on Render's free tier, whose disk
 # is ephemeral and wiped on every redeploy (this repo auto-deploys on every
@@ -357,15 +370,16 @@ _DRILL_CATALOG_DDL = f"""
 # (see MAX_VIDEO_BYTES for why: no persistent disk on this deployment yet).
 _VIDEOS_DDL = f"""
     CREATE TABLE IF NOT EXISTS {VIDEOS_TABLE} (
-        id           INT AUTO_INCREMENT PRIMARY KEY,
-        title        VARCHAR(255) NOT NULL,
-        category     VARCHAR(32) NOT NULL,
-        mimetype     VARCHAR(64),
-        size_bytes   INT,
-        data         LONGBLOB,
-        active       TINYINT(1) NOT NULL DEFAULT 1,
-        created_by   INT,
-        created_at   DATETIME
+        id             INT AUTO_INCREMENT PRIMARY KEY,
+        title          VARCHAR(255) NOT NULL,
+        category       VARCHAR(32) NOT NULL,
+        drill_category VARCHAR(32),
+        mimetype       VARCHAR(64),
+        size_bytes     INT,
+        data           LONGBLOB,
+        active         TINYINT(1) NOT NULL DEFAULT 1,
+        created_by     INT,
+        created_at     DATETIME
     )"""
 
 _ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
@@ -415,6 +429,9 @@ def ensure_tables(engine=None) -> None:
         # script_type (2026-09-16) -- _SCRIPTS_DDL above already has it for a
         # brand-new table, this just backfills an existing one.
         _ensure_column(conn, SCRIPTS_TABLE, "script_type", "script_type VARCHAR(16)")
+        # Same idea for splash_videos.drill_category (2026-09-16, Gas Station
+        # filter -- see GAS_STATION_DRILL_CATEGORIES).
+        _ensure_column(conn, VIDEOS_TABLE, "drill_category", "drill_category VARCHAR(32)")
     _TABLES_ENSURED = True
 
 
@@ -1085,9 +1102,13 @@ def deactivate_drill_option(name: str) -> None:
 # in the DB for now).
 
 def list_videos(category: str | None = None, *, active_only: bool = True) -> pd.DataFrame:
-    """id/title/category/size_bytes/created_at for the video library --
-    never selects `data` (the blob) so listing stays cheap even with a lot
-    of clips; fetch one clip's bytes with `get_video`."""
+    """id/title/category/drill_category/size_bytes/created_at for the video
+    library -- never selects `data` (the blob) so listing stays cheap even
+    with a lot of clips; fetch one clip's bytes with `get_video`.
+    `drill_category` is "" (never NULL) for a Recovery video or an older
+    Gas Station upload from before drill categories existed -- the Gas
+    Station filter dropdown treats that the same as any other value it
+    doesn't recognize (shown, just not matched by a specific filter pick)."""
     ensure_tables()
     where = ["active = 1"] if active_only else []
     params = {}
@@ -1095,9 +1116,12 @@ def list_videos(category: str | None = None, *, active_only: bool = True) -> pd.
         where.append("category = :category")
         params["category"] = category
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    return query_df(
-        f"SELECT id, title, category, size_bytes, created_at FROM {VIDEOS_TABLE} "
-        f"{clause} ORDER BY created_at DESC", params)
+    df = query_df(
+        f"SELECT id, title, category, drill_category, size_bytes, created_at "
+        f"FROM {VIDEOS_TABLE} {clause} ORDER BY created_at DESC", params)
+    if not df.empty:
+        df["drill_category"] = df["drill_category"].fillna("")
+    return df
 
 
 def get_video(video_id) -> dict | None:
@@ -1114,13 +1138,20 @@ def get_video(video_id) -> dict | None:
     return {"title": r["title"], "mimetype": r["mimetype"] or "video/mp4", "data": r["data"]}
 
 
-def add_video(title: str, category: str, mimetype: str, data: bytes, created_by=None) -> int:
+def add_video(title: str, category: str, mimetype: str, data: bytes, created_by=None,
+             drill_category: str | None = None) -> int:
     """Stores one video's bytes; returns the new row's id. Raises
-    ValueError for an oversized file or an unrecognized category --
-    callers (the upload callback) should catch that and show it as a
-    status message, not a stack trace."""
+    ValueError for an oversized file, an unrecognized category, or a
+    `drill_category` outside GAS_STATION_DRILL_CATEGORIES -- callers (the
+    upload callback) should catch that and show it as a status message, not
+    a stack trace. `drill_category` is only meaningful for category="Gas
+    Station" (see GAS_STATION_DRILL_CATEGORIES); pass None for a Recovery
+    upload, or leave it None on a Gas Station one if the coach didn't pick
+    a drill category -- it just won't show under any filter tab."""
     if category not in VIDEO_CATEGORIES:
         raise ValueError(f"unknown video category: {category!r}")
+    if drill_category and drill_category not in GAS_STATION_DRILL_CATEGORIES:
+        raise ValueError(f"unknown drill category: {drill_category!r}")
     if not data:
         raise ValueError("no file data")
     if len(data) > MAX_VIDEO_BYTES:
@@ -1128,13 +1159,15 @@ def add_video(title: str, category: str, mimetype: str, data: bytes, created_by=
                          f"{MAX_VIDEO_BYTES / 1e6:.0f} MB limit")
     ensure_tables()
     sql = text(f"""
-        INSERT INTO {VIDEOS_TABLE} (title, category, mimetype, size_bytes, data, active,
-                                    created_by, created_at)
-        VALUES (:title, :category, :mimetype, :size_bytes, :data, 1, :created_by, :created_at)
+        INSERT INTO {VIDEOS_TABLE} (title, category, drill_category, mimetype, size_bytes,
+                                    data, active, created_by, created_at)
+        VALUES (:title, :category, :drill_category, :mimetype, :size_bytes, :data, 1,
+                :created_by, :created_at)
     """)
     with get_engine().begin() as conn:
         result = conn.execute(sql, {
             "title": (title or "Untitled").strip() or "Untitled", "category": category,
+            "drill_category": _clean(drill_category),
             "mimetype": mimetype, "size_bytes": len(data), "data": data,
             "created_by": _clean(created_by), "created_at": _now(),
         })

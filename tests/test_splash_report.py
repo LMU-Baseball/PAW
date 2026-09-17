@@ -453,6 +453,33 @@ def test_add_video_rejects_bad_category_and_oversized_file(_clean_videos):
                      b"x" * (SR.MAX_VIDEO_BYTES + 1))
 
 
+def test_gas_station_video_drill_category_roundtrip_and_filter(_clean_videos):
+    SR.add_video("__test_sandbox_elbow_clip__", "Gas Station", "video/mp4", b"x",
+                created_by=1, drill_category="Elbow Strength")
+    SR.add_video("__test_sandbox_rehab_clip__", "Gas Station", "video/mp4", b"x",
+                created_by=1, drill_category="Rehab")
+    SR.add_video("__test_sandbox_uncategorized_clip__", "Gas Station", "video/mp4", b"x",
+                created_by=1)  # no drill_category -- still a valid Gas Station upload
+
+    gas = SR.list_videos(category="Gas Station")
+    by_title = gas.set_index("title")
+    assert by_title.loc["__test_sandbox_elbow_clip__", "drill_category"] == "Elbow Strength"
+    assert by_title.loc["__test_sandbox_rehab_clip__", "drill_category"] == "Rehab"
+    assert by_title.loc["__test_sandbox_uncategorized_clip__", "drill_category"] == ""
+
+    # a Recovery upload is unaffected -- drill_category is Gas-Station-only
+    SR.add_video("__test_sandbox_recovery_clip__", "Recovery", "video/mp4", b"x", created_by=1)
+    recovery = SR.list_videos(category="Recovery")
+    assert recovery.set_index("title").loc["__test_sandbox_recovery_clip__",
+                                           "drill_category"] == ""
+
+
+def test_add_video_rejects_unknown_drill_category(_clean_videos):
+    with pytest.raises(ValueError):
+        SR.add_video("__test_sandbox_bad_drill_cat__", "Gas Station", "video/mp4", b"x",
+                    drill_category="Not A Real Category")
+
+
 def test_pen_results_fig_plots_by_date_not_pen_number():
     """2026-09-16: chart x-axis switched from the sequential pen_number to
     the real pen_date -- confirm the trace actually carries dates, and that

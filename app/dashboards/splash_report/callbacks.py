@@ -237,11 +237,13 @@ def register_callbacks(dash_app) -> None:
         Input("splash-video-upload", "contents"),
         State("splash-video-upload", "filename"),
         State("splash-video-title", "value"), State("splash-video-category", "value"),
+        State("splash-video-drill-category", "value"),
         State("splash-player", "value"), State("splash-season", "value"),
         State("splash-cycle", "value"),
         prevent_initial_call=True,
     )
-    def _on_upload_video(contents, filename, title, category, player_id, season, cycle):
+    def _on_upload_video(contents, filename, title, category, drill_category,
+                         player_id, season, cycle):
         if not contents or not _is_coach():
             return no_update, no_update, no_update
         try:
@@ -249,7 +251,8 @@ def register_callbacks(dash_app) -> None:
             mimetype = header.split(";")[0].replace("data:", "") or "video/mp4"
             data = base64.b64decode(b64data)
             SR.add_video(title or filename or "Untitled", category, mimetype, data,
-                        created_by=getattr(current_user, "id", None))
+                        created_by=getattr(current_user, "id", None),
+                        drill_category=drill_category if category == "Gas Station" else None)
         except ValueError as e:
             return str(e), no_update, no_update
         new_data = layout.load_data(player_id, season, cycle)
@@ -271,6 +274,21 @@ def register_callbacks(dash_app) -> None:
         new_data = layout.load_data(player_id, season, cycle)
         new_data["manage_videos_open"] = True
         return new_data
+
+    # ---- Gas Station category filter (2026-09-16 meeting): narrows the
+    # displayed video list to one drill category, or "All Categories".
+    # Purely a re-render of already-loaded splash-data -- no DB round trip,
+    # same reasoning as "Compare Scripts"/"Show Scripts" not needing one.
+    @dash_app.callback(
+        Output("splash-gas-video-list", "children"),
+        Input("splash-gas-category-filter", "value"),
+        State("splash-data", "data"),
+    )
+    def _on_gas_category_filter(category, data):
+        videos = ((data or {}).get("videos") or {}).get("Gas Station", [])
+        if category and category != layout.ALL_DRILL_CATEGORIES:
+            videos = [v for v in videos if v.get("drill_category") == category]
+        return layout.video_list_or_empty(videos)
 
     # ---- Shared video popup (Recovery Protocols + Gas Station titled
     # links both open this one modal) -- streams from the /splash-video/

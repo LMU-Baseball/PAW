@@ -29,6 +29,8 @@ from app.dashboards.splash_report import body_visual, charts, tables
 # and across cards, it's just no longer a plain white panel. Padding/margin
 # trimmed from the original 12px/16px to cut down the whitespace between
 # cards ("eliminating as much white space as possible").
+ALL_DRILL_CATEGORIES = "__all__"  # the Gas Station filter's "show everything" option
+
 _CARD = {"background": "linear-gradient(160deg, rgba(255,255,255,0.92) 0%, "
                        "rgba(255,255,255,0.85) 55%, rgba(154,0,33,0.10) 100%)",
          "borderRadius": "8px", "borderTop": f"3px solid {CRIMSON}",
@@ -268,7 +270,7 @@ def _video_link(video: dict) -> html.Div:
         style={"display": "block"})
 
 
-def _video_list_or_empty(videos: list[dict]) -> html.Div:
+def video_list_or_empty(videos: list[dict]) -> html.Div:
     """A titled-link list for one category (Recovery Protocols or Gas
     Station Videos) -- click a title to pop the clip up in the shared
     modal (`video_modal`/`_on_video_modal` in callbacks.py), never an
@@ -308,10 +310,14 @@ def video_modal() -> html.Div:
 
 
 def _video_row(video: dict) -> html.Div:
-    """One row in the Manage Video Library list: title, category, delete."""
+    """One row in the Manage Video Library list: title, category (+ drill
+    category for a Gas Station upload that has one), delete."""
+    cat_label = video["category"]
+    if video.get("drill_category"):
+        cat_label += f" · {video['drill_category']}"
     return html.Div([
         html.Span(f"{video['title']} ", style={"fontWeight": "bold"}),
-        html.Span(f"({video['category']})", style={"color": "#666", "fontSize": "12px"}),
+        html.Span(f"({cat_label})", style={"color": "#666", "fontSize": "12px"}),
         html.Button("Remove", id={"type": "splash-video-delete", "index": video["id"]},
                    n_clicks=0, style={"border": "none", "background": "none", "color": CRIMSON,
                                       "cursor": "pointer", "fontSize": "12px",
@@ -351,6 +357,16 @@ def manage_video_library_panel(all_videos: list[dict], *, open_: bool) -> html.D
                            options=[{"label": c, "value": c} for c in SR.VIDEO_CATEGORIES],
                            value=SR.VIDEO_CATEGORIES[0], clearable=False,
                            style={"marginBottom": "6px"}),
+                # Only meaningful for a "Gas Station" upload (see
+                # SR.add_video's docstring) -- always rendered regardless of
+                # the category dropdown's live value so this id is a stable
+                # State target, same reasoning as script_movement_panel's
+                # always-mounted table.
+                dcc.Dropdown(id="splash-video-drill-category",
+                           options=[{"label": c, "value": c}
+                                    for c in SR.GAS_STATION_DRILL_CATEGORIES],
+                           placeholder="Drill category (Gas Station only)", clearable=True,
+                           style={"marginBottom": "6px"}),
                 dcc.Upload(id="splash-video-upload",
                           children=html.Button("Choose File & Upload",
                                               style={"border": f"2px solid {CRIMSON}",
@@ -371,7 +387,7 @@ def manage_video_library_panel(all_videos: list[dict], *, open_: bool) -> html.D
 
 def _recovery_section(recovery_videos: list[dict], all_videos: list[dict], *,
                       is_coach: bool, manage_videos_open: bool) -> html.Div:
-    children = [_video_list_or_empty(recovery_videos)]
+    children = [video_list_or_empty(recovery_videos)]
     if is_coach:
         children.append(manage_video_library_panel(all_videos, open_=manage_videos_open))
     return _card("Recovery Protocols", html.Div(children))
@@ -493,9 +509,17 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
         html.Div("Tie a specific exercise to whatever the numbers above flag.",
                  style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
         gas_child,
-        html.Div([html.B("Gas Station Videos", style={"fontSize": "13px"}),
-                 _video_list_or_empty(gas_videos)],
-                style={"marginTop": "10px"}),
+        html.Div([
+            html.B("Gas Station Videos", style={"fontSize": "13px"}),
+            dcc.Dropdown(
+                id="splash-gas-category-filter",
+                options=[{"label": "All Categories", "value": ALL_DRILL_CATEGORIES}] +
+                        [{"label": c, "value": c} for c in SR.GAS_STATION_DRILL_CATEGORIES],
+                value=ALL_DRILL_CATEGORIES, clearable=False,
+                style={"fontFamily": "Teko, sans-serif", "margin": "6px 0",
+                      "maxWidth": "260px"}),
+            html.Div(video_list_or_empty(gas_videos), id="splash-gas-video-list"),
+        ], style={"marginTop": "10px"}),
     ]
     return _card("The Gas Station", html.Div(children))
 
