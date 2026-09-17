@@ -695,14 +695,11 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                                             "marginBottom": "4px"}),
             tables.movement_log_table(movement_records, editable=True),
         ], style={"flex": "0 0 auto"}))
-    else:
-        has_movement = any(movement_records.get(str(n)) for n in script_numbers)
-        if has_movement:
-            tables_row.append(html.Div([
-                html.Div("Movement Log", style={"fontWeight": "bold", "color": CRIMSON,
-                                                "marginBottom": "4px"}),
-                tables.movement_log_table(movement_records, editable=False),
-            ], style={"flex": "0 0 auto"}))
+    # 2026-09-17 round 2 (Brad, screenshot): "just have this table show up
+    # when editing, the visual does a good enough telling the story" -- view
+    # mode no longer renders the Movement Log at all, same as
+    # pen_results_table (which was already edit-only); the shared HB/IVB
+    # chart above is the only movement-related thing a player sees.
     if tables_row:
         graph_block.children.append(html.Div(tables_row, style={
             "display": "flex", "flexWrap": "wrap", "gap": "20px",
@@ -976,4 +973,7 @@ def serve_layout() -> html.Div:
                  children=render_from_data(data, editable=False, is_coach=is_coach),
                  style={"padding": "16px"}),
         video_modal(),
+        # Dummy Output target for the Backspace/Delete fix clientside
+        # callback (callbacks.py) -- never actually renders anything.
+        html.Div(id="splash-backspace-fix", style={"display": "none"}),
     ])

@@ -447,3 +447,79 @@ def register_callbacks(dash_app) -> None:
         SR.restore_pen_result(trig["index"], updated_by=getattr(current_user, "id", None))
         return layout.load_data(player_id, season, cycle)
 
+    # ---- Backspace/Delete fix for every editable table on this page
+    # (2026-09-17, Brad: "backspace nor delete work in these tables... can
+    # you make it so the data we type can be deleted"). Confirmed live:
+    # clicking a cell auto-selects its whole text, so Backspace there
+    # deletes that selection and correctly clears the cell -- that part
+    # already worked, this doesn't touch it. But once actively typing inside
+    # a plain cell (a collapsed cursor, not a selection) OR typing into a
+    # dropdown-presentation cell's filter box (e.g. Gas Station's
+    # Need/Exercise columns -- a `react-select` input, DOM-wise unrelated to
+    # a plain cell's `<input class="dash-cell-value">`), Backspace/Delete do
+    # nothing at all -- dash_table's own JS swallows the keydown either way.
+    # Both are documented dash_table limitations (plotly/dash-table #700,
+    # #830), not something any DataTable prop controls, so there's no
+    # supported fix from Python. Installs one page-wide, capture-phase
+    # keydown listener (guarded so it only attaches once) that performs the
+    # deletion itself -- using the native value setter (bypassing React's
+    # instance-level override) plus a dispatched `input` event so React's
+    # own onChange still fires and Dash's redux store (or react-select's own
+    # state) stays in sync -- instead of letting dash_table's broken
+    # handling run. A capture-phase listener on `document` always runs
+    # before dash_table's own listener (attached lower in the DOM), so
+    # `stopImmediatePropagation` fully replaces that handling rather than
+    # racing it. Only intervenes when there's actual text to delete (a
+    # selection, or a cursor not already at position 0) -- an empty search
+    # box's own Backspace behavior (e.g. a multi-select dropdown removing
+    # its last chip) passes through untouched.
+    dash_app.clientside_callback(
+        """
+        function() {
+            if (!window.__splashBackspaceFixInstalled) {
+                window.__splashBackspaceFixInstalled = true;
+                document.addEventListener('keydown', function(e) {
+                    if ((e.key !== 'Backspace' && e.key !== 'Delete') ||
+                        e.ctrlKey || e.metaKey || e.altKey) {
+                        return;
+                    }
+                    var el = document.activeElement;
+                    if (!el || el.tagName !== 'INPUT' || el.readOnly || el.disabled) {
+                        return;
+                    }
+                    var isCellInput = el.classList.contains('dash-cell-value');
+                    var isDropdownFilter = el.parentElement &&
+                        el.parentElement.classList.contains('Select-input');
+                    if (!isCellInput && !isDropdownFilter) { return; }
+                    var start = el.selectionStart, end = el.selectionEnd;
+                    if (start === null || end === null) { return; }
+                    var val = el.value;
+                    var newVal, newPos;
+                    if (start !== end) {
+                        newVal = val.slice(0, start) + val.slice(end);
+                        newPos = start;
+                    } else if (e.key === 'Backspace') {
+                        if (start === 0) { return; }
+                        newVal = val.slice(0, start - 1) + val.slice(start);
+                        newPos = start - 1;
+                    } else {
+                        if (start >= val.length) { return; }
+                        newVal = val.slice(0, start) + val.slice(start + 1);
+                        newPos = start;
+                    }
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    var setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value').set;
+                    setter.call(el, newVal);
+                    el.setSelectionRange(newPos, newPos);
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                }, true);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("splash-backspace-fix", "children"),
+        Input("splash-editing", "data"),
+    )
+
