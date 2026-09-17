@@ -201,21 +201,44 @@ def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTab
                  row_deletable=editable)
 
 
-def movement_table(df: pd.DataFrame, script_number: int, *, editable: bool) -> dash_table.DataTable:
-    """Pitch Type / Pen Date / HB / IVB -- variable rows, ONE script's
-    movement entries (unlike pen_results_table, not shared across all 6 --
-    see `app.data.splash_report.save_movement`). Same `id`-round-tripping/
-    soft-delete idiom as `pen_results_table`."""
+def movement_log_table(movement_records: dict, *, editable: bool) -> dash_table.DataTable:
+    """Script # / Pitch Type / Pen Date / HB / IVB -- ONE shared table across
+    all 6 scripts, mirroring `pen_results_table`'s shape exactly (a flat
+    table with a Script # column instead of six separate per-script grids).
+
+    2026-09-17 (Brad): the old per-script movement entry table
+    (`script_movement_panel`, sitting beside each script's card) "ruins the
+    look... that area is designated only for scripts, so having a random
+    movement log table looks awkward and messes up the perfect 3x2 columns."
+    Replaced with this single table, placed next to `pen_results_table` in
+    `layout.scripts_section`'s graph_block instead of down in the script
+    grid -- same idiom Brad pointed at in his own screenshot of that table.
+
+    `movement_records`: {str(script_number): [row dicts]} (see
+    `app.data.splash_report.read_all_movement`). Same `id`-round-tripping/
+    soft-delete idiom as `pen_results_table` -- see that function's
+    docstring; `save_all`/`save_movement` are unchanged, the callback just
+    regroups this flat table's rows by `script_number` before calling them."""
+    rows = []
+    for key, recs in (movement_records or {}).items():
+        try:
+            n = int(key)
+        except (TypeError, ValueError):
+            continue
+        for r in recs:
+            rows.append({"id": r.get("id"), "script_number": n,
+                        "pitch_type": r.get("pitch_type"), "pen_date": r.get("pen_date"),
+                        "hb": r.get("hb"), "ivb": r.get("ivb")})
+    rows.sort(key=lambda r: (r["script_number"], r.get("pen_date") or ""))
     columns = [
+        {"name": "Script #", "id": "script_number", "editable": editable, "type": "numeric"},
         {"name": "Pitch Type", "id": "pitch_type", "editable": editable},
         {"name": "Pen Date (YYYY-MM-DD)", "id": "pen_date", "editable": editable},
         {"name": "HB", "id": "hb", "editable": editable, "type": "numeric"},
         {"name": "IVB", "id": "ivb", "editable": editable, "type": "numeric"},
     ]
-    data = df[["id", "pitch_type", "pen_date", "hb", "ivb"]].to_dict("records") \
-        if not df.empty else []
-    if editable and len(data) < 4:
-        data = data + [{"pitch_type": "", "pen_date": "", "hb": None, "ivb": None}
-                      for _ in range(4 - len(data))]
-    return _table(f"splash-script-movement-table-{script_number}", columns, data,
-                 editable=editable, row_deletable=editable)
+    if editable and len(rows) < 6:
+        rows = rows + [{"script_number": None, "pitch_type": "", "pen_date": "",
+                       "hb": None, "ivb": None} for _ in range(6 - len(rows))]
+    return _table("splash-movement-table", columns, rows, editable=editable,
+                 row_deletable=editable)

@@ -73,11 +73,17 @@ def pen_results_fig(df: pd.DataFrame) -> go.Figure:
                            "<br>%{x|%Y-%m-%d}<br>%{y:.0f}%<extra></extra>"),
         ))
     fig.update_layout(
-        title="Script Pen Results", height=360, margin=dict(l=40, r=20, t=50, b=40),
+        # 2026-09-17 (Brad, screenshot): the "Date" axis title and the
+        # legend row were landing on top of each other -- b=40 only left
+        # room for the tick labels themselves, not the title below them AND
+        # a legend below that. Taller bottom margin + legend pushed further
+        # down (y is fraction of the whole figure, not just the plot area)
+        # gives each its own row instead of stacking.
+        title="Script Pen Results", height=380, margin=dict(l=40, r=20, t=50, b=90),
         xaxis=dict(title="Date", type="date"), yaxis=dict(title="Result (%)"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
-        legend=dict(orientation="h", y=-0.15))
+        legend=dict(orientation="h", y=-0.35, x=0.5, xanchor="center"))
     return fig
 
 
@@ -142,9 +148,13 @@ def scripts_movement_fig(movement_by_script: dict, selected: list[int] | None = 
                            "<br>avg of %{customdata[1]} session(s)<extra></extra>"),
         ))
     fig.update_layout(
-        title="Movement", height=320, margin=dict(l=40, r=20, t=50, b=40),
+        # Same fix as pen_results_fig: the "HB (in)" axis title and the
+        # pitch-type legend were overlapping with only b=40/y=-0.2 to work
+        # with -- taller bottom margin + legend pushed further down gives
+        # the title its own row above the legend.
+        title="Movement", height=340, margin=dict(l=40, r=20, t=50, b=90),
         xaxis=dict(title="HB (in)", zeroline=True), yaxis=dict(title="IVB (in)", zeroline=True),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
-        legend=dict(orientation="h", y=-0.2))
+        legend=dict(orientation="h", y=-0.32, x=0.5, xanchor="center"))
     return fig
