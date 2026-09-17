@@ -37,13 +37,29 @@ def pen_results_fig(df: pd.DataFrame) -> go.Figure:
     `app.data.splash_report.read_pen_results`). One line per script that has
     at least one recorded value; x = pen_date (2026-09-16: switched from the
     sequential pen_number -- Brad wanted real calendar progression, not an
-    arbitrary 1st/2nd/3rd count), y = value (%). A row with no pen_date is
-    dropped from the chart (nothing to plot it against on a date axis) but
-    stays in the underlying data/table untouched."""
+    arbitrary 1st/2nd/3rd count), y = value (%). A row with no pen_date, or
+    one Plotly can't actually parse, is dropped from the chart (nothing to
+    plot it against on a date axis) but stays in the underlying data/table
+    untouched.
+
+    `pen_date` is a free-typed text cell (`tables.pen_results_table`), not a
+    real date picker -- a coach types "9/16/26" as readily as "2026-09-16".
+    Handing that raw string straight to a Plotly date axis was the actual
+    2026-09-16 bug (Brad: "the xaxis starts from 2000 ... there is no data
+    then"): Plotly's client-side date parser mis-reads "9/16/26" and the
+    real points render far outside the default-autoscaled 2000-2001 view,
+    so they're invisible, not missing. Parsing with `pd.to_datetime` HERE
+    (pandas' parser correctly reads both "9/16/26" and "2026-09-16" as
+    2026-09-16) and handing Plotly real Timestamps instead of the raw string
+    fixes that regardless of what format a coach happened to type."""
     if df is None or df.empty:
         return _empty_fig()
-    dated = df.dropna(subset=["pen_date"])
-    dated = dated[dated["pen_date"] != ""]
+    d = df.copy()
+    # format="mixed": coaches type both "9/16/26" and "2026-09-16" across
+    # different rows, so a single fixed format would reject one or the
+    # other -- this parses each value on its own terms instead.
+    d["pen_date"] = pd.to_datetime(d["pen_date"], errors="coerce", format="mixed")
+    dated = d.dropna(subset=["pen_date"])
     if dated.empty:
         return _empty_fig()
     fig = go.Figure()
@@ -54,7 +70,7 @@ def pen_results_fig(df: pd.DataFrame) -> go.Figure:
             name=f"Script {int(script_number)}",
             line=dict(color=color, width=2), marker=dict(color=color, size=7),
             hovertemplate=(f"Script {int(script_number)}"
-                           "<br>%{x}<br>%{y:.0f}%<extra></extra>"),
+                           "<br>%{x|%Y-%m-%d}<br>%{y:.0f}%<extra></extra>"),
         ))
     fig.update_layout(
         title="Script Pen Results", height=360, margin=dict(l=40, r=20, t=50, b=40),

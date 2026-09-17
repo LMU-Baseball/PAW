@@ -112,25 +112,21 @@ def test_upsert_engine_metrics_blank_cell_clears_stored_value():
 
 
 def test_engine_flag_thresholds():
+    """IR's confirmed thresholds (Brad, 2026-09-16): red <= 40.5, yellow
+    40.5-45, ok >= 45, deficit-only (no upper cap)."""
     assert SR.engine_flag("IR", None) is None  # no reading yet -> never flags
-    original = SR.D1_BASELINES["IR"]
-    SR.D1_BASELINES["IR"] = 50.0
-    try:
-        assert SR.engine_flag("IR", 49.0) == "ok"       # 1 lb off
-        assert SR.engine_flag("IR", 45.0) == "yellow"    # 5 lb off
-        assert SR.engine_flag("IR", 39.0) == "red"       # 11 lb off
-        assert SR.engine_flag("IR", None) is None        # no reading yet
-    finally:
-        SR.D1_BASELINES["IR"] = original  # don't leak into other tests
+    assert SR.engine_flag("IR", 45.0) == "ok"        # at the green threshold
+    assert SR.engine_flag("IR", 60.0) == "ok"        # well above -- still ok, deficit-only
+    assert SR.engine_flag("IR", 42.0) == "yellow"     # inside the yellow range
+    assert SR.engine_flag("IR", 40.5) == "red"        # at the red threshold
+    assert SR.engine_flag("IR", 35.0) == "red"
+    assert SR.engine_flag("IR", None) is None
 
 
-def test_engine_flag_none_when_baseline_unset():
-    original = SR.D1_BASELINES["IR"]
-    SR.D1_BASELINES["IR"] = None
-    try:
-        assert SR.engine_flag("IR", 10.0) is None  # no baseline -> never flags
-    finally:
-        SR.D1_BASELINES["IR"] = original
+def test_engine_flag_none_when_thresholds_unset():
+    # Grip and Scaption ROM are still TBD (None) as of 2026-09-16.
+    assert SR.engine_flag("Grip", 100.0) is None
+    assert SR.engine_flag("ScaptionROM", 90.0) is None
 
 
 def test_gas_station_replace_drops_blank_rows_and_removes_stale_ones():
@@ -469,9 +465,26 @@ def test_pen_results_fig_plots_by_date_not_pen_number():
     fig = SC.pen_results_fig(df)
     assert len(fig.data) == 1  # only script 1 has a usable (dated) point
     trace = fig.data[0]
-    assert list(trace.x) == ["2026-09-01", "2026-09-15"]
+    assert list(trace.x) == [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-15")]
     assert list(trace.y) == [60.0, 70.0]
     assert fig.layout.xaxis.title.text == "Date"
+
+
+def test_pen_results_fig_parses_free_typed_us_date_format():
+    """Real bug, reported live 2026-09-16: pen_date is a free-typed text
+    cell, not a date picker -- a coach typing "9/16/26" (M/D/YY) instead of
+    ISO left the chart's x-axis autoscaled to Jan 2000-2001 with the real
+    2026 points invisible off to the right, looking like "no data" even
+    though the table below clearly had rows. Confirms both formats land on
+    the exact same parsed date."""
+    df = pd.DataFrame([
+        {"script_number": 1, "pen_number": 1, "pen_date": "9/16/26", "value": 50.0},
+        {"script_number": 2, "pen_number": 1, "pen_date": "2026-09-16", "value": 55.0},
+    ])
+    fig = SC.pen_results_fig(df)
+    assert len(fig.data) == 2
+    for trace in fig.data:
+        assert list(trace.x) == [pd.Timestamp("2026-09-16")]
 
 
 def test_pen_results_fig_empty_when_no_dated_rows():

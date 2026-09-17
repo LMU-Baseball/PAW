@@ -131,7 +131,7 @@ def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTab
     destroying it, and it's recoverable from "Recently Removed.\""""
     columns = [
         {"name": "Script #", "id": "script_number", "editable": editable, "type": "numeric"},
-        {"name": "Pen Date", "id": "pen_date", "editable": editable},
+        {"name": "Pen Date (YYYY-MM-DD)", "id": "pen_date", "editable": editable},
         {"name": "Value %", "id": "value", "editable": editable, "type": "numeric"},
     ]
     data = df[["id", "script_number", "pen_date", "value"]].to_dict("records") \
@@ -150,7 +150,7 @@ def movement_table(df: pd.DataFrame, script_number: int, *, editable: bool) -> d
     soft-delete idiom as `pen_results_table`."""
     columns = [
         {"name": "Pitch Type", "id": "pitch_type", "editable": editable},
-        {"name": "Pen Date", "id": "pen_date", "editable": editable},
+        {"name": "Pen Date (YYYY-MM-DD)", "id": "pen_date", "editable": editable},
         {"name": "HB", "id": "hb", "editable": editable, "type": "numeric"},
         {"name": "IVB", "id": "ivb", "editable": editable, "type": "numeric"},
     ]
