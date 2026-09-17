@@ -101,38 +101,55 @@ ENGINE_METRIC_LABELS = {
     "TotalArc": "Total Arc",
 }
 
-# D1-average baseline per metric, the fixed reference line a player's Now
-# value would be color-flagged against -- unset (all None) as of 2026-09-16:
-# Brad decided against using generic (non-LMU) D1-average numbers at all, so
-# nothing here is real vs. placeholder anymore, it's just off. `engine_flag`/
-# the table/body-visual dot already treat a None baseline as "no color flag,
-# neutral display" (same path as an unlogged reading), so this fully disables
-# the comparison without touching any of that wiring. If LMU's own
-# strength/athletic-training staff ever supplies real per-metric numbers,
-# set them here -- nothing else needs to change.
-D1_BASELINES: dict[str, float | None] = {
-    "IR": None, "ER": None, "Scaption": None, "Grip": None,
-    "IROM": None, "EROM": None, "ScaptionROM": None, "TotalArc": None,
+# Confirmed clinical thresholds from LMU's own strength/athletic-training
+# staff (Brad, 2026-09-16 -- "Confirmed Thresholds" table, supersedes the
+# 2026-09-10 generic/non-LMU D1-average placeholders entirely, and the
+# brief 2026-09-16 "drop it, we're not using D1 examples" window before
+# these real numbers were in hand). `red`/`green` are the metric's own unit
+# (lb for strength, degrees for ROM) -- at/below `red` is "red", at/above
+# `green` is "ok", the whole span between is "yellow" (Brad's "Yellow
+# Range" is the full red-to-green gap, not a narrow band around either
+# edge). `two_sided=True` (the three ROM metrics -- GIRD + laxity risk) is
+# recorded per Brad's notes but has NO effect yet: he gave only the
+# deficit-side numbers, not the upper (excess-ROM) red/yellow thresholds,
+# so `engine_flag` only ever flags a deficit until those arrive -- ask him
+# for the upper bounds before wiring that side up. Grip and Scaption ROM
+# are still "TBD" (None) -- a metric with no thresholds shows no color flag
+# at all, same as an unlogged reading.
+ENGINE_THRESHOLDS: dict[str, dict] = {
+    "IR": {"red": 40.5, "green": 45.0, "two_sided": False},
+    "ER": {"red": 28.8, "green": 32.0, "two_sided": False},
+    "Scaption": {"red": 27.0, "green": 30.0, "two_sided": False},
+    "Grip": {"red": None, "green": None, "two_sided": False},
+    "IROM": {"red": 49.5, "green": 55.0, "two_sided": True},
+    "EROM": {"red": 103.5, "green": 115.0, "two_sided": True},
+    "TotalArc": {"red": 162.0, "green": 180.0, "two_sided": True},
+    "ScaptionROM": {"red": None, "green": None, "two_sided": True},
 }
-D1_YELLOW_DELTA = 5.0
-D1_RED_DELTA = 10.0
+
+# The body-visual ring gauge's "full ring" reference value -- kept as its
+# own flat lookup (rather than that module reaching into ENGINE_THRESHOLDS'
+# dict shape) so it stays a simple {metric: number} map like before.
+D1_BASELINES: dict[str, float | None] = {k: v["green"] for k, v in ENGINE_THRESHOLDS.items()}
 
 
 def engine_flag(metric_key: str, now_value) -> str | None:
-    """"red" / "yellow" / "ok" against D1_BASELINES[metric_key], or None if
-    either the baseline or the player's Now value isn't known yet."""
-    baseline = D1_BASELINES.get(metric_key)
-    if baseline is None or now_value is None:
+    """"red" / "yellow" / "ok" against ENGINE_THRESHOLDS[metric_key], or None
+    if that metric's thresholds (still TBD for Grip/Scaption ROM) or the
+    player's Now value aren't known yet."""
+    th = ENGINE_THRESHOLDS.get(metric_key)
+    if not th or th["red"] is None or th["green"] is None or now_value is None:
         return None
     try:
         if pd.isna(now_value):
             return None
     except (TypeError, ValueError):
         pass
-    off = float(baseline) - float(now_value)
-    if off >= D1_RED_DELTA:
+    v = float(now_value)
+    red, green = float(th["red"]), float(th["green"])
+    if v <= red:
         return "red"
-    if off >= D1_YELLOW_DELTA:
+    if v < green:
         return "yellow"
     return "ok"
 
