@@ -520,22 +520,65 @@ def test_pen_results_fig_empty_when_no_dated_rows():
     assert fig.layout.annotations[0].text == "No pen results for this cycle yet."
 
 
-def test_movement_fig_one_trace_per_pitch_type():
-    df = pd.DataFrame([
-        {"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0},
-        {"pitch_type": "Fastball", "pen_date": "2026-09-08", "hb": 9.0, "ivb": 16.0},
-        {"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0},
-    ])
-    fig = SC.movement_fig(df)
-    assert len(fig.data) == 2  # one trace per pitch type
-    names = sorted(t.name for t in fig.data)
-    assert names == ["Fastball", "Slider"]
+def test_scripts_movement_fig_averages_per_script_and_pitch_type():
+    """2026-09-16 round 2: the movement chart moved from a per-script detail
+    view (one dot per pen session) to one shared chart averaging across ALL
+    scripts -- one dot per (script, pitch_type), not per session."""
+    movement_by_script = {
+        "1": [
+            {"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0},
+            {"pitch_type": "Fastball", "pen_date": "2026-09-08", "hb": 10.0, "ivb": 17.0},
+        ],
+        "2": [
+            {"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0},
+        ],
+        "3": [],  # no movement logged -- contributes nothing, doesn't crash
+    }
+    fig = SC.scripts_movement_fig(movement_by_script)
+    assert len(fig.data) == 2  # one trace per pitch type (Fastball, Slider)
     fb = next(t for t in fig.data if t.name == "Fastball")
-    assert list(fb.x) == [8.0, 9.0] and list(fb.y) == [15.0, 16.0]
+    assert list(fb.x) == [9.0] and list(fb.y) == [16.0]  # averaged across 2 sessions
+    assert list(fb.text) == ["S1"]  # labeled with its script number
+    sl = next(t for t in fig.data if t.name == "Slider")
+    assert list(sl.x) == [3.0] and list(sl.text) == ["S2"]
     assert fig.layout.xaxis.title.text == "HB (in)"
     assert fig.layout.yaxis.title.text == "IVB (in)"
 
 
-def test_movement_fig_empty_when_no_rows():
-    fig = SC.movement_fig(pd.DataFrame(columns=["pitch_type", "pen_date", "hb", "ivb"]))
+def test_scripts_movement_fig_selected_filters_to_those_scripts():
+    movement_by_script = {
+        "1": [{"pitch_type": "Fastball", "pen_date": "2026-09-01", "hb": 8.0, "ivb": 15.0}],
+        "2": [{"pitch_type": "Slider", "pen_date": "2026-09-01", "hb": 3.0, "ivb": -2.0}],
+    }
+    fig = SC.scripts_movement_fig(movement_by_script, selected=[1])
+    assert len(fig.data) == 1
+    assert fig.data[0].name == "Fastball"
+
+
+def test_scripts_movement_fig_empty_when_no_rows():
+    fig = SC.scripts_movement_fig({})
     assert fig.layout.annotations[0].text == "No movement logged for this script yet."
+
+
+def test_add_video_link_roundtrip(_clean_videos):
+    vid_id = SR.add_video_link("__test_sandbox_link_clip__", "Gas Station",
+                               "https://drive.google.com/file/d/abc123/view",
+                               created_by=1, drill_category="Rehab")
+    listed = SR.list_videos(category="Gas Station")
+    row = listed.set_index("id").loc[vid_id]
+    assert row["link_url"] == "https://drive.google.com/file/d/abc123/view"
+    assert row["drill_category"] == "Rehab"
+
+    # get_video is upload-only -- a link video has no bytes to stream
+    assert SR.get_video(vid_id) is None
+
+    SR.deactivate_video(vid_id)
+    assert vid_id not in set(SR.list_videos(category="Gas Station")["id"])
+
+
+def test_add_video_link_rejects_blank_url_and_bad_category(_clean_videos):
+    with pytest.raises(ValueError):
+        SR.add_video_link("__test_sandbox_blank_link__", "Gas Station", "")
+    with pytest.raises(ValueError):
+        SR.add_video_link("__test_sandbox_bad_cat_link__", "NotACategory",
+                          "https://drive.google.com/x")

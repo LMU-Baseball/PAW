@@ -259,6 +259,36 @@ def register_callbacks(dash_app) -> None:
         new_data["manage_videos_open"] = True
         return f"Uploaded \"{title or filename}\".", "", new_data
 
+    # ---- Link-based video (2026-09-16 -- SR.add_video_link): same
+    # Title/Category/Drill Category fields as the upload above, just a
+    # different action button and no file contents to react to.
+    @dash_app.callback(
+        Output("splash-video-upload-status", "children", allow_duplicate=True),
+        Output("splash-video-title", "value", allow_duplicate=True),
+        Output("splash-video-link-url", "value"),
+        Output("splash-data", "data", allow_duplicate=True),
+        Input("splash-video-add-link", "n_clicks"),
+        State("splash-video-link-url", "value"),
+        State("splash-video-title", "value"), State("splash-video-category", "value"),
+        State("splash-video-drill-category", "value"),
+        State("splash-player", "value"), State("splash-season", "value"),
+        State("splash-cycle", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_add_video_link(n_clicks, url, title, category, drill_category,
+                           player_id, season, cycle):
+        if not n_clicks or not _is_coach():
+            return no_update, no_update, no_update, no_update
+        try:
+            SR.add_video_link(title or "Untitled", category, url,
+                              created_by=getattr(current_user, "id", None),
+                              drill_category=drill_category if category == "Gas Station" else None)
+        except ValueError as e:
+            return str(e), no_update, no_update, no_update
+        new_data = layout.load_data(player_id, season, cycle)
+        new_data["manage_videos_open"] = True
+        return f"Added \"{title or 'Untitled'}\".", "", "", new_data
+
     @dash_app.callback(
         Output("splash-data", "data", allow_duplicate=True),
         Input({"type": "splash-video-delete", "index": ALL}, "n_clicks"),
@@ -358,17 +388,20 @@ def register_callbacks(dash_app) -> None:
     )
 
     # "Compare Scripts" narrows which scripts' lines the pen-results trend
-    # graph shows -- a normal (server) callback since it re-renders the
-    # Plotly figure from splash-data, not just a style toggle.
+    # graph AND the shared movement chart show -- a normal (server) callback
+    # since it re-renders both Plotly figures from splash-data, not just a
+    # style toggle.
     @dash_app.callback(
         Output("splash-pen-graph", "figure"),
+        Output("splash-movement-graph", "figure"),
         Input("splash-pen-compare", "value"), Input("splash-data", "data"),
     )
     def _on_pen_compare(selected, data):
         pen = pd.DataFrame((data or {}).get("pen", []))
         if selected and not pen.empty:
             pen = pen[pen["script_number"].isin(selected)]
-        return charts.pen_results_fig(pen)
+        movement = (data or {}).get("movement", {})
+        return charts.pen_results_fig(pen), charts.scripts_movement_fig(movement, selected)
 
     # "Recently Removed" pen results -- Restore is immediate (not part of
     # the big Save), same "small coach-only action, refresh splash-data

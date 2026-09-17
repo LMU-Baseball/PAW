@@ -93,34 +93,56 @@ def _empty_movement_fig() -> go.Figure:
     return fig
 
 
-def movement_fig(df: pd.DataFrame) -> go.Figure:
-    """`df`: columns pitch_type/pen_date/hb/ivb (see
-    `app.data.splash_report.read_movement`), already scoped to ONE Pitch
-    Design script. x = HB (horizontal break, in), y = IVB (induced vertical
-    break, in) -- the same pair every other movement chart in the app plots
-    (see `app.reports.plots`/bullpen's charts), except each dot here is a
-    coach-typed session average rather than a raw tracked pitch. One trace
-    per pitch_type, colored by `app.reports.plots.color_for` for visual
-    consistency with the rest of the site. Wider than tall (rectangle, not
-    square) per the 2026-09-16 meeting -- set via `style` on the dcc.Graph
-    that wraps this, not here."""
-    if df is None or df.empty:
+def scripts_movement_fig(movement_by_script: dict, selected: list[int] | None = None) -> go.Figure:
+    """One dot per (script, pitch_type) -- the AVERAGE HB/IVB across every
+    pen-session entry logged for that script+pitch_type. `movement_by_script`:
+    {str(script_number): [row dicts with pitch_type/hb/ivb]} (see
+    `app.data.splash_report.read_all_movement`); `selected` narrows which
+    script numbers are included (mirrors "Compare Scripts"), None/empty
+    means all six.
+
+    2026-09-16, Brad: reworked from a per-script detail panel (one dot per
+    pen session, only visible after picking a script in "Show Scripts") to
+    this single shared chart, always visible right under Script Pen
+    Results -- "each dot represents the average from that script... a dot
+    for each script based on the pitch type." Each dot is labeled with its
+    script number directly on the chart (not just in the hover), since
+    several scripts can share the same pitch type (and therefore color)."""
+    frames = []
+    for key, rows in (movement_by_script or {}).items():
+        try:
+            n = int(key)
+        except (TypeError, ValueError):
+            continue
+        if selected and n not in selected:
+            continue
+        d = pd.DataFrame(rows)
+        if d.empty:
+            continue
+        d["script_number"] = n
+        frames.append(d)
+    if not frames:
         return _empty_movement_fig()
-    d = df.dropna(subset=["hb", "ivb"], how="all")
-    if d.empty:
+    all_rows = pd.concat(frames, ignore_index=True).dropna(subset=["hb", "ivb"], how="all")
+    if all_rows.empty:
         return _empty_movement_fig()
+    agg = all_rows.groupby(["script_number", "pitch_type"], as_index=False).agg(
+        hb=("hb", "mean"), ivb=("ivb", "mean"), sessions=("hb", "size"))
     fig = go.Figure()
-    for pitch_type, sub in d.groupby("pitch_type"):
+    for pitch_type, sub in agg.groupby("pitch_type"):
         color = color_for(pitch_type)
         fig.add_trace(go.Scatter(
-            x=sub["hb"], y=sub["ivb"], mode="markers", name=str(pitch_type),
-            marker=dict(color=color, size=10, line=dict(width=1, color="white")),
-            customdata=sub["pen_date"].fillna("").to_numpy(),
-            hovertemplate=(f"{pitch_type}<br>%{{customdata}}"
-                           "<br>HB %{x:.1f} / IVB %{y:.1f}<extra></extra>"),
+            x=sub["hb"], y=sub["ivb"], mode="markers+text", name=str(pitch_type),
+            text=[f"S{n}" for n in sub["script_number"]], textposition="top center",
+            textfont=dict(size=11, family="Teko, sans-serif"),
+            marker=dict(color=color, size=13, line=dict(width=1, color="white")),
+            customdata=sub[["script_number", "sessions"]].to_numpy(),
+            hovertemplate=(f"{pitch_type}<br>Script %{{customdata[0]}}"
+                           "<br>HB %{x:.1f} / IVB %{y:.1f}"
+                           "<br>avg of %{customdata[1]} session(s)<extra></extra>"),
         ))
     fig.update_layout(
-        title="Movement", height=280, margin=dict(l=40, r=20, t=50, b=40),
+        title="Movement", height=320, margin=dict(l=40, r=20, t=50, b=40),
         xaxis=dict(title="HB (in)", zeroline=True), yaxis=dict(title="IVB (in)", zeroline=True),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),

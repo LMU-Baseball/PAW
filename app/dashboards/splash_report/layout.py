@@ -260,21 +260,33 @@ def _drill_section(title: str, text: str, *, editable: bool, is_coach: bool, dd_
 # planning session): coach-managed, shown to every player rather than curated
 # per plan. See app.data.splash_report.VIDEO_CATEGORIES/list_videos/add_video.
 
+_VIDEO_LINK_STYLE = {"color": CRIMSON, "textDecoration": "underline", "cursor": "pointer",
+                     "fontFamily": "Teko, sans-serif", "fontSize": "15px",
+                     "padding": "2px 0", "textAlign": "left", "display": "block",
+                     "border": "none", "background": "none"}
+
+
 def _video_link(video: dict) -> html.Div:
-    return html.Div(
-        html.Button(f"▶ {video['title']}", id={"type": "splash-video-open", "index": video["id"]},
-                   n_clicks=0, style={"border": "none", "background": "none", "color": CRIMSON,
-                                      "textDecoration": "underline", "cursor": "pointer",
-                                      "fontFamily": "Teko, sans-serif", "fontSize": "15px",
-                                      "padding": "2px 0", "textAlign": "left"}),
-        style={"display": "block"})
+    """A link-based video (`link_url` set -- e.g. a Google Drive share link,
+    2026-09-16: Brad confirmed these open in a new tab, no inline embedding
+    to build) is a plain anchor; an uploaded one pops the shared modal
+    (`video_modal`/`_on_video_modal` in callbacks.py) instead, since its
+    bytes stream from this app's own `/splash-video/<id>` route."""
+    if video.get("link_url"):
+        child = html.A(f"↗ {video['title']}", href=video["link_url"], target="_blank",
+                       rel="noopener", style=_VIDEO_LINK_STYLE)
+    else:
+        child = html.Button(f"▶ {video['title']}",
+                            id={"type": "splash-video-open", "index": video["id"]},
+                            n_clicks=0, style=_VIDEO_LINK_STYLE)
+    return html.Div(child, style={"display": "block"})
 
 
 def video_list_or_empty(videos: list[dict]) -> html.Div:
     """A titled-link list for one category (Recovery Protocols or Gas
-    Station Videos) -- click a title to pop the clip up in the shared
-    modal (`video_modal`/`_on_video_modal` in callbacks.py), never an
-    embedded player inline on the page."""
+    Station Videos) -- click an uploaded video's title to pop it up in the
+    shared modal; a link-based one (see `_video_link`) opens in a new tab
+    instead, never an embedded player inline on the page either way."""
     if not videos:
         return html.Div("No videos yet.", style={"color": "#888", "fontStyle": "italic"})
     return html.Div([_video_link(v) for v in videos])
@@ -311,10 +323,13 @@ def video_modal() -> html.Div:
 
 def _video_row(video: dict) -> html.Div:
     """One row in the Manage Video Library list: title, category (+ drill
-    category for a Gas Station upload that has one), delete."""
+    category for a Gas Station upload that has one, + "Link" for a
+    link-based video), delete."""
     cat_label = video["category"]
     if video.get("drill_category"):
         cat_label += f" · {video['drill_category']}"
+    if video.get("link_url"):
+        cat_label += " · Link"
     return html.Div([
         html.Span(f"{video['title']} ", style={"fontWeight": "bold"}),
         html.Span(f"({cat_label})", style={"color": "#666", "fontSize": "12px"}),
@@ -377,6 +392,22 @@ def manage_video_library_panel(all_videos: list[dict], *, open_: bool) -> html.D
                           multiple=False),
                 html.Div(id="splash-video-upload-status",
                         style={"fontSize": "12px", "color": CRIMSON, "margin": "6px 0"}),
+                html.Div("— or —", style={"fontSize": "11px", "color": "#999",
+                                          "textAlign": "center", "margin": "6px 0"}),
+                # Link-based video (2026-09-16, Brad: "Prescription Links" --
+                # a Google Drive share link, opens in a new tab rather than
+                # being downloaded/uploaded -- see SR.add_video_link). Shares
+                # the Title/Category/Drill Category fields above with the
+                # file-upload path; only one of "Choose File & Upload" or
+                # "Add Link" actually needs a value below it.
+                dcc.Input(id="splash-video-link-url", type="text",
+                         placeholder="Or paste a video link (e.g. Google Drive)",
+                         style={"width": "100%", "padding": "6px", "borderRadius": "6px",
+                                "border": "1px solid #ccc", "marginBottom": "6px"}),
+                html.Button("Add Link", id="splash-video-add-link", n_clicks=0,
+                           style={"border": f"2px solid {CRIMSON}", "background": "#fff",
+                                  "color": CRIMSON, "borderRadius": "14px", "padding": "4px 14px",
+                                  "cursor": "pointer", "fontFamily": "Teko, sans-serif"}),
             ], style={"maxWidth": "320px", "marginBottom": "10px"}),
             html.Div([_video_row(v) for v in all_videos] or
                     [html.Div("No videos in the library yet.",
@@ -579,14 +610,16 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
 
 def script_movement_panel(script_number, script_type: str, movement_records: list, *,
                           editable: bool) -> html.Div:
-    """Pitch Design's movement plot + entry table (2026-09-16 meeting) --
-    ALWAYS rendered as a sibling of that script's `script_card` in the same
+    """Pitch Design's movement ENTRY TABLE (2026-09-16 meeting) -- ALWAYS
+    rendered as a sibling of that script's `script_card` in the same
     flex-wrap row (same "always in the DOM, visibility toggled client-side"
-    reasoning as script_card itself), so it fills the white space Brad
-    pointed at beside the (narrow, 220px) card instead of stacking under the
-    Pen Results graph like the original meeting note described -- Brad
-    corrected that placement live while reviewing the page. Rectangular
-    (wider than tall), not square, per the same note.
+    reasoning as script_card itself), so it fills the white space beside the
+    (narrow, 220px) card. The movement PLOT itself moved out of here and
+    into a single shared chart under Script Pen Results
+    (`charts.scripts_movement_fig`, wired in `scripts_section`) -- Brad,
+    2026-09-16 round 2: he wanted one always-visible chart averaging every
+    script together, not a per-script plot buried behind "Show Scripts."
+    This panel is now just the raw per-session numbers a coach types in.
 
     In edit mode the INNER panel (and its movement_table) is always mounted
     -- just CSS-hidden (`display: none`, not omitted) for a non-Pitch-Design
@@ -604,14 +637,12 @@ def script_movement_panel(script_number, script_type: str, movement_records: lis
                         style={"display": "none"})
     df = pd.DataFrame(movement_records)
     panel = html.Div([
-        html.Div(f"Script #{script_number} — Movement", style={"fontWeight": "bold",
-                                                                "color": CRIMSON}),
-        dcc.Graph(figure=charts.movement_fig(df), config={"displayModeBar": False},
-                 style={"height": "280px"}),
+        html.Div(f"Script #{script_number} — Movement Log", style={"fontWeight": "bold",
+                                                                    "color": CRIMSON}),
         html.Div(tables.movement_table(df, script_number, editable=editable),
                  style={"marginTop": "6px"}),
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px", "width": "460px",
+              "padding": "10px", "marginBottom": "12px", "width": "320px",
               "boxSizing": "border-box",
               **({} if show else {"display": "none"})})
     return html.Div(panel, id=f"splash-script-movement-wrap-{script_number}",
@@ -667,6 +698,14 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                     value=script_numbers, style={"fontFamily": "Teko, sans-serif",
                                                  "marginBottom": "8px"}),
         dcc.Graph(id="splash-pen-graph", figure=charts.pen_results_fig(pen),
+                 config={"displayModeBar": False}),
+        # Pitch Design's movement chart (2026-09-16 round 2, Brad: "just
+        # place it right underneath the script pen chart," always visible --
+        # not the earlier per-script panel that only showed up once a
+        # script was picked in "Show Scripts"). Shares "Compare Scripts"
+        # with the graph above it rather than its own selector.
+        dcc.Graph(id="splash-movement-graph",
+                 figure=charts.scripts_movement_fig(movement_records, script_numbers),
                  config={"displayModeBar": False}),
     ])
     if editable:

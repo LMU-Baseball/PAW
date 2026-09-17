@@ -377,6 +377,7 @@ _VIDEOS_DDL = f"""
         mimetype       VARCHAR(64),
         size_bytes     INT,
         data           LONGBLOB,
+        link_url       VARCHAR(1024),
         active         TINYINT(1) NOT NULL DEFAULT 1,
         created_by     INT,
         created_at     DATETIME
@@ -432,6 +433,8 @@ def ensure_tables(engine=None) -> None:
         # Same idea for splash_videos.drill_category (2026-09-16, Gas Station
         # filter -- see GAS_STATION_DRILL_CATEGORIES).
         _ensure_column(conn, VIDEOS_TABLE, "drill_category", "drill_category VARCHAR(32)")
+        # And for splash_videos.link_url (2026-09-16 round 2 -- see add_video_link).
+        _ensure_column(conn, VIDEOS_TABLE, "link_url", "link_url VARCHAR(1024)")
     _TABLES_ENSURED = True
 
 
@@ -1102,13 +1105,17 @@ def deactivate_drill_option(name: str) -> None:
 # in the DB for now).
 
 def list_videos(category: str | None = None, *, active_only: bool = True) -> pd.DataFrame:
-    """id/title/category/drill_category/size_bytes/created_at for the video
-    library -- never selects `data` (the blob) so listing stays cheap even
-    with a lot of clips; fetch one clip's bytes with `get_video`.
-    `drill_category` is "" (never NULL) for a Recovery video or an older
-    Gas Station upload from before drill categories existed -- the Gas
-    Station filter dropdown treats that the same as any other value it
-    doesn't recognize (shown, just not matched by a specific filter pick)."""
+    """id/title/category/drill_category/link_url/size_bytes/created_at for
+    the video library -- never selects `data` (the blob) so listing stays
+    cheap even with a lot of clips; fetch one uploaded clip's bytes with
+    `get_video`. `drill_category` is "" (never NULL) for a Recovery video or
+    an older Gas Station upload from before drill categories existed -- the
+    Gas Station filter dropdown treats that the same as any other value it
+    doesn't recognize (shown, just not matched by a specific filter pick).
+    `link_url` is "" (never NULL) for an uploaded (not linked) video --
+    `layout.video_list_or_empty` uses its presence to decide whether a title
+    opens the shared modal (an upload) or the link in a new tab (a link,
+    e.g. Google Drive -- see `add_video_link`)."""
     ensure_tables()
     where = ["active = 1"] if active_only else []
     params = {}
@@ -1117,20 +1124,23 @@ def list_videos(category: str | None = None, *, active_only: bool = True) -> pd.
         params["category"] = category
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     df = query_df(
-        f"SELECT id, title, category, drill_category, size_bytes, created_at "
+        f"SELECT id, title, category, drill_category, link_url, size_bytes, created_at "
         f"FROM {VIDEOS_TABLE} {clause} ORDER BY created_at DESC", params)
     if not df.empty:
         df["drill_category"] = df["drill_category"].fillna("")
+        df["link_url"] = df["link_url"].fillna("")
     return df
 
 
 def get_video(video_id) -> dict | None:
-    """{"title","mimetype","data"} (raw bytes) for one video, or None if
-    the id doesn't exist / was deactivated. Used only by the streaming
-    route -- never loaded onto the page itself."""
+    """{"title","mimetype","data"} (raw bytes) for one video, or None if the
+    id doesn't exist, was deactivated, or is a link-based video (see
+    `add_video_link`) with no bytes of its own to stream. Used only by the
+    streaming route -- never loaded onto the page itself."""
     ensure_tables()
     df = query_df(
-        f"SELECT title, mimetype, data FROM {VIDEOS_TABLE} WHERE id = :id AND active = 1",
+        f"SELECT title, mimetype, data FROM {VIDEOS_TABLE} "
+        f"WHERE id = :id AND active = 1 AND data IS NOT NULL",
         {"id": int(video_id)})
     if df.empty:
         return None
@@ -1169,6 +1179,38 @@ def add_video(title: str, category: str, mimetype: str, data: bytes, created_by=
             "title": (title or "Untitled").strip() or "Untitled", "category": category,
             "drill_category": _clean(drill_category),
             "mimetype": mimetype, "size_bytes": len(data), "data": data,
+            "created_by": _clean(created_by), "created_at": _now(),
+        })
+        return int(result.lastrowid)
+
+
+def add_video_link(title: str, category: str, url: str, created_by=None,
+                   drill_category: str | None = None) -> int:
+    """Stores a titled LINK (no file, no bytes) -- for a video hosted
+    somewhere the app has no business re-hosting, e.g. a Google Drive share
+    link (2026-09-16: Brad's "Prescription Links" -- confirmed these open in
+    a new tab rather than an inline player, so there's no embedding to
+    build; `layout.video_list_or_empty` just renders an `<a target="_blank">`
+    instead of the modal-opening button an upload gets). Same category/
+    drill_category validation as `add_video`; raises ValueError for an
+    unrecognized category, an unrecognized drill_category, or a blank URL."""
+    if category not in VIDEO_CATEGORIES:
+        raise ValueError(f"unknown video category: {category!r}")
+    if drill_category and drill_category not in GAS_STATION_DRILL_CATEGORIES:
+        raise ValueError(f"unknown drill category: {drill_category!r}")
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("no link URL")
+    ensure_tables()
+    sql = text(f"""
+        INSERT INTO {VIDEOS_TABLE} (title, category, drill_category, link_url, active,
+                                    created_by, created_at)
+        VALUES (:title, :category, :drill_category, :link_url, 1, :created_by, :created_at)
+    """)
+    with get_engine().begin() as conn:
+        result = conn.execute(sql, {
+            "title": (title or "Untitled").strip() or "Untitled", "category": category,
+            "drill_category": _clean(drill_category), "link_url": url,
             "created_by": _clean(created_by), "created_at": _now(),
         })
         return int(result.lastrowid)
