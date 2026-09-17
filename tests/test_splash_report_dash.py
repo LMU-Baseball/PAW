@@ -177,6 +177,19 @@ def test_movement_log_is_one_shared_table_next_to_pen_results_not_in_script_grid
     assert pen_table_pos < movement_table_pos < first_script_card_pos
 
 
+def test_movement_log_table_hidden_in_view_mode():
+    """2026-09-17 round 2 (Brad, screenshot): "just have this table show up
+    when editing, the visual does a good enough telling the story" -- the
+    Movement Log is edit-only now, same as `pen_results_table` (which was
+    already edit-only); a player never sees the raw table, only the shared
+    HB/IVB chart above it."""
+    from app.dashboards.splash_report import layout
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    out = str(layout.render_from_data(data, editable=False, is_coach=False))
+    assert "splash-movement-table" not in out
+    assert "Movement Log" not in out
+
+
 def test_movement_log_table_flattens_and_sorts_by_script_then_date():
     """`tables.movement_log_table` replaces six per-script tables with one
     flat table -- verify it actually regroups {script_number: [rows]} into
@@ -286,6 +299,45 @@ def test_gas_station_exercise_search_box_and_callback_registered(server):
     callbacks.register_callbacks(app)
     spec = app.callback_map["splash-gas-table.dropdown"]
     assert [i["id"] for i in spec["inputs"]] == ["splash-gas-exercise-search"]
+
+
+def test_backspace_fix_clientside_callback_registered(server):
+    """2026-09-17 round 3 (Brad: "backspace nor delete work in these
+    tables... can you make it so the data we type can be deleted") --
+    confirmed live that dash_table's own Backspace/Delete handling silently
+    does nothing once a cell is actively being typed into (a documented
+    dash_table limitation, not a prop we control). A page-wide clientside
+    keydown patch (`splash-backspace-fix`, wired to fire once on page load)
+    replaces it -- this just checks the callback is actually registered."""
+    from dash import Dash
+
+    from app.dashboards.splash_report import callbacks, layout
+
+    app = Dash(__name__, server=server, url_base_pathname="/dash/splashtest5/",
+              suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    spec = app.callback_map["splash-backspace-fix.children"]
+    assert [i["id"] for i in spec["inputs"]] == ["splash-editing"]
+
+
+def test_serve_layout_has_backspace_fix_target(server):
+    """The clientside callback above needs its dummy Output id to actually
+    exist in the page (Dash rejects an Output whose target is never
+    rendered) -- confirm it's there for a real coach render."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from app.dashboards.splash_report import layout
+    with server.app_context():
+        coach = User(email="splashbf@lmu.edu", name="Coach BF", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        with server.test_request_context("/dash/splash_report/"):
+            login_user(coach)
+            out = layout.serve_layout()
+    assert "splash-backspace-fix" in str(out)
 
 
 def test_load_data_no_pitcher_selected_is_empty():
