@@ -374,8 +374,7 @@ def manage_video_library_panel(all_videos: list[dict], *, open_: bool) -> html.D
                 # Only meaningful for a "Gas Station" upload (see
                 # SR.add_video's docstring) -- always rendered regardless of
                 # the category dropdown's live value so this id is a stable
-                # State target, same reasoning as script_movement_panel's
-                # always-mounted table.
+                # State target.
                 dcc.Dropdown(id="splash-video-drill-category",
                            options=[{"label": c, "value": c}
                                     for c in SR.GAS_STATION_DRILL_CATEGORIES],
@@ -621,47 +620,6 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     return html.Div(card, id=f"splash-script-wrap-{script_number}", style={"display": "none"})
 
 
-def script_movement_panel(script_number, script_type: str, movement_records: list, *,
-                          editable: bool) -> html.Div:
-    """Pitch Design's movement ENTRY TABLE (2026-09-16 meeting) -- ALWAYS
-    rendered as a sibling of that script's `script_card` in the same
-    flex-wrap row (same "always in the DOM, visibility toggled client-side"
-    reasoning as script_card itself), so it fills the white space beside the
-    (narrow, 220px) card. The movement PLOT itself moved out of here and
-    into a single shared chart under Script Pen Results
-    (`charts.scripts_movement_fig`, wired in `scripts_section`) -- Brad,
-    2026-09-16 round 2: he wanted one always-visible chart averaging every
-    script together, not a per-script plot buried behind "Show Scripts."
-    This panel is now just the raw per-session numbers a coach types in.
-
-    In edit mode the INNER panel (and its movement_table) is always mounted
-    -- just CSS-hidden (`display: none`, not omitted) for a non-Pitch-Design
-    script -- never conditionally OMITTED, even though it's only meaningful
-    for Pitch Design: Dash's client-side State binding hard-fails the whole
-    Save callback the instant ANY State target isn't in the current layout
-    (confirmed live, 2026-09-16 -- `splash-script-movement-table-2` missing
-    for a "Velo" script threw `ReferenceError: A nonexistent object was used
-    in a State...` in the browser console and silently broke every field's
-    save, not just this one). View mode has no Save button to protect, so it
-    can skip the whole panel for a non-Pitch-Design script same as before."""
-    show = script_type == "Pitch Design"
-    if not editable and not show:
-        return html.Div(id=f"splash-script-movement-wrap-{script_number}",
-                        style={"display": "none"})
-    df = pd.DataFrame(movement_records)
-    panel = html.Div([
-        html.Div(f"Script #{script_number} — Movement Log", style={"fontWeight": "bold",
-                                                                    "color": CRIMSON}),
-        html.Div(tables.movement_table(df, script_number, editable=editable),
-                 style={"marginTop": "6px"}),
-    ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px", "width": "320px",
-              "boxSizing": "border-box",
-              **({} if show else {"display": "none"})})
-    return html.Div(panel, id=f"splash-script-movement-wrap-{script_number}",
-                    style={"display": "none"})
-
-
 def _removed_pen_row(row: dict) -> html.Div:
     value = row.get("value")
     value_text = "—" if value is None else f"{value:g}%"
@@ -712,41 +670,50 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                                                  "marginBottom": "8px"}),
         dcc.Graph(id="splash-pen-graph", figure=charts.pen_results_fig(pen),
                  config={"displayModeBar": False}),
-        # Pitch Design's movement chart (2026-09-16 round 2, Brad: "just
-        # place it right underneath the script pen chart," always visible --
-        # not the earlier per-script panel that only showed up once a
-        # script was picked in "Show Scripts"). Round 3 briefly moved this
-        # to the right-column sidebar, and round 4 briefly moved the
-        # per-script movement LOG TABLE there instead -- round 5 (Brad,
-        # looking at it live): movement shouldn't be its own box at all,
-        # full stop. The chart stays here under Script Pen Results; the log
-        # table went back to living directly under each script's card (see
-        # the `cards` loop below), both still inside this one "Bullpen
-        # Scripts" card. Shares "Compare Scripts" with the graph above it
-        # rather than its own selector.
+        # Shared movement chart (2026-09-16 round 2, Brad: "just place it
+        # right underneath the script pen chart," always visible). Shares
+        # "Compare Scripts" with the graph above it rather than its own
+        # selector.
         dcc.Graph(id="splash-movement-graph",
                  figure=charts.scripts_movement_fig(movement_records, script_numbers),
                  config={"displayModeBar": False}),
     ])
+    # 2026-09-17, Brad (screenshot): the per-script Movement Log entry table
+    # used to sit beside each script's card in the grid below -- "that area
+    # is designated only for scripts... having a random movement log table
+    # looks awkward and messes up the perfect 3x2 columns." Replaced with
+    # ONE shared table (`tables.movement_log_table`, same shape as
+    # `pen_results_table` but with a Script # column) placed right next to
+    # the pen results table here instead -- "move the movement log next to
+    # that table in the white space on the right."
+    tables_row = []
     if editable:
-        graph_block.children.append(tables.pen_results_table(pen, editable=True))
+        tables_row.append(html.Div(tables.pen_results_table(pen, editable=True),
+                                   style={"flex": "0 0 auto"}))
+        tables_row.append(html.Div([
+            html.Div("Movement Log", style={"fontWeight": "bold", "color": CRIMSON,
+                                            "marginBottom": "4px"}),
+            tables.movement_log_table(movement_records, editable=True),
+        ], style={"flex": "0 0 auto"}))
+    else:
+        has_movement = any(movement_records.get(str(n)) for n in script_numbers)
+        if has_movement:
+            tables_row.append(html.Div([
+                html.Div("Movement Log", style={"fontWeight": "bold", "color": CRIMSON,
+                                                "marginBottom": "4px"}),
+                tables.movement_log_table(movement_records, editable=False),
+            ], style={"flex": "0 0 auto"}))
+    if tables_row:
+        graph_block.children.append(html.Div(tables_row, style={
+            "display": "flex", "flexWrap": "wrap", "gap": "20px",
+            "alignItems": "flex-start", "marginTop": "10px"}))
     if is_coach:
         graph_block.children.append(
             html.Div(_removed_pen_panel(deleted_pen_records), id="splash-pen-removed-wrap"))
 
-    cards = []
-    for r in scripts_records:
-        n = int(r["script_number"])
-        # Stacked in one flex-column wrapper (2026-09-16 round 5, Brad: the
-        # movement log "should be in the same box as the script and right
-        # underneath it") -- one wrapper is one item in the outer flex-wrap
-        # row below, so the pair still moves/wraps together as a unit.
-        cards.append(html.Div([
-            script_card(n, r, script_rows[str(n)], editable=editable),
-            script_movement_panel(
-                n, r.get("script_type") or "", movement_records.get(str(n), []),
-                editable=editable),
-        ], style={"display": "flex", "flexDirection": "column"}))
+    cards = [script_card(int(r["script_number"]), r, script_rows[str(r["script_number"])],
+                         editable=editable)
+            for r in scripts_records]
     # 2026-09-14 (Brad, matching the skeleton-visuals grid fix): a fixed
     # 2-column grid stretched every card to half the (now much wider) center
     # column, leaving a lot of blank space to the right of each card's

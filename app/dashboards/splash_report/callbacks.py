@@ -41,7 +41,6 @@ def _script_states() -> list:
         states.append(State(f"splash-script-measurable-{n}", "value"))
         states.append(State(f"splash-script-type-{n}", "value"))
         states.append(State(f"splash-script-rows-{n}", "data"))
-        states.append(State(f"splash-script-movement-table-{n}", "data"))
     return states
 
 
@@ -122,12 +121,13 @@ def register_callbacks(dash_app) -> None:
         State("splash-engine-rom-table", "data"),
         State("splash-gas-table", "data"),
         State("splash-pen-table", "data"),
+        State("splash-movement-table", "data"),
         *_script_states(),
         prevent_initial_call=True,
     )
     def _on_save(n_clicks, current_data, player_id, season, cycle, vision, goals, pre, post,
                 feet_set, feet_moving, work_day, engine_strength_rows, engine_rom_rows,
-                gas_rows, pen_rows, *script_args):
+                gas_rows, pen_rows, movement_table_rows, *script_args):
         if not n_clicks or not _is_coach():
             return no_update, no_update, no_update
         if player_id is None:
@@ -144,16 +144,27 @@ def register_callbacks(dash_app) -> None:
             "work_day": "\n".join(work_day or []),
             "recovery_video_url": recovery_url,
         }
-        script_fields, script_pitch_rows, movement_rows = {}, {}, {}
+        script_fields, script_pitch_rows = {}, {}
         for i, n in enumerate(range(1, SR.N_SCRIPTS + 1)):
-            goal_v, measurable_v, type_v, rows_v, movement_v = script_args[i * 5:i * 5 + 5]
+            goal_v, measurable_v, type_v, rows_v = script_args[i * 4:i * 4 + 4]
             script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v}
             script_pitch_rows[n] = rows_v or []
-            # movement_v is None for a script whose movement table isn't
-            # mounted (velo/execution scripts never render one -- see
-            # layout.script_movement_panel) -- nothing to save for those.
-            if movement_v is not None:
-                movement_rows[n] = movement_v
+        # The Movement Log is now ONE shared table (`splash-movement-table`,
+        # a Script # column instead of six separate per-script grids -- see
+        # layout.scripts_section/tables.movement_log_table) -- regroup its
+        # flat rows by script_number before handing them to SR.save_all,
+        # which still saves per-script (SR.save_movement is unchanged).
+        # Every script number gets a key (even an empty list) so a script
+        # whose last remaining row was just deleted here still gets its
+        # active DB rows soft-deleted, not left stale.
+        movement_rows = {n: [] for n in range(1, SR.N_SCRIPTS + 1)}
+        for row in (movement_table_rows or []):
+            try:
+                sn = int(row.get("script_number"))
+            except (TypeError, ValueError):
+                continue
+            if sn in movement_rows:
+                movement_rows[sn].append(row)
         engine_rows = (engine_strength_rows or []) + (engine_rom_rows or [])
 
         SR.save_all(
@@ -384,11 +395,7 @@ def register_callbacks(dash_app) -> None:
     # show when clicked"). Every card is ALWAYS in the DOM (see
     # `layout.script_card`'s docstring for why) -- this just toggles each
     # wrapper's display, entirely client-side, so it never touches the
-    # Save form's State values and never needs a server round trip. The
-    # movement-wrap siblings (2026-09-16, `layout.script_movement_panel`)
-    # follow the exact same selection, one style output per script alongside
-    # its card's -- toggling display on an empty (non-Pitch-Design) wrapper
-    # is harmless, there's just nothing inside it to show.
+    # Save form's State values and never needs a server round trip.
     dash_app.clientside_callback(
         """
         function(selected) {
@@ -398,15 +405,10 @@ def register_callbacks(dash_app) -> None:
                 out.push(sel.indexOf(n) !== -1
                     ? {display: 'block', marginBottom: '12px'} : {display: 'none'});
             }
-            for (var n = 1; n <= %(n)d; n++) {
-                out.push(sel.indexOf(n) !== -1
-                    ? {display: 'block', marginBottom: '12px'} : {display: 'none'});
-            }
             return out;
         }
         """ % {"n": SR.N_SCRIPTS},
         *[Output(f"splash-script-wrap-{n}", "style") for n in range(1, SR.N_SCRIPTS + 1)],
-        *[Output(f"splash-script-movement-wrap-{n}", "style") for n in range(1, SR.N_SCRIPTS + 1)],
         Input("splash-script-select", "value"),
     )
 

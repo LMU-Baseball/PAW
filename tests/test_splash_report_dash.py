@@ -142,31 +142,69 @@ def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
             assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted
 
 
-def test_movement_chart_and_log_table_both_inside_bullpen_scripts_card():
-    """2026-09-16 round 5: Brad, after round 4's "Movement Log" sidebar
-    card -- "movement should not be its own box, it should be in the same
-    box as the script and right underneath it." The shared HB/IVB chart
-    stays under Script Pen Results (as round 4 had it); the per-script
-    Movement Log entry tables go back to living directly beneath each
-    script's card, both still nested inside the one "Bullpen Scripts" card
-    (`layout.scripts_section`) rather than a separate card of their own."""
+def test_movement_chart_inside_bullpen_scripts_card_above_script_grid():
+    """2026-09-16 round 5: the shared HB/IVB chart stays under Script Pen
+    Results, inside the one "Bullpen Scripts" card (`layout.scripts_section`)
+    rather than a separate card of its own."""
     from app.dashboards.splash_report import layout
     data = layout.load_data(TEST_PID, "2099/2100", "Fall")
     out = str(layout.render_from_data(data, editable=True, is_coach=True))
-    for n in range(1, 7):
-        assert f"Script #{n} — Movement Log" in out  # each panel's own heading
-        assert f"splash-script-movement-wrap-{n}" in out
     pen_graph_pos = out.index("splash-pen-graph")
     movement_graph_pos = out.index("splash-movement-graph")
     first_script_card_pos = out.index("splash-script-wrap-1")
-    first_movement_wrap_pos = out.index("splash-script-movement-wrap-1")
     building_engine_pos = out.index("Building the Engine")
-    # chart under the pen graph, and script #1's movement log immediately
-    # follows script #1's card, both still ahead of the right-column
-    # content -- i.e. inside the same Bullpen Scripts card, not a separate
-    # one of its own
-    assert pen_graph_pos < movement_graph_pos < first_script_card_pos
-    assert first_script_card_pos < first_movement_wrap_pos < building_engine_pos
+    assert pen_graph_pos < movement_graph_pos < first_script_card_pos < building_engine_pos
+
+
+def test_movement_log_is_one_shared_table_next_to_pen_results_not_in_script_grid():
+    """2026-09-17 (Brad, screenshot): the old per-script Movement Log entry
+    table sitting beside each script's card "ruins the look... that area is
+    designated only for scripts, so having a random movement log table looks
+    awkward and messes up the perfect 3x2 columns" -- moved out of the script
+    grid entirely into ONE shared table (`tables.movement_log_table`, a
+    Script # column instead of six separate grids) placed right next to
+    `pen_results_table`, "in the white space on the right." """
+    from app.dashboards.splash_report import layout
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    out = str(layout.render_from_data(data, editable=True, is_coach=True))
+    assert "splash-movement-table" in out  # the one shared table, not per-script ids
+    assert "splash-script-movement-table-1" not in out
+    assert "splash-script-movement-wrap-1" not in out
+    pen_table_pos = out.index("splash-pen-table")
+    movement_table_pos = out.index("splash-movement-table")
+    first_script_card_pos = out.index("splash-script-wrap-1")
+    # both tables sit together, ahead of (not inside) the script grid below
+    assert pen_table_pos < movement_table_pos < first_script_card_pos
+
+
+def test_movement_log_table_flattens_and_sorts_by_script_then_date():
+    """`tables.movement_log_table` replaces six per-script tables with one
+    flat table -- verify it actually regroups {script_number: [rows]} into
+    a single row list, stamping each row with its script_number, sorted by
+    script then date so a coach reads it top-to-bottom by script."""
+    from app.dashboards.splash_report import tables
+
+    movement_records = {
+        "2": [{"id": 5, "pitch_type": "Fastball", "pen_date": "2026-09-20",
+              "hb": 8, "ivb": 15}],
+        "1": [{"id": 7, "pitch_type": "Slider", "pen_date": "2026-09-08",
+              "hb": 3, "ivb": -2},
+             {"id": 9, "pitch_type": "Fastball", "pen_date": "2026-09-01",
+              "hb": 8, "ivb": 15}],
+    }
+    edit_table = tables.movement_log_table(movement_records, editable=True)
+    col_ids = [c["id"] for c in edit_table.columns]
+    assert col_ids == ["script_number", "pitch_type", "pen_date", "hb", "ivb"]
+    real_rows = [r for r in edit_table.data if r.get("id") is not None]
+    assert [(r["script_number"], r["pen_date"]) for r in real_rows] == [
+        (1, "2026-09-01"), (1, "2026-09-08"), (2, "2026-09-20")]
+    # Padded to 6 rows in edit mode (same as pen_results_table) so a coach
+    # always has blank rows to type a brand new entry into.
+    assert len(edit_table.data) == 6
+
+    view_table = tables.movement_log_table(movement_records, editable=False)
+    assert len(view_table.data) == 3  # no padding, and not row_deletable
+    assert view_table.row_deletable is False
 
 
 def test_gas_station_table_exercise_dropdown_in_edit_markdown_link_in_view():
