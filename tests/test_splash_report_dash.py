@@ -142,23 +142,31 @@ def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
             assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted
 
 
-def test_movement_chart_under_pen_graph_and_log_table_in_sidebar():
-    """2026-09-16 round 4: Brad corrected round 3's placement -- the shared
-    HB/IVB chart belongs under Script Pen Results in the center column (as
-    round 2 had it, `layout.scripts_section`'s graph_block), and it's the
-    per-script Movement Log entry tables (`layout.movement_log_card`) that
-    move out to the right-column sidebar instead, no longer sitting beside
-    each script_card in the center column."""
+def test_movement_chart_and_log_table_both_inside_bullpen_scripts_card():
+    """2026-09-16 round 5: Brad, after round 4's "Movement Log" sidebar
+    card -- "movement should not be its own box, it should be in the same
+    box as the script and right underneath it." The shared HB/IVB chart
+    stays under Script Pen Results (as round 4 had it); the per-script
+    Movement Log entry tables go back to living directly beneath each
+    script's card, both still nested inside the one "Bullpen Scripts" card
+    (`layout.scripts_section`) rather than a separate card of their own."""
     from app.dashboards.splash_report import layout
     data = layout.load_data(TEST_PID, "2099/2100", "Fall")
     out = str(layout.render_from_data(data, editable=True, is_coach=True))
-    assert "Movement Log" in out
     for n in range(1, 7):
+        assert f"Script #{n} — Movement Log" in out  # each panel's own heading
         assert f"splash-script-movement-wrap-{n}" in out
     pen_graph_pos = out.index("splash-pen-graph")
     movement_graph_pos = out.index("splash-movement-graph")
     first_script_card_pos = out.index("splash-script-wrap-1")
+    first_movement_wrap_pos = out.index("splash-script-movement-wrap-1")
+    building_engine_pos = out.index("Building the Engine")
+    # chart under the pen graph, and script #1's movement log immediately
+    # follows script #1's card, both still ahead of the right-column
+    # content -- i.e. inside the same Bullpen Scripts card, not a separate
+    # one of its own
     assert pen_graph_pos < movement_graph_pos < first_script_card_pos
+    assert first_script_card_pos < first_movement_wrap_pos < building_engine_pos
 
 
 def test_gas_station_table_exercise_dropdown_in_edit_markdown_link_in_view():
