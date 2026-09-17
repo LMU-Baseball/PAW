@@ -111,10 +111,20 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
     dropdown = {"need": {"options": [{"label": v, "value": v} for v in
                                      SR.STRENGTH_NEED_OPTIONS]}}
     if editable:
+        # 2026-09-16 round 6 (Brad): "add a way to search... so the coach
+        # doesn't have to scroll the entire thing" -- the cell already
+        # filters live as you type (Dash's built-in dropdown-cell behavior,
+        # matching anywhere in the label -- category prefix or the drill
+        # name), but that's not discoverable without a visible search box,
+        # and `gas_videos` arrives sorted newest-first (`SR.list_videos`),
+        # which is meaningless order for scanning by eye. Sorting here by
+        # category then title makes scrolling without typing usable too.
+        sorted_videos = sorted(
+            gas_videos, key=lambda v: (v.get("drill_category") or v["category"], v["title"]))
         dropdown["exercise"] = {"options": [
             {"label": f"{v.get('drill_category') or v['category']} — {v['title']}",
              "value": v["title"]}
-            for v in gas_videos
+            for v in sorted_videos
         ]}
     data = df[["need", "exercise", "sets_reps", "notes"]].to_dict("records") \
         if not df.empty else []

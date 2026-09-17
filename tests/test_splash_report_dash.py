@@ -198,6 +198,13 @@ def test_gas_station_table_exercise_dropdown_in_edit_markdown_link_in_view():
     assert exercise_col["presentation"] == "dropdown"
     values = {o["value"] for o in edit_table.dropdown["exercise"]["options"]}
     assert values == {"Forearm Extensor Release", "Uploaded Clip"}
+    # 2026-09-16 round 6 (Brad): "add a way to search... so the coach
+    # doesn't have to scroll the entire thing" -- the cell already filters
+    # live as you type, but `gas_videos` arrives newest-first from
+    # SR.list_videos, so scrolling by eye was effectively unordered.
+    # Sorted by category then title makes scanning without typing usable.
+    labels = [o["label"] for o in edit_table.dropdown["exercise"]["options"]]
+    assert labels == ["Elbow Strength — Forearm Extensor Release", "Rehab — Uploaded Clip"]
 
     view_table = tables.gas_station_table(df, gas_videos, editable=False)
     exercise_col_view = next(c for c in view_table.columns if c["id"] == "exercise")

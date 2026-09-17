@@ -544,9 +544,16 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
     gas_child = tables.gas_station_table(gas, gas_videos, editable=editable) \
         if (editable or not gas.empty) \
         else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
+    caption = "Tie a specific exercise to whatever the numbers above flag."
+    if editable:
+        # 2026-09-16 round 6 (Brad): the Exercise dropdown already filters
+        # live as you type -- not discoverable on its own (no visible
+        # search box, Dash's built-in behavior for a DataTable dropdown
+        # cell), so this spells it out rather than a coach scrolling a
+        # 100+-video list by hand.
+        caption += " Click Exercise and start typing to search the video list."
     children = [
-        html.Div("Tie a specific exercise to whatever the numbers above flag.",
-                 style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
+        html.Div(caption, style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
         gas_child,
     ]
     return _card("The Gas Station", html.Div(children))
