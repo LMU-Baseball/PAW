@@ -219,6 +219,36 @@ def test_gas_station_table_exercise_dropdown_in_edit_markdown_link_in_view():
     # table after this column switched to markdown presentation).
     assert rows[3]["exercise"] == ""
 
+    # 2026-09-16 round 7 (Brad): "without anything in the column it is
+    # skinny and hard to read" -- a fixed width so an empty/short cell
+    # doesn't collapse the column.
+    exercise_width = next(c for c in edit_table.style_cell_conditional
+                          if c["if"]["column_id"] == "exercise")
+    assert exercise_width["width"] == "260px"
+
+
+def test_gas_station_exercise_search_box_and_callback_registered(server):
+    """2026-09-16 round 7 (Brad): "add an exercise search bar at the top
+    of the column so coaches can search" -- a real, visible dcc.Input
+    above the table (edit mode only), wired to a clientside callback that
+    narrows `splash-gas-table`'s dropdown options as the coach types."""
+    from dash import Dash
+
+    from app.dashboards.splash_report import callbacks, layout
+
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    editing = str(layout.render_from_data(data, editable=True))
+    assert "splash-gas-exercise-search" in editing
+    viewing = str(layout.render_from_data(data, editable=False))
+    assert "splash-gas-exercise-search" not in viewing
+
+    app = Dash(__name__, server=server, url_base_pathname="/dash/splashtest3/",
+              suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    spec = app.callback_map["splash-gas-table.dropdown"]
+    assert [i["id"] for i in spec["inputs"]] == ["splash-gas-exercise-search"]
+
 
 def test_load_data_no_pitcher_selected_is_empty():
     from app.dashboards.splash_report import layout

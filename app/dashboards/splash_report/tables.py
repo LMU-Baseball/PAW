@@ -14,12 +14,14 @@ _TABLE_STYLE = {"overflowX": "auto", "width": "fit-content", "maxWidth": "100%"}
 
 
 def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
-          dropdown=None, extra_style=None, cell_style=None, header_style=None) -> dash_table.DataTable:
+          dropdown=None, extra_style=None, cell_style=None, header_style=None,
+          cell_conditional=None) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=id_, columns=columns, data=data, editable=editable,
         row_deletable=row_deletable, dropdown=dropdown or {},
         style_table=_TABLE_STYLE, style_as_list_view=True,
         style_header=header_style or _HEADER_STYLE, style_cell=cell_style or _CELL_STYLE,
+        style_cell_conditional=cell_conditional or [],
         style_data={"backgroundColor": "rgba(255,255,255,0.85)"},
         style_data_conditional=extra_style or [],
         markdown_options={"link_target": "_blank"},
@@ -144,8 +146,20 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
     if editable and len(data) < 8:
         data = data + [{"need": "", "exercise": "", "sets_reps": "", "notes": ""}
                       for _ in range(8 - len(data))]
+    # 2026-09-16 round 7 (Brad): "without anything in the column it is
+    # skinny and hard to read" -- an empty/short exercise cell had nothing
+    # to size the column against (every other column here is either short,
+    # fixed-option, or numeric), so a long drill title or link truncated
+    # hard. A generous fixed width fixes both the empty-column case and the
+    # truncation; left-aligned since centering a long title/link reads
+    # worse than centering "3x10".
+    cell_conditional = [
+        {"if": {"column_id": "exercise"}, "minWidth": "260px", "width": "260px",
+         "textAlign": "left"},
+    ]
     return _table("splash-gas-table", columns, data, editable=editable,
-                 row_deletable=editable, dropdown=dropdown)
+                 row_deletable=editable, dropdown=dropdown,
+                 cell_conditional=cell_conditional)
 
 
 def script_pitch_table(df: pd.DataFrame, script_number: int, *,
