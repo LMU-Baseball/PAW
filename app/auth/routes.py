@@ -34,10 +34,28 @@ class LoginForm(FlaskForm):
     submit = SubmitField("Sign in")
 
 
+def _matches_coach_code(entered: str | None) -> bool:
+    """True if `entered` is the configured PAW_COACH_CODE (case-insensitive).
+    Read live, not at import time, same reasoning as `_team_code` below."""
+    coach_code = (os.getenv("PAW_COACH_CODE") or "").strip()
+    return bool(coach_code) and (entered or "").strip().lower() == coach_code.lower()
+
+
 def _team_code(form, field):
     # PAW_TEAM_CODE unset/blank = gate disabled (today's domain-only behavior).
     # Read live rather than at import time so a deployed env-var change takes
     # effect without a restart-triggering code change.
+    #
+    # PAW_COACH_CODE (2026-09-18, Brad: "add a team code so I can share that
+    # one with coaches and their account will register as a coach / the team
+    # code is for player accounts") -- a second, separate code shared only
+    # with coaches. It's always accepted here regardless of PAW_TEAM_CODE's
+    # own state (even if the team-code gate is currently open/unset, a coach
+    # entering the coach code must never be rejected) -- which of the two
+    # codes was actually entered is what decides coach vs. player role, in
+    # register() below, not this validator.
+    if _matches_coach_code(field.data):
+        return
     required = (os.getenv("PAW_TEAM_CODE") or "").strip()
     if not required:
         return
@@ -111,7 +129,11 @@ def register():
         if User.query.filter_by(email=email).first():
             flash("An account with that email already exists. Try signing in instead.", "error")
         else:
-            role = "coach" if is_coach_email(email) else "player"
+            # Coach role from EITHER the email allowlist (PAW_COACH_EMAILS,
+            # pre-listed individuals) OR the coach code (self-service, no
+            # allowlist maintenance needed) -- either one is sufficient.
+            role = "coach" if (is_coach_email(email) or _matches_coach_code(form.team_code.data)) \
+                else "player"
             user = User(email=email, name=form.name.data.strip(), role=role)
             user.set_password(form.password.data)
             db.session.add(user)

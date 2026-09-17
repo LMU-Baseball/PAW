@@ -358,3 +358,66 @@ def test_register_accepts_correct_team_code_case_insensitive(app, client, monkey
     assert b"Account created." in resp.data
     with app.app_context():
         assert User.query.filter_by(email="rightcode@lmu.edu").first() is not None
+
+
+# --------------------------- coach code (2026-09-18) -----------------------
+# Brad: "add a team code so I can share that one with coaches and their
+# account will register as a coach / the team code is for player accounts"
+# -- PAW_COACH_CODE is a second, separate code; whichever of the two the
+# registrant enters into the same "team_code" form field decides their role.
+
+def test_register_with_coach_code_creates_coach_account(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_TEAM_CODE", "GoLions26")
+    monkeypatch.setenv("PAW_COACH_CODE", "CoachesOnly26")
+    resp = _register(client, "New Coach", "newcoach@lmu.edu", "a-real-password",
+                     team_code="  coachesonly26  ")  # case/whitespace insensitive
+    assert b"Account created." in resp.data
+    with app.app_context():
+        user = User.query.filter_by(email="newcoach@lmu.edu").first()
+        assert user is not None and user.role == "coach"
+
+
+def test_register_with_team_code_still_creates_player_account(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_TEAM_CODE", "GoLions26")
+    monkeypatch.setenv("PAW_COACH_CODE", "CoachesOnly26")
+    resp = _register(client, "New Kid", "newplayer@lmu.edu", "a-real-password",
+                     team_code="GoLions26")
+    assert b"Account created." in resp.data
+    with app.app_context():
+        user = User.query.filter_by(email="newplayer@lmu.edu").first()
+        assert user is not None and user.role == "player"
+
+
+def test_register_rejects_wrong_code_when_both_configured(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_TEAM_CODE", "GoLions26")
+    monkeypatch.setenv("PAW_COACH_CODE", "CoachesOnly26")
+    resp = _register(client, "New Kid", "wrongboth@lmu.edu", "a-real-password",
+                     team_code="neither-code")
+    assert b"Incorrect team code." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="wrongboth@lmu.edu").first() is None
+
+
+def test_coach_code_still_accepted_when_team_code_unset(app, client, monkeypatch):
+    # The team-code gate being open (PAW_TEAM_CODE unset) must never block a
+    # coach entering the separate coach code.
+    monkeypatch.delenv("PAW_TEAM_CODE", raising=False)
+    monkeypatch.setenv("PAW_COACH_CODE", "CoachesOnly26")
+    resp = _register(client, "New Coach", "opengatecoach@lmu.edu", "a-real-password",
+                     team_code="CoachesOnly26")
+    assert b"Account created." in resp.data
+    with app.app_context():
+        user = User.query.filter_by(email="opengatecoach@lmu.edu").first()
+        assert user is not None and user.role == "coach"
+
+
+def test_coach_email_allowlist_still_works_alongside_coach_code(app, client, monkeypatch):
+    # PAW_COACH_EMAILS keeps working unchanged -- either path is sufficient.
+    monkeypatch.setenv("PAW_COACH_EMAILS", "allowlisted@lmu.edu")
+    monkeypatch.setenv("PAW_COACH_CODE", "CoachesOnly26")
+    monkeypatch.delenv("PAW_TEAM_CODE", raising=False)
+    resp = _register(client, "Allowlisted Coach", "allowlisted@lmu.edu", "a-real-password")
+    assert b"Account created." in resp.data
+    with app.app_context():
+        user = User.query.filter_by(email="allowlisted@lmu.edu").first()
+        assert user is not None and user.role == "coach"
