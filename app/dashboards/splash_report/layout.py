@@ -545,17 +545,26 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
         if (editable or not gas.empty) \
         else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
     caption = "Tie a specific exercise to whatever the numbers above flag."
-    if editable:
-        # 2026-09-16 round 6 (Brad): the Exercise dropdown already filters
-        # live as you type -- not discoverable on its own (no visible
-        # search box, Dash's built-in behavior for a DataTable dropdown
-        # cell), so this spells it out rather than a coach scrolling a
-        # 100+-video list by hand.
-        caption += " Click Exercise and start typing to search the video list."
     children = [
         html.Div(caption, style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
-        gas_child,
     ]
+    if editable:
+        # 2026-09-16 round 7 (Brad): "add an exercise search bar at the top
+        # of the column" -- round 6's fix (typing directly into the cell
+        # already filters it) worked but had no visible affordance, so
+        # Brad still couldn't tell it was there. This is a real, visible
+        # search box above the table; `_on_gas_exercise_search`
+        # (callbacks.py, clientside) narrows the Exercise column's
+        # dropdown options as you type, filtering `gas_videos` client-side
+        # against the same splash-data already loaded -- no DB round trip.
+        children.append(dcc.Input(
+            id="splash-gas-exercise-search", type="text",
+            placeholder="Search exercises (e.g. \"shoulder\", \"elbow\")...",
+            style={"width": "100%", "maxWidth": "320px", "padding": "6px 10px",
+                  "borderRadius": "6px", "border": "1px solid #ccc",
+                  "marginBottom": "8px", "fontFamily": "Teko, sans-serif",
+                  "fontSize": "14px"}))
+    children.append(gas_child)
     return _card("The Gas Station", html.Div(children))
 
 

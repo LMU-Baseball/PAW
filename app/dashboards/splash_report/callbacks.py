@@ -19,6 +19,7 @@ only exist in the DOM once editing=True has actually rendered them).
 from __future__ import annotations
 
 import base64
+import json
 
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, no_update
@@ -288,6 +289,43 @@ def register_callbacks(dash_app) -> None:
         new_data = layout.load_data(player_id, season, cycle)
         new_data["manage_videos_open"] = True
         return f"Added \"{title or 'Untitled'}\".", "", "", new_data
+
+    # ---- Gas Station exercise search (2026-09-16 round 7, Brad: "add an
+    # exercise search bar at the top of the column so coaches can search")
+    # -- narrows the Exercise column's dropdown options as a coach types,
+    # entirely client-side against `gas_videos` already loaded in
+    # splash-data (same list `layout.gas_station_card`/`tables.
+    # gas_station_table` render from), so no DB round trip. Needs
+    # "need"'s options re-sent alongside "exercise"'s on every keystroke --
+    # `dropdown` is one prop covering the whole table, not settable
+    # per-column, so leaving "need" out would wipe it.
+    dash_app.clientside_callback(
+        """
+        function(query, data) {
+            var needOptions = %(need_options)s;
+            var videos = ((data || {}).videos || {})["Gas Station"] || [];
+            var q = (query || "").trim().toLowerCase();
+            var filtered = videos.filter(function(v) {
+                var label = (v.drill_category || v.category || "") + " " + v.title;
+                return label.toLowerCase().indexOf(q) !== -1;
+            });
+            filtered.sort(function(a, b) {
+                var ka = (a.drill_category || a.category || "") + " " + a.title;
+                var kb = (b.drill_category || b.category || "") + " " + b.title;
+                return ka < kb ? -1 : ka > kb ? 1 : 0;
+            });
+            var exerciseOptions = filtered.map(function(v) {
+                return {label: (v.drill_category || v.category) + " — " + v.title,
+                        value: v.title};
+            });
+            return {need: {options: needOptions}, exercise: {options: exerciseOptions}};
+        }
+        """ % {"need_options": json.dumps(
+            [{"label": v, "value": v} for v in SR.STRENGTH_NEED_OPTIONS])},
+        Output("splash-gas-table", "dropdown"),
+        Input("splash-gas-exercise-search", "value"),
+        State("splash-data", "data"),
+    )
 
     @dash_app.callback(
         Output("splash-data", "data", allow_duplicate=True),
