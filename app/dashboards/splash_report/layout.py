@@ -29,7 +29,6 @@ from app.dashboards.splash_report import body_visual, charts, tables
 # and across cards, it's just no longer a plain white panel. Padding/margin
 # trimmed from the original 12px/16px to cut down the whitespace between
 # cards ("eliminating as much white space as possible").
-ALL_DRILL_CATEGORIES = "__all__"  # the Gas Station filter's "show everything" option
 
 _CARD = {"background": "linear-gradient(160deg, rgba(255,255,255,0.92) 0%, "
                        "rgba(255,255,255,0.85) 55%, rgba(154,0,33,0.10) 100%)",
@@ -517,18 +516,25 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
 
-def movement_card(movement_records: dict) -> html.Div:
-    """Pitch Design's shared HB/IVB movement chart, in its own right-column
-    card (2026-09-16 round 3, Brad: "move the movement insert chart to the
-    red area since there is a ton of whitespace. it clutters the script
-    editing area" -- moved out of `scripts_section`'s center-column
-    graph_block into here). `_on_pen_compare` still targets this component
-    by id and keeps working regardless of where it's mounted in the DOM."""
-    script_numbers = list(range(1, SR.N_SCRIPTS + 1))
-    return _card("Movement", dcc.Graph(
-        id="splash-movement-graph",
-        figure=charts.scripts_movement_fig(movement_records, script_numbers),
-        config={"displayModeBar": False}))
+def movement_log_card(scripts_records: list, movement_records: dict, *,
+                      editable: bool) -> html.Div:
+    """The 6 per-script Movement Log entry tables (`script_movement_panel`),
+    in their own right-column card next to Building the Engine's tables.
+
+    2026-09-16 round 3 moved the shared movement CHART here instead, on a
+    misreading of "it clutters the script editing area" -- round 4 (Brad,
+    looking at it live): the chart belongs back under Script Pen Results
+    (see `scripts_section`); it was these per-script entry TABLES, sitting
+    beside each script's card in the center column, that were the actual
+    clutter. Same "Show Scripts" selection still drives which one is
+    visible -- each panel keeps its `splash-script-movement-wrap-{n}` id,
+    and `_on_script_select`'s clientside callback (callbacks.py) toggles
+    that by id regardless of where in the DOM it's mounted."""
+    panels = [script_movement_panel(
+        int(r["script_number"]), r.get("script_type") or "",
+        movement_records.get(str(r["script_number"]), []), editable=editable)
+        for r in scripts_records]
+    return _card("Movement Log", html.Div(panels))
 
 
 def engine_card(engine_records: list, *, editable: bool) -> html.Div:
@@ -546,25 +552,22 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
     """The Gas Station, split out of `engine_card` into its own card
     (2026-09-13: Brad wants it "its own box like the others... with the
     background heading and separate opaque box") -- same `_card()` treatment
-    (graffiti header + opaque gradient box) as every other section."""
+    (graffiti header + opaque gradient box) as every other section.
+
+    2026-09-16 round 4 (Brad): dropped the standalone "Gas Station Videos"
+    browsable list that used to sit under this table -- a player shouldn't
+    see a flat library, just the specific video prescribed for each
+    exercise row. That linking now happens IN the Exercise column itself
+    (see `tables.gas_station_table`): a dropdown a coach can filter while
+    editing, a plain link for everyone else."""
     gas = pd.DataFrame(gas_records)
-    gas_child = tables.gas_station_table(gas, editable=editable) if (editable or not gas.empty) \
+    gas_child = tables.gas_station_table(gas, gas_videos, editable=editable) \
+        if (editable or not gas.empty) \
         else html.Div("Nothing entered yet.", style={"color": "#888", "fontStyle": "italic"})
     children = [
         html.Div("Tie a specific exercise to whatever the numbers above flag.",
                  style={"fontSize": "12px", "color": "#666", "margin": "2px 0 6px"}),
         gas_child,
-        html.Div([
-            html.B("Gas Station Videos", style={"fontSize": "13px"}),
-            dcc.Dropdown(
-                id="splash-gas-category-filter",
-                options=[{"label": "All Categories", "value": ALL_DRILL_CATEGORIES}] +
-                        [{"label": c, "value": c} for c in SR.GAS_STATION_DRILL_CATEGORIES],
-                value=ALL_DRILL_CATEGORIES, clearable=False,
-                style={"fontFamily": "Teko, sans-serif", "margin": "6px 0",
-                      "maxWidth": "260px"}),
-            html.Div(video_list_or_empty(gas_videos), id="splash-gas-video-list"),
-        ], style={"marginTop": "10px"}),
     ]
     return _card("The Gas Station", html.Div(children))
 
@@ -713,6 +716,20 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                                                  "marginBottom": "8px"}),
         dcc.Graph(id="splash-pen-graph", figure=charts.pen_results_fig(pen),
                  config={"displayModeBar": False}),
+        # Pitch Design's movement chart (2026-09-16 round 2, Brad: "just
+        # place it right underneath the script pen chart," always visible --
+        # not the earlier per-script panel that only showed up once a
+        # script was picked in "Show Scripts"). Round 3 briefly moved this
+        # to the right-column sidebar to declutter the center column, but
+        # round 4 (Brad, looking at it live): that was backwards -- the
+        # chart belongs here under Script Pen Results; it's the per-script
+        # MOVEMENT LOG TABLE (see `movement_log_card`) that was cluttering
+        # the script cards and should move to the sidebar instead. Shares
+        # "Compare Scripts" with the graph above it rather than its own
+        # selector.
+        dcc.Graph(id="splash-movement-graph",
+                 figure=charts.scripts_movement_fig(movement_records, script_numbers),
+                 config={"displayModeBar": False}),
     ])
     if editable:
         graph_block.children.append(tables.pen_results_table(pen, editable=True))
@@ -724,9 +741,6 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     for r in scripts_records:
         n = int(r["script_number"])
         cards.append(script_card(n, r, script_rows[str(n)], editable=editable))
-        cards.append(script_movement_panel(
-            n, r.get("script_type") or "", movement_records.get(str(n), []),
-            editable=editable))
     # 2026-09-14 (Brad, matching the skeleton-visuals grid fix): a fixed
     # 2-column grid stretched every card to half the (now much wider) center
     # column, leaving a lot of blank space to the right of each card's
@@ -903,7 +917,7 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
         id="splash-engine-visual-wrap", style={**_CARD})
     right_block = html.Div([
         visuals_block,
-        movement_card(data.get("movement", {})),
+        movement_log_card(data["scripts"], data.get("movement", {}), editable=editable),
         engine_card(data["engine"], editable=editable),
         gas_station_card(data["gas"], videos.get("Gas Station", []), editable=editable),
     ], style={"gridArea": "right", "minWidth": "0"})
