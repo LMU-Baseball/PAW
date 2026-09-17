@@ -22,6 +22,7 @@ def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
         style_header=header_style or _HEADER_STYLE, style_cell=cell_style or _CELL_STYLE,
         style_data={"backgroundColor": "rgba(255,255,255,0.85)"},
         style_data_conditional=extra_style or [],
+        markdown_options={"link_target": "_blank"},
     )
 
 
@@ -85,18 +86,51 @@ def engine_metrics_table(df: pd.DataFrame, table_id: str, *,
                  header_style=_ENGINE_HEADER_STYLE)
 
 
-def gas_station_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:
-    """Need (dropdown) / Exercise / Sets x Reps / Notes -- variable rows."""
+def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
+                      editable: bool) -> dash_table.DataTable:
+    """Need (dropdown) / Exercise / Sets x Reps / Notes -- variable rows.
+
+    2026-09-16 round 4 (Brad): the "Gas Station Videos" library used to be
+    a separate browsable list under this table -- now a video is tied to
+    ONE exercise row directly, in the Exercise cell itself. A coach picks
+    from `gas_videos` via a filterable dropdown (Dash's dropdown cells
+    narrow as you type, same as `need`'s) while editing; everyone else
+    just sees that pick rendered as a plain link, same as any other titled
+    video on this page. `exercise` still stores the video's plain title
+    text (no schema change) -- the link is built at render time by
+    matching that text against `gas_videos`, so a legacy free-typed
+    exercise that isn't a known video title just renders as plain text."""
+    video_by_title = {v["title"]: v for v in gas_videos}
     columns = [
         {"name": "Need", "id": "need", "editable": editable, "presentation": "dropdown"},
-        {"name": "Exercise", "id": "exercise", "editable": editable},
+        {"name": "Exercise", "id": "exercise", "editable": editable,
+         "presentation": "dropdown" if editable else "markdown"},
         {"name": "Sets x Reps", "id": "sets_reps", "editable": editable},
         {"name": "Notes", "id": "notes", "editable": editable},
     ]
     dropdown = {"need": {"options": [{"label": v, "value": v} for v in
                                      SR.STRENGTH_NEED_OPTIONS]}}
+    if editable:
+        dropdown["exercise"] = {"options": [
+            {"label": f"{v.get('drill_category') or v['category']} — {v['title']}",
+             "value": v["title"]}
+            for v in gas_videos
+        ]}
     data = df[["need", "exercise", "sets_reps", "notes"]].to_dict("records") \
         if not df.empty else []
+    if not editable:
+        for row in data:
+            title = row.get("exercise") or ""
+            video = video_by_title.get(title)
+            # A markdown-presentation cell renders None as the literal text
+            # "null" (JSON round-trip through the frontend, unlike a plain
+            # cell which shows blank) -- coerce to "" up front so a row with
+            # no exercise typed still renders empty.
+            if video:
+                url = video.get("link_url") or f"/splash-video/{video['id']}"
+                row["exercise"] = f"[{title}]({url})"
+            else:
+                row["exercise"] = title
     if editable and len(data) < 8:
         data = data + [{"need": "", "exercise": "", "sets_reps": "", "notes": ""}
                       for _ in range(8 - len(data))]

@@ -142,6 +142,69 @@ def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
             assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted
 
 
+def test_movement_chart_under_pen_graph_and_log_table_in_sidebar():
+    """2026-09-16 round 4: Brad corrected round 3's placement -- the shared
+    HB/IVB chart belongs under Script Pen Results in the center column (as
+    round 2 had it, `layout.scripts_section`'s graph_block), and it's the
+    per-script Movement Log entry tables (`layout.movement_log_card`) that
+    move out to the right-column sidebar instead, no longer sitting beside
+    each script_card in the center column."""
+    from app.dashboards.splash_report import layout
+    data = layout.load_data(TEST_PID, "2099/2100", "Fall")
+    out = str(layout.render_from_data(data, editable=True, is_coach=True))
+    assert "Movement Log" in out
+    for n in range(1, 7):
+        assert f"splash-script-movement-wrap-{n}" in out
+    pen_graph_pos = out.index("splash-pen-graph")
+    movement_graph_pos = out.index("splash-movement-graph")
+    first_script_card_pos = out.index("splash-script-wrap-1")
+    assert pen_graph_pos < movement_graph_pos < first_script_card_pos
+
+
+def test_gas_station_table_exercise_dropdown_in_edit_markdown_link_in_view():
+    """2026-09-16 round 4 (Brad): the standalone "Gas Station Videos"
+    browsable list is gone -- a video is now tied to ONE exercise row via
+    the Exercise cell itself: a filterable dropdown while a coach edits
+    (`gas_videos` options), a plain link for everyone else. A legacy
+    free-typed exercise that isn't a known video title stays plain text
+    rather than a broken link."""
+    import pandas as pd
+
+    from app.dashboards.splash_report import tables
+
+    gas_videos = [
+        {"id": 1, "title": "Forearm Extensor Release", "category": "Gas Station",
+         "drill_category": "Elbow Strength", "link_url": "https://drive.google.com/x"},
+        {"id": 2, "title": "Uploaded Clip", "category": "Gas Station",
+         "drill_category": "Rehab", "link_url": None},
+    ]
+    df = pd.DataFrame([
+        {"need": "Elbow", "exercise": "Forearm Extensor Release", "sets_reps": "3x10", "notes": ""},
+        {"need": "Elbow", "exercise": "Uploaded Clip", "sets_reps": "2x8", "notes": ""},
+        {"need": "Elbow", "exercise": "Not A Video", "sets_reps": "1x1", "notes": ""},
+        {"need": "Elbow", "exercise": None, "sets_reps": "", "notes": ""},
+    ])
+
+    edit_table = tables.gas_station_table(df, gas_videos, editable=True)
+    exercise_col = next(c for c in edit_table.columns if c["id"] == "exercise")
+    assert exercise_col["presentation"] == "dropdown"
+    values = {o["value"] for o in edit_table.dropdown["exercise"]["options"]}
+    assert values == {"Forearm Extensor Release", "Uploaded Clip"}
+
+    view_table = tables.gas_station_table(df, gas_videos, editable=False)
+    exercise_col_view = next(c for c in view_table.columns if c["id"] == "exercise")
+    assert exercise_col_view["presentation"] == "markdown"
+    rows = view_table.data
+    assert rows[0]["exercise"] == "[Forearm Extensor Release](https://drive.google.com/x)"
+    assert rows[1]["exercise"] == "[Uploaded Clip](/splash-video/2)"
+    assert rows[2]["exercise"] == "Not A Video"
+    # A blank/None exercise must render as "" -- a markdown cell shows the
+    # literal text "null" for None otherwise (2026-09-16 live bug: the
+    # sandbox's blank-exercise test row showed "null" in the Gas Station
+    # table after this column switched to markdown presentation).
+    assert rows[3]["exercise"] == ""
+
+
 def test_load_data_no_pitcher_selected_is_empty():
     from app.dashboards.splash_report import layout
     assert layout.load_data(None, "2099/2100", "Fall") == {}

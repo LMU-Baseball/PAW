@@ -305,21 +305,6 @@ def register_callbacks(dash_app) -> None:
         new_data["manage_videos_open"] = True
         return new_data
 
-    # ---- Gas Station category filter (2026-09-16 meeting): narrows the
-    # displayed video list to one drill category, or "All Categories".
-    # Purely a re-render of already-loaded splash-data -- no DB round trip,
-    # same reasoning as "Compare Scripts"/"Show Scripts" not needing one.
-    @dash_app.callback(
-        Output("splash-gas-video-list", "children"),
-        Input("splash-gas-category-filter", "value"),
-        State("splash-data", "data"),
-    )
-    def _on_gas_category_filter(category, data):
-        videos = ((data or {}).get("videos") or {}).get("Gas Station", [])
-        if category and category != layout.ALL_DRILL_CATEGORIES:
-            videos = [v for v in videos if v.get("drill_category") == category]
-        return layout.video_list_or_empty(videos)
-
     # ---- Shared video popup (Recovery Protocols + Gas Station titled
     # links both open this one modal) -- streams from the /splash-video/
     # route (app.main.routes.splash_video), never embedded inline.
