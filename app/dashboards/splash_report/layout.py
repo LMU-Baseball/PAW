@@ -516,26 +516,6 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
 
-def movement_log_card(scripts_records: list, movement_records: dict, *,
-                      editable: bool) -> html.Div:
-    """The 6 per-script Movement Log entry tables (`script_movement_panel`),
-    in their own right-column card next to Building the Engine's tables.
-
-    2026-09-16 round 3 moved the shared movement CHART here instead, on a
-    misreading of "it clutters the script editing area" -- round 4 (Brad,
-    looking at it live): the chart belongs back under Script Pen Results
-    (see `scripts_section`); it was these per-script entry TABLES, sitting
-    beside each script's card in the center column, that were the actual
-    clutter. Same "Show Scripts" selection still drives which one is
-    visible -- each panel keeps its `splash-script-movement-wrap-{n}` id,
-    and `_on_script_select`'s clientside callback (callbacks.py) toggles
-    that by id regardless of where in the DOM it's mounted."""
-    panels = [script_movement_panel(
-        int(r["script_number"]), r.get("script_type") or "",
-        movement_records.get(str(r["script_number"]), []), editable=editable)
-        for r in scripts_records]
-    return _card("Movement Log", html.Div(panels))
-
 
 def engine_card(engine_records: list, *, editable: bool) -> html.Div:
     """Building the Engine: just the Strength/ROM tables. Gas Station split
@@ -720,13 +700,14 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
         # place it right underneath the script pen chart," always visible --
         # not the earlier per-script panel that only showed up once a
         # script was picked in "Show Scripts"). Round 3 briefly moved this
-        # to the right-column sidebar to declutter the center column, but
-        # round 4 (Brad, looking at it live): that was backwards -- the
-        # chart belongs here under Script Pen Results; it's the per-script
-        # MOVEMENT LOG TABLE (see `movement_log_card`) that was cluttering
-        # the script cards and should move to the sidebar instead. Shares
-        # "Compare Scripts" with the graph above it rather than its own
-        # selector.
+        # to the right-column sidebar, and round 4 briefly moved the
+        # per-script movement LOG TABLE there instead -- round 5 (Brad,
+        # looking at it live): movement shouldn't be its own box at all,
+        # full stop. The chart stays here under Script Pen Results; the log
+        # table went back to living directly under each script's card (see
+        # the `cards` loop below), both still inside this one "Bullpen
+        # Scripts" card. Shares "Compare Scripts" with the graph above it
+        # rather than its own selector.
         dcc.Graph(id="splash-movement-graph",
                  figure=charts.scripts_movement_fig(movement_records, script_numbers),
                  config={"displayModeBar": False}),
@@ -740,7 +721,16 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     cards = []
     for r in scripts_records:
         n = int(r["script_number"])
-        cards.append(script_card(n, r, script_rows[str(n)], editable=editable))
+        # Stacked in one flex-column wrapper (2026-09-16 round 5, Brad: the
+        # movement log "should be in the same box as the script and right
+        # underneath it") -- one wrapper is one item in the outer flex-wrap
+        # row below, so the pair still moves/wraps together as a unit.
+        cards.append(html.Div([
+            script_card(n, r, script_rows[str(n)], editable=editable),
+            script_movement_panel(
+                n, r.get("script_type") or "", movement_records.get(str(n), []),
+                editable=editable),
+        ], style={"display": "flex", "flexDirection": "column"}))
     # 2026-09-14 (Brad, matching the skeleton-visuals grid fix): a fixed
     # 2-column grid stretched every card to half the (now much wider) center
     # column, leaving a lot of blank space to the right of each card's
@@ -917,7 +907,6 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
         id="splash-engine-visual-wrap", style={**_CARD})
     right_block = html.Div([
         visuals_block,
-        movement_log_card(data["scripts"], data.get("movement", {}), editable=editable),
         engine_card(data["engine"], editable=editable),
         gas_station_card(data["gas"], videos.get("Gas Station", []), editable=editable),
     ], style={"gridArea": "right", "minWidth": "0"})
