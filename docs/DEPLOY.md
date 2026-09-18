@@ -68,6 +68,13 @@ SSH in (Lightsail browser SSH, or your key):
 
 ```bash
 sudo apt update && sudo apt -y upgrade
+
+# Ubuntu 22.04's default repos only ship Python 3.10 -- this repo targets
+# 3.12 (same version the local dev venv/requirements.txt were built
+# against), so add the deadsnakes PPA first or `apt install python3.12`
+# fails with "Unable to locate package."
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
 sudo apt -y install python3.12 python3.12-venv python3-pip nginx git
 
 # --- get the code (use your repo URL or scp the working tree up) ---
