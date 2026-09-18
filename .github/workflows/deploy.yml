@@ -1,0 +1,30 @@
+name: deploy
+
+# Pushes to main only (i.e. after a PR merges) -- never pull_request. This
+# repo is public; a pull_request-triggered run would expose the Lightsail
+# deploy secrets to anyone who opened a PR. push:main only fires for an
+# actual merge, which already requires write access to the repo.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and redeploy
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/paw
+            git pull
+            source .venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart paw
