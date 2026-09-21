@@ -10,6 +10,7 @@ tables above instead; see its docstring.)
 from __future__ import annotations
 
 from datetime import date, timedelta
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -199,8 +200,39 @@ def load_player_stats(exclude_test: bool = True, player: str | None = None) -> p
     return df
 
 
-def load_sessions(exclude_test: bool = True, player=None,
-                  start=None, end=None) -> pd.DataFrame:
+def _in_clause(prefix: str, values: Sequence) -> tuple[str, dict]:
+    values = list(values or [])
+    params = {f"{prefix}{i}": value for i, value in enumerate(values)}
+    return ", ".join(f":{key}" for key in params), params
+
+
+def _date_plan_clause(plan_names: Sequence[str] | None, params: dict,
+                      date_expr: str = "PRACTICE_SESSIONS.session_date") -> str:
+    if not plan_names:
+        return ""
+    names = [str(name).strip() for name in plan_names if str(name).strip()]
+    if not names:
+        return ""
+    slots, values = _in_clause("plan", names)
+    params.update(values)
+    return (" AND EXISTS (SELECT 1 FROM practice_plan_assignments ppa "
+            "JOIN practice_plans pp ON pp.id = ppa.plan_id "
+            f"WHERE ppa.practice_date = {date_expr} "
+            f"AND pp.name IN ({slots}) AND pp.archived_at IS NULL)")
+
+
+def _dates_for_plans(dates: Sequence[str], plan_names: Sequence[str] | None) -> list[str]:
+    if not plan_names:
+        return list(dates)
+    from app.data import practice_plans as PP
+    wanted = {str(name).strip().casefold() for name in plan_names}
+    assignments = PP.assignments_for_dates(dates)
+    return [d for d in dates if wanted.intersection(
+        {str(name).casefold() for name in assignments.get(str(d)[:10], [])})]
+
+
+def practice_dates(start=None, end=None, player=None, exclude_test: bool = True,
+                   plan_names: Sequence[str] | None = None) -> list[str]:
     where = "WHERE session_date IS NOT NULL" + _test_clause("user_name", exclude_test)
     params: dict = {}
     if player:
@@ -209,6 +241,36 @@ def load_sessions(exclude_test: bool = True, player=None,
     if start and end:
         where += " AND session_date BETWEEN :start AND :end"
         params["start"], params["end"] = str(start), str(end)
+    df = query_df(f"SELECT DISTINCT session_date FROM PRACTICE_SESSIONS {where} "
+                  "ORDER BY session_date DESC", params)
+    dates = [] if df.empty else [str(d)[:10] for d in df["session_date"]]
+    return _dates_for_plans(dates, plan_names)
+
+
+def _effective_dates(start, end, player, dates, plan_names, exclude_test=True):
+    if not plan_names:
+        return dates
+    base = list(dates or practice_dates(start, end, player=player,
+                                         exclude_test=exclude_test))
+    return _dates_for_plans(base, plan_names)
+
+
+def load_sessions(exclude_test: bool = True, player=None,
+                  start=None, end=None, dates: Sequence[str] | None = None,
+                  plan_names: Sequence[str] | None = None) -> pd.DataFrame:
+    where = "WHERE session_date IS NOT NULL" + _test_clause("user_name", exclude_test)
+    params: dict = {}
+    if player:
+        where += " AND user_name = :player"
+        params["player"] = player
+    if start and end:
+        where += " AND session_date BETWEEN :start AND :end"
+        params["start"], params["end"] = str(start), str(end)
+    dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
+    if dates:
+        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        where += f" AND session_date IN ({slots})"
+        params.update(values)
     return query_df(f"""
         SELECT session_id, session_date,
                user_name AS player_name, player_id,
@@ -224,7 +286,8 @@ def load_sessions(exclude_test: bool = True, player=None,
 
 
 def load_plays(exclude_test: bool = True, player=None,
-               start=None, end=None) -> pd.DataFrame:
+               start=None, end=None, dates: Sequence[str] | None = None,
+               plan_names: Sequence[str] | None = None) -> pd.DataFrame:
     """PRACTICE_PLAYS.player_name is permanently NULL for every row (the
     ingest has no name field to put there -- see app/ingest/hittrax.py's
     ``player_name = None`` comment); name comes from a join to
@@ -244,6 +307,17 @@ def load_plays(exclude_test: bool = True, player=None,
         where += (" AND pp.play_timestamp >= :start"
                   " AND pp.play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
         params["start"], params["end"] = str(start), str(end)
+    if dates:
+        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        where += f" AND DATE(pp.play_timestamp) IN ({slots})"
+        params.update(values)
+    if plan_names:
+        dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
+        if not dates:
+            return pd.DataFrame()
+        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        where += f" AND DATE(pp.play_timestamp) IN ({slots})"
+        params.update(values)
     return query_df(f"""
         SELECT ps.user_name AS player_name, pp.player_id,
                DATE(pp.play_timestamp) AS play_date,
@@ -257,7 +331,8 @@ def load_plays(exclude_test: bool = True, player=None,
 
 
 def load_pitch_coords(exclude_test: bool = True, player=None,
-                      start=None, end=None) -> pd.DataFrame:
+                      start=None, end=None, dates: Sequence[str] | None = None,
+                      plan_names: Sequence[str] | None = None) -> pd.DataFrame:
     """Pitch location rows for heatmaps / swing decision (from Swing Decision
     start). `player`/`start`/`end` scope the load in SQL (the dashboard passes
     the selected player + date so it never loads every player's rows); all
@@ -283,6 +358,21 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         where += (" AND pp.play_timestamp >= :start"
                   " AND pp.play_timestamp < DATE_ADD(:end, INTERVAL 1 DAY)")
         params["start"], params["end"] = str(start), str(end)
+    if dates:
+        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        where += f" AND DATE(pp.play_timestamp) IN ({slots})"
+        params.update(values)
+    if plan_names:
+        dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
+        if not dates:
+            return pd.DataFrame(columns=[
+                "player_name", "player_id", "hand", "px", "py", "result",
+                "exit_velocity", "distance_feet", "zone_section", "play_timestamp",
+                "session_id", "play_date", "session_type", "session_tag",
+            ])
+        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        where += f" AND DATE(pp.play_timestamp) IN ({slots})"
+        params.update(values)
     try:
         df = query_df(f"""
             SELECT ps.user_name AS player_name, pp.player_id, pp.hand,
@@ -333,6 +423,8 @@ def apply_filters(
     start: date | None,
     end: date | None,
     session: str | None,
+    dates: Sequence[str] | None = None,
+    plan_names: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Filter pitch-coord rows by player / date / session display or Swing Decision."""
     if pitch_df.empty:
@@ -341,8 +433,10 @@ def apply_filters(
     if player and player != "All Players":
         d = d[d["player_name"] == player]
     if start and end:
-        dates = pd.to_datetime(d["play_date"])
-        d = d[dates.between(pd.Timestamp(start), pd.Timestamp(end))]
+        date_values = pd.to_datetime(d["play_date"])
+        d = d[date_values.between(pd.Timestamp(start), pd.Timestamp(end))]
+    if dates:
+        d = d[d["play_date"].astype(str).str[:10].isin({str(x)[:10] for x in dates})]
     if session == SWING_DECISION_LABEL:
         dates = pd.to_datetime(d["play_date"])
         d = d[dates.between(SWING_DECISION_START, SWING_DECISION_END)]

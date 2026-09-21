@@ -43,6 +43,19 @@ def test_contact_summary():
     assert s["contact_pct"] == 50.0
 
 
+def test_date_plan_filter_is_or_and_supports_two_plans(monkeypatch):
+    from app.data import practice_plans as PP
+    monkeypatch.setattr(PP, "assignments_for_dates", lambda dates: {
+        "2026-09-21": ["Fastball", "Slider"],
+        "2026-09-18": ["Curveball"],
+    })
+    assert P._dates_for_plans(["2026-09-21", "2026-09-18"], ["Slider"]) == ["2026-09-21"]
+    assert P._dates_for_plans(
+        ["2026-09-21", "2026-09-18"], ["Fastball", "Curveball"]
+    ) == ["2026-09-21", "2026-09-18"]
+    assert P._dates_for_plans(["2026-09-21"], []) == ["2026-09-21"]
+
+
 def test_contact_quality():
     df = pd.DataFrame([
         # batted balls (hit_type 1/2/3)
