@@ -65,6 +65,7 @@ def assignments_for_dates(dates):
         db.select(PracticePlanAssignment.practice_date, PracticePlan.name)
         .join(PracticePlan, PracticePlan.id == PracticePlanAssignment.plan_id)
         .where(PracticePlanAssignment.practice_date.in_(values))
+        .where(PracticePlan.archived_at.is_(None))
         .order_by(PracticePlan.name)
     ).all()
     result = {}
@@ -77,8 +78,8 @@ def replace_assignments(dates, plan_names, *, actor_is_coach: bool,
                         actor_id: int | None = None) -> None:
     if not actor_is_coach:
         raise PermissionError("Only coaches may assign practice plans")
-    values = [_as_date(d) for d in dates or []]
-    names = [_clean_name(n) for n in plan_names or []]
+    values = list(dict.fromkeys(_as_date(d) for d in dates or []))
+    names = list(dict.fromkeys(_clean_name(n) for n in plan_names or []))
     if not values:
         raise ValueError("Select at least one practice date")
     active = list_plans()

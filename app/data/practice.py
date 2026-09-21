@@ -206,21 +206,6 @@ def _in_clause(prefix: str, values: Sequence) -> tuple[str, dict]:
     return ", ".join(f":{key}" for key in params), params
 
 
-def _date_plan_clause(plan_names: Sequence[str] | None, params: dict,
-                      date_expr: str = "PRACTICE_SESSIONS.session_date") -> str:
-    if not plan_names:
-        return ""
-    names = [str(name).strip() for name in plan_names if str(name).strip()]
-    if not names:
-        return ""
-    slots, values = _in_clause("plan", names)
-    params.update(values)
-    return (" AND EXISTS (SELECT 1 FROM practice_plan_assignments ppa "
-            "JOIN practice_plans pp ON pp.id = ppa.plan_id "
-            f"WHERE ppa.practice_date = {date_expr} "
-            f"AND pp.name IN ({slots}) AND pp.archived_at IS NULL)")
-
-
 def _dates_for_plans(dates: Sequence[str], plan_names: Sequence[str] | None) -> list[str]:
     if not plan_names:
         return list(dates)
@@ -250,8 +235,9 @@ def practice_dates(start=None, end=None, player=None, exclude_test: bool = True,
 def _effective_dates(start, end, player, dates, plan_names, exclude_test=True):
     if not plan_names:
         return dates
-    base = list(dates or practice_dates(start, end, player=player,
-                                         exclude_test=exclude_test))
+    if dates is not None:
+        return _dates_for_plans(list(dates), plan_names)
+    base = practice_dates(start, end, player=player, exclude_test=exclude_test)
     return _dates_for_plans(base, plan_names)
 
 
@@ -312,10 +298,10 @@ def load_plays(exclude_test: bool = True, player=None,
         where += f" AND DATE(pp.play_timestamp) IN ({slots})"
         params.update(values)
     if plan_names:
-        dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
-        if not dates:
+        effective_dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
+        if not effective_dates:
             return pd.DataFrame()
-        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        slots, values = _in_clause("plan_date", [str(d)[:10] for d in effective_dates])
         where += f" AND DATE(pp.play_timestamp) IN ({slots})"
         params.update(values)
     return query_df(f"""
@@ -363,14 +349,14 @@ def load_pitch_coords(exclude_test: bool = True, player=None,
         where += f" AND DATE(pp.play_timestamp) IN ({slots})"
         params.update(values)
     if plan_names:
-        dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
-        if not dates:
+        effective_dates = _effective_dates(start, end, player, dates, plan_names, exclude_test)
+        if not effective_dates:
             return pd.DataFrame(columns=[
                 "player_name", "player_id", "hand", "px", "py", "result",
                 "exit_velocity", "distance_feet", "zone_section", "play_timestamp",
                 "session_id", "play_date", "session_type", "session_tag",
             ])
-        slots, values = _in_clause("date", [str(d)[:10] for d in dates])
+        slots, values = _in_clause("plan_date", [str(d)[:10] for d in effective_dates])
         where += f" AND DATE(pp.play_timestamp) IN ({slots})"
         params.update(values)
     try:
@@ -437,6 +423,10 @@ def apply_filters(
         d = d[date_values.between(pd.Timestamp(start), pd.Timestamp(end))]
     if dates:
         d = d[d["play_date"].astype(str).str[:10].isin({str(x)[:10] for x in dates})]
+    if plan_names:
+        matching = set(_dates_for_plans(
+            d["play_date"].astype(str).str[:10].unique(), plan_names))
+        d = d[d["play_date"].astype(str).str[:10].isin(matching)]
     if session == SWING_DECISION_LABEL:
         dates = pd.to_datetime(d["play_date"])
         d = d[dates.between(SWING_DECISION_START, SWING_DECISION_END)]

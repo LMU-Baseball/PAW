@@ -52,6 +52,11 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("prac-filters", "data"),
         Output("prac-player", "options"),
+        Output("prac-session-dates", "options"),
+        Output("prac-plan-assignment-dates", "options"),
+        Output("prac-plan-filter", "options"),
+        Output("prac-plan-assignment-values", "options"),
+        Output("prac-plan-manage-select", "options"),
         Input("prac-player", "value"),
         Input("prac-daterange", "start_date"),
         Input("prac-daterange", "end_date"),
@@ -86,6 +91,11 @@ def register_callbacks(dash_app) -> None:
              "end": end.isoformat() if end else None,
              "session_dates": selected_dates, "plans": selected_plans},
             popts,
+            [{"label": d, "value": d} for d in available_dates],
+            [{"label": d, "value": d} for d in available_dates],
+            [{"label": p, "value": p} for p in sorted(plan_names)],
+            [{"label": p, "value": p} for p in sorted(plan_names)],
+            [{"label": p.name, "value": p.id} for p in PP.list_plans(include_archived=True)],
         )
 
     @dash_app.callback(
