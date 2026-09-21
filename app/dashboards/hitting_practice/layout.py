@@ -108,6 +108,8 @@ def serve_layout() -> html.Div:
     plan_rows = PP.list_plans()
     plan_options = [{"label": p.name, "value": p.name} for p in plan_rows]
     available_dates = P.practice_dates(start_d, end_d, exclude_test=True)
+    session_options = ([{"label": "All sessions in range", "value": "__all_sessions__"}]
+                       + [{"label": d, "value": d} for d in available_dates])
     opt_values = {o["value"] for o in players}
     on_latest = [n for n in on_latest_all if n in opt_values]
     default_player = selectors.resolve_player(
@@ -135,9 +137,8 @@ def serve_layout() -> html.Div:
         ]),
         html.Div([
             html.Label("Practice sessions", style={"color": "white", "fontWeight": "bold"}),
-            dcc.Dropdown(id="prac-session-dates",
-                         options=[{"label": d, "value": d} for d in available_dates],
-                         value=[], multi=True, placeholder="All dates",
+            dcc.Dropdown(id="prac-session-dates", options=session_options,
+                         value="__all_sessions__", clearable=False,
                          style={"minWidth": "220px"}),
         ]),
         html.Div([
@@ -157,16 +158,30 @@ def serve_layout() -> html.Div:
                          value=[], multi=True, placeholder="Select dates to assign"),
             dcc.Dropdown(id="prac-plan-assignment-values", options=plan_options,
                          value=[], multi=True, placeholder="Select plans"),
-            html.Button("Save assignments", id="prac-plan-save", n_clicks=0),
+            html.Div([
+                html.Button("Save assignments", id="prac-plan-save", n_clicks=0,
+                            style={"width": "auto", "justifySelf": "start"}),
+            ], style={"display": "flex", "justifyContent": "flex-end"}),
             html.Div(id="prac-plan-status"),
             html.Div(id="prac-plan-manage-list"),
-            dcc.Dropdown(id="prac-plan-manage-select", options=plan_options,
-                         value=None, placeholder="Select plan to rename/archive"),
-            dcc.Input(id="prac-plan-rename", type="text", placeholder="Replacement name"),
-            html.Button("Rename plan", id="prac-plan-rename-button", n_clicks=0),
-            html.Button("Archive plan", id="prac-plan-archive", n_clicks=0),
-            dcc.Input(id="prac-plan-new-name", type="text", placeholder="New plan name"),
-            html.Button("Add plan", id="prac-plan-add", n_clicks=0),
+            html.Div([
+                dcc.Dropdown(id="prac-plan-manage-select", options=plan_options,
+                             value=None, placeholder="Select plan to rename/archive",
+                             style={"minWidth": "240px"}),
+                dcc.Input(id="prac-plan-rename", type="text", placeholder="Replacement name",
+                          style={"width": "180px"}),
+                html.Button("Rename", id="prac-plan-rename-button", n_clicks=0,
+                            style={"width": "auto"}),
+                html.Button("Archive", id="prac-plan-archive", n_clicks=0,
+                            style={"width": "auto"}),
+            ], style={"display": "flex", "gap": "6px", "alignItems": "center",
+                      "justifyContent": "flex-end", "flexWrap": "wrap"}),
+            html.Div([
+                dcc.Input(id="prac-plan-new-name", type="text", placeholder="New plan name",
+                          style={"width": "180px"}),
+                html.Button("Add plan", id="prac-plan-add", n_clicks=0,
+                            style={"width": "auto"}),
+            ], style={"display": "flex", "gap": "6px", "justifyContent": "flex-end"}),
         ], style={"display": "grid", "gap": "8px", "padding": "10px 0"}),
     ], style={"padding": "8px 16px", "borderBottom": "1px solid #ddd"}) if is_coach else html.Div()
 
@@ -182,7 +197,8 @@ def serve_layout() -> html.Div:
         dcc.Store(id="prac-filters", data={
             "player": default_player,
             "session": "All session types", "exclude_test": True,
-            "start": start_d, "end": end_d, "session_dates": [], "plans": [],
+            "start": start_d, "end": end_d,
+            "session_dates": "__all_sessions__", "plans": [],
         }),
         dcc.Store(id="prac-pitch-data"),
         header(back_href="/hitting", back_label="← Hitting"),
