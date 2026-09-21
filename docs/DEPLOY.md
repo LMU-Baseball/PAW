@@ -396,6 +396,17 @@ Lightsail is below.
 - **(Optional) overnight report warm-cache:** once the fall-2026 Trackman ingest
   cadence is set, add a cron/systemd-timer that runs the report pre-build after
   ingest so next-morning downloads are instant (see Memory §SP5).
+- **Running `scripts/load_lmu_roster.py` (or any one-off script that writes
+  directly to the DB) does NOT update what the live app shows — you MUST
+  `sudo systemctl restart paw` afterward.** `app/data/pitching_caps.lmu_pitchers`
+  (and `pitcher_profile`, and friends) are `@cached` per gunicorn worker process,
+  warmed once at boot (`PAW_WARM_CACHE=1`) and never re-read until the cache is
+  cleared. `clear_all()` only fires from a `precalc.rebuild_*` version bump — a
+  standalone script like the roster loader never triggers it. Verified live
+  2026-09-20: reseeding a roster row changed the DB correctly but the already-
+  running workers kept serving the old roster list until restarted. The fix is
+  always the same: run the script, then restart the service, then check the
+  app.
 
 ---
 
