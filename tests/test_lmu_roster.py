@@ -18,7 +18,9 @@ def test_ensure_table_idempotent():
 def test_position_group_mapping():
     assert LR._position_group("RHP") == "pitcher"
     assert LR._position_group("LHP") == "pitcher"
+    assert LR._position_group("RHP/CF") == "pitcher"
     assert LR._position_group("C") == "catcher"
+    assert LR._position_group("CF") == "hitter"
     assert LR._position_group("1B") == "hitter"
     assert LR._position_group("SS") == "hitter"
     assert LR._position_group("") == "hitter"

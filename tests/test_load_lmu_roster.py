@@ -52,3 +52,6 @@ def test_real_2026_2027_fixture_loads_47_players():
     assert len(players) == 47
     for p in players:
         assert p["first_name"] and p["last_name"] and p["position"]
+    donnie = [p for p in players if p["first_name"] == "Donnie" and p["last_name"] == "Morgan"]
+    assert len(donnie) == 1
+    assert donnie[0]["position"] == "RHP/CF"

@@ -46,6 +46,7 @@ _DDL = f"""
 
 _PITCHER_POSITIONS = {"RHP", "LHP"}
 _CATCHER_POSITIONS = {"C"}
+_POSITION_SEPARATORS = "/,&"
 
 # Tables that persist a value keyed by player_id/pitcher_id -- the only place
 # a negative placeholder id can outlive a single request and need migrating
@@ -69,12 +70,18 @@ def ensure_table(engine=None) -> None:
 
 
 def _position_group(position) -> str:
-    """'pitcher' for RHP/LHP, 'catcher' for C, 'hitter' otherwise (including
-    blank/unknown positions -- never silently drops a rostered player)."""
+    """Classify a roster position, including dual-position display strings.
+
+    Pitcher takes precedence when a player has multiple positions (for example,
+    ``RHP/CF``), followed by catcher, with all other positions treated as
+    hitters. Blank and unknown positions remain hitters so rostered players are
+    never silently dropped.
+    """
     p = (position or "").strip().upper()
-    if p in _PITCHER_POSITIONS:
+    tokens = {token.strip() for token in p.replace("/", " ").replace(",", " ").replace("&", " ").split()}
+    if tokens & _PITCHER_POSITIONS:
         return "pitcher"
-    if p in _CATCHER_POSITIONS:
+    if tokens & _CATCHER_POSITIONS:
         return "catcher"
     return "hitter"
 
