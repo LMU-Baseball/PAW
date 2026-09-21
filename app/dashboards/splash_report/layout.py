@@ -638,20 +638,28 @@ def _removed_pen_row(row: dict) -> html.Div:
 
 
 def _removed_pen_panel(deleted_records: list) -> html.Div:
-    """Coach-only, always-visible-when-nonempty list of soft-deleted pen
-    results (see `app.data.splash_report.save_pen_results`'s docstring for
-    why deleting a pen result is a soft-delete, not a hard one) with a
-    per-row Restore button. Unlike Manage Drills/Manage Video Library, this
-    one doesn't need an open/closed flag at all -- it simply isn't rendered
-    when there's nothing removed, which sidesteps that whole class of bug
-    (see this session's fix for those two panels re-closing themselves on
-    every edit) by never having state to lose in the first place."""
+    """Coach-in-edit-mode-only, always-visible-when-nonempty list of
+    soft-deleted pen results (see `app.data.splash_report.save_pen_results`'s
+    docstring for why deleting a pen result is a soft-delete, not a hard one)
+    with a per-row Restore button. Unlike Manage Drills/Manage Video Library,
+    this one doesn't need an open/closed flag at all -- it simply isn't
+    rendered when there's nothing removed, which sidesteps that whole class
+    of bug (see this session's fix for those two panels re-closing themselves
+    on every edit) by never having state to lose in the first place.
+
+    2026-09-21 (Brad): a season's worth of removed test data turned this into
+    a long list that "clutters up a lot of the space" on the read-only view
+    -- `scripts_section` now only renders this panel at all when `editable`
+    (edit mode is where a Restore actually matters), and the row list itself
+    is capped to a scrollable strip here so it stays out of the way even with
+    many entries."""
     if not deleted_records:
         return html.Div()
     return html.Div([
         html.Div("Recently Removed", style={"fontSize": "12px", "fontWeight": "bold",
                                             "color": CRIMSON, "marginTop": "8px"}),
-        html.Div([_removed_pen_row(r) for r in deleted_records]),
+        html.Div([_removed_pen_row(r) for r in deleted_records],
+                 style={"maxHeight": "120px", "overflowY": "auto"}),
     ])
 
 
@@ -708,7 +716,7 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
         graph_block.children.append(html.Div(tables_row, style={
             "display": "flex", "flexWrap": "wrap", "gap": "20px",
             "alignItems": "flex-start", "marginTop": "10px"}))
-    if is_coach:
+    if is_coach and editable:
         graph_block.children.append(
             html.Div(_removed_pen_panel(deleted_pen_records), id="splash-pen-removed-wrap"))
 
