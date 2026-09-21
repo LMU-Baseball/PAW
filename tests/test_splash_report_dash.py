@@ -474,6 +474,30 @@ def test_splash_video_route_requires_login_and_streams_bytes(server):
             conn.execute(_text(f"DELETE FROM {SR.VIDEOS_TABLE} WHERE id = :id"), {"id": vid_id})
 
 
+def test_graffiti_header_has_solid_color_fallback_behind_backdrop_image():
+    """2026-09-20 (coaches: Pre-Throw/Post-Throw headers sometimes render as
+    just floating white text, no visible box) -- `_graffiti_header`'s whole
+    background used to be `url(...)` with no color fallback, so a slow/
+    failed image load left the always-white label with nothing behind it.
+    Pins the fix: the `background` shorthand must also carry a solid color
+    matching each backdrop image's dominant tone, so the box is never blank."""
+    from app.dashboards.splash_report import layout
+
+    pre = layout._graffiti_header("Pre-Throw Checklist", 0)
+    post = layout._graffiti_header("Post-Throw Checklist", 1)
+
+    pre_bg = pre.style["background"]
+    assert layout.BLUE in pre_bg
+    assert layout._HEADER_IMAGES[0] in pre_bg
+
+    post_bg = post.style["background"]
+    assert layout.CRIMSON in post_bg
+    assert layout._HEADER_IMAGES[1] in post_bg
+
+    assert pre.children.style["color"] == "#fff"
+    assert post.children.style["color"] == "#fff"
+
+
 def test_pitching_hub_has_splash_report_card(server):
     server.config["WTF_CSRF_ENABLED"] = False
     from app.auth.models import User

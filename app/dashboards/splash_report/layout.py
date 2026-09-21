@@ -154,13 +154,17 @@ _HEADER_VARIANTS = [
 
 def _graffiti_header(text: str, idx: int) -> html.Div:
     img_idx, pos = _HEADER_VARIANTS[idx % len(_HEADER_VARIANTS)]
+    # Solid color fallback (matching the image's dominant tone) so a slow/
+    # failed image load never leaves the always-white label with nothing
+    # behind it -- see the coaches' "header box disappears" report.
+    fallback_color = BLUE if img_idx == 0 else CRIMSON
     label = html.Span(text, style={
         "color": "#fff", "fontWeight": "bold", "fontSize": "13px",
         "textTransform": "uppercase", "letterSpacing": "1px",
         "textShadow": "0 1px 3px rgba(0,0,0,0.65)",
     })
     return html.Div(label, style={
-        "background": f"url({_HEADER_IMAGES[img_idx]}) {pos}/cover no-repeat",
+        "background": f"url({_HEADER_IMAGES[img_idx]}) {pos}/cover no-repeat {fallback_color}",
         "borderRadius": "6px", "padding": "6px 10px", "margin": "0 0 8px",
         "minHeight": "18px", "display": "flex", "alignItems": "center",
         "justifyContent": "center", "textAlign": "center",
