@@ -27,6 +27,29 @@ def test_position_group_mapping():
     assert LR._position_group(None) == "hitter"
 
 
+def test_position_groups_mapping_dual_position():
+    # The regression this fix closes: a dual-position player belongs to
+    # BOTH groups, not just the pitcher-precedence winner -- otherwise a
+    # player like Donnie ("RHP/CF") is silently dropped from the Hitting
+    # dashboard's placeholder-roster union.
+    assert LR._position_groups("RHP/CF") == {"pitcher", "hitter"}
+    assert LR._position_groups("C/1B") == {"catcher", "hitter"}
+
+
+def test_position_groups_mapping_single_position_unchanged():
+    # Ordinary single-token positions must still classify the same way
+    # under the new set-returning function -- no regression vs.
+    # _position_group for the non-dual-position case.
+    assert LR._position_groups("RHP") == {"pitcher"}
+    assert LR._position_groups("LHP") == {"pitcher"}
+    assert LR._position_groups("C") == {"catcher"}
+    assert LR._position_groups("CF") == {"hitter"}
+    assert LR._position_groups("1B") == {"hitter"}
+    assert LR._position_groups("SS") == {"hitter"}
+    assert LR._position_groups("") == {"hitter"}
+    assert LR._position_groups(None) == {"hitter"}
+
+
 def test_upsert_then_load_roster_roundtrip():
     LR.ensure_table()
     n = LR.upsert_season_roster(SEASON, [
@@ -78,6 +101,28 @@ def test_placeholder_rows_shape_and_negative_ids(monkeypatch):
     assert len(df) == 1
     assert df.iloc[0]["PitcherId"] == -501
     assert df.iloc[0]["Pitcher"] == "Rhp, Test"
+
+
+def test_placeholder_rows_dual_position_player_returned_for_hitter_query(monkeypatch):
+    # Regression test for the Donnie bug: a dual-position roster row
+    # ("RHP/CF") must be returned by a ("hitter", "catcher") query -- the
+    # same groups app.data.hitting_caps.lmu_hitters unions the LMU roster
+    # against -- not just by a ("pitcher",) query. Pre-fix, _position_group
+    # collapsed "RHP/CF" to "pitcher" only, so .isin(("hitter", "catcher"))
+    # silently dropped this row from the Hitting dashboard.
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 601, "first_name": "Donnie", "last_name": "Morgan",
+         "class_year": "SO", "position": "RHP/CF"},
+        {"roster_id": 602, "first_name": "Test", "last_name": "Inf",
+         "class_year": "SO", "position": "SS"},
+    ]))
+    df = LR.placeholder_rows(SEASON, ("hitter", "catcher"), "BatterId", "Batter")
+    assert set(df["BatterId"]) == {-601, -602}
+    assert "Morgan, Donnie" in set(df["Batter"])
+
+    # And still returned by a pitcher-only query too -- it belongs to BOTH.
+    df_pitch = LR.placeholder_rows(SEASON, ("pitcher",), "PitcherId", "Pitcher")
+    assert set(df_pitch["PitcherId"]) == {-601}
 
 
 def test_placeholder_rows_empty_when_no_roster(monkeypatch):

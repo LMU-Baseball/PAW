@@ -69,21 +69,58 @@ def ensure_table(engine=None) -> None:
         conn.execute(text(_DDL))
 
 
-def _position_group(position) -> str:
-    """Classify a roster position, including dual-position display strings.
-
-    Pitcher takes precedence when a player has multiple positions (for example,
-    ``RHP/CF``), followed by catcher, with all other positions treated as
-    hitters. Blank and unknown positions remain hitters so rostered players are
-    never silently dropped.
-    """
+def _tokenize_position(position) -> set[str]:
+    """Split a (possibly dual-position) roster position string into its
+    individual position tokens, upper-cased and separator-agnostic -- e.g.
+    ``"RHP/CF"`` -> ``{"RHP", "CF"}``. Shared by `_position_group` and
+    `_position_groups` below so both agree on what counts as a token."""
     p = (position or "").strip().upper()
-    tokens = {token.strip() for token in p.replace("/", " ").replace(",", " ").replace("&", " ").split()}
+    p = p.translate(str.maketrans(_POSITION_SEPARATORS, " " * len(_POSITION_SEPARATORS)))
+    return {token.strip() for token in p.split()}
+
+
+def _position_group(position) -> str:
+    """Classify a roster position, including dual-position display strings,
+    into a SINGLE group. Pitcher takes precedence when a player has multiple
+    positions (for example, ``RHP/CF``), followed by catcher, with all other
+    positions treated as hitters. Blank and unknown positions remain hitters
+    so rostered players are never silently dropped.
+
+    Used only by `reconcile_ids`, which is deliberately pitcher-only and
+    pitcher-precedence (Cauldron and Velo Board are both pitcher-only
+    systems -- a dual-position player like Donnie ("RHP/CF") is still,
+    unambiguously, a pitcher for reconciliation purposes, so collapsing to
+    one group is correct there). Every OTHER caller that tests group
+    membership -- `placeholder_rows` and anything built on it -- needs a
+    player to be able to belong to more than one group at once, and uses
+    `_position_groups` (plural) below instead.
+    """
+    tokens = _tokenize_position(position)
     if tokens & _PITCHER_POSITIONS:
         return "pitcher"
     if tokens & _CATCHER_POSITIONS:
         return "catcher"
     return "hitter"
+
+
+def _position_groups(position) -> set[str]:
+    """Every group a position string belongs to -- unlike `_position_group`
+    (singular), a dual-position player belongs to MORE than one group at
+    once (``"RHP/CF"`` is both a pitcher and a hitter). Blank/unknown
+    positions still fall back to ``{"hitter"}`` so rostered players are
+    never silently dropped. This is what `placeholder_rows` tests group
+    membership against, so a dual-position player isn't silently excluded
+    from a dashboard's roster union just because they also happen to pitch
+    (or catch)."""
+    tokens = _tokenize_position(position)
+    groups = set()
+    if tokens & _PITCHER_POSITIONS:
+        groups.add("pitcher")
+    if tokens & _CATCHER_POSITIONS:
+        groups.add("catcher")
+    if tokens - _PITCHER_POSITIONS - _CATCHER_POSITIONS or not groups:
+        groups.add("hitter")
+    return groups
 
 
 def load_roster(season_label: str) -> pd.DataFrame:
@@ -167,13 +204,19 @@ def upsert_season_roster(season_label: str, players: list[dict], engine=None) ->
 
 def placeholder_rows(season_label: str, groups: tuple[str, ...],
                      id_col: str, name_col: str) -> pd.DataFrame:
-    """lmu_roster rows for `season_label` whose _position_group is in `groups`,
-    shaped as a 2-column DataFrame [id_col, name_col] -- id = -roster_id,
-    name = "Last, First" (matches GAMES.Pitcher/Batter/Catcher's own format)."""
+    """lmu_roster rows for `season_label` whose _position_groups() intersects
+    `groups`, shaped as a 2-column DataFrame [id_col, name_col] -- id =
+    -roster_id, name = "Last, First" (matches GAMES.Pitcher/Batter/Catcher's
+    own format). Intersection, not single-group membership, so a
+    dual-position player (e.g. "RHP/CF") is returned for EITHER a
+    ("pitcher",) query or a ("hitter", "catcher") one -- otherwise pitcher
+    precedence would silently drop them from the hitter/catcher dashboards
+    they're also eligible for."""
     roster = load_roster(season_label)
     if roster.empty:
         return pd.DataFrame(columns=[id_col, name_col])
-    sub = roster[roster["position"].map(_position_group).isin(groups)]
+    wanted = set(groups)
+    sub = roster[roster["position"].map(lambda p: bool(_position_groups(p) & wanted))]
     if sub.empty:
         return pd.DataFrame(columns=[id_col, name_col])
     return pd.DataFrame({
