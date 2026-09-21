@@ -14,6 +14,14 @@ TEST_PID = -999101  # sandboxed fake player id; never collides with real GAMES d
 SEASON = "2099/2100"  # sandboxed fake season label
 CYCLE = "Fall"
 
+# Isolation-test-only sandboxed ids/labels (Task 4) -- kept distinct from
+# TEST_PID/SEASON above so those tests' cleanup can't accidentally mask a
+# cross-key leak in these ones.
+ISO_PID_A = -999201
+ISO_PID_B = -999202
+ISO_SEASON_A = "2099/2100"  # matches SEASON on purpose (see brief's four keys)
+ISO_SEASON_B = "2098/2099"  # a distinct fake season, never a real one
+
 
 @pytest.fixture(autouse=True)
 def _clean_sandbox():
@@ -22,6 +30,8 @@ def _clean_sandbox():
         for t in (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
                  SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE):
             conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": TEST_PID})
+            for pid in (ISO_PID_A, ISO_PID_B):
+                conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": pid})
 
 
 def test_ensure_tables_idempotent():
@@ -582,3 +592,48 @@ def test_add_video_link_rejects_blank_url_and_bad_category(_clean_videos):
     with pytest.raises(ValueError):
         SR.add_video_link("__test_sandbox_bad_cat_link__", "NotACategory",
                           "https://drive.google.com/x")
+
+
+def test_plan_and_script_rows_isolation_by_player_season_cycle():
+    """Task 4: coaches reported every pitcher showing the exact same
+    Pre-Throw/Post-Throw checklist text on Built on the Bluff and asked
+    whether that's a save-isolation bug (stale caching / a save that isn't
+    actually player-specific) or intentional shared content. Proves the
+    persistence layer's composite key (player_id, season_label, cycle)
+    actually isolates saves: four keys that each differ in exactly one
+    part of the key get distinct plan text AND a distinct script-row value,
+    then each key's read must come back with ONLY its own values -- never
+    another key's, even the one that shares two of its three parts."""
+    keys = [
+        (ISO_PID_A, ISO_SEASON_A, "Fall"),
+        (ISO_PID_B, ISO_SEASON_A, "Fall"),   # different player, same season/cycle
+        (ISO_PID_A, ISO_SEASON_A, "Winter"), # same player, different cycle
+        (ISO_PID_A, ISO_SEASON_B, "Fall"),   # same player, different season
+    ]
+
+    def plan_fields_for(i):
+        return {
+            "vision_statement": "", "training_goals": "",
+            "pre_throw_checklist": f"pre-throw-{i}",
+            "post_throw_checklist": f"post-throw-{i}",
+            "feet_set": "", "feet_moving": "", "work_day": "",
+            "recovery_video_url": "",
+        }
+
+    for i, (pid, season, cycle) in enumerate(keys):
+        SR.upsert_plan(pid, season, cycle, plan_fields_for(i), updated_by=1)
+        SR.upsert_all_script_rows(pid, season, cycle, {
+            1: [{"row_num": 1, "pitch_type": f"pitch-{i}", "ball_info": "", "info": ""}],
+        }, updated_by=1)
+
+    for i, (pid, season, cycle) in enumerate(keys):
+        plan = SR.read_plan(pid, season, cycle)
+        assert plan["pre_throw_checklist"] == f"pre-throw-{i}"
+        assert plan["post_throw_checklist"] == f"post-throw-{i}"
+        rows = SR.read_all_script_rows(pid, season, cycle)[1]
+        assert rows.iloc[0]["pitch_type"] == f"pitch-{i}"
+        # not any OTHER key's values -- the actual isolation assertion
+        for j, _ in enumerate(keys):
+            if j != i:
+                assert plan["pre_throw_checklist"] != f"pre-throw-{j}"
+                assert plan["post_throw_checklist"] != f"post-throw-{j}"

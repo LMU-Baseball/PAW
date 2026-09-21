@@ -364,6 +364,36 @@ def test_register_callbacks_adds_callbacks(server):
     assert len(app.callback_map) > before
 
 
+def test_on_save_state_bound_to_live_selectors_not_a_stale_store(server):
+    """Task 4 (coaches: every pitcher showed the exact same Pre-Throw/
+    Post-Throw checklist text on Built on the Bluff) -- the code trace
+    found `_on_save` reads State("splash-player"/"splash-season"/
+    "splash-cycle", "value"), the live dropdown selections at click time,
+    never a cached/stale store. Confirms that by inspecting the registered
+    callback's own State spec (same technique as
+    test_gas_station_exercise_search_box_and_callback_registered /
+    test_backspace_fix_clientside_callback_registered above -- read
+    app.callback_map, don't trust the source) rather than re-deriving it
+    from scratch. No DB access needed: registering callbacks only wires
+    up functions, it never queries."""
+    from dash import Dash
+    from app.dashboards.splash_report import layout, callbacks
+
+    dash_app = Dash(__name__, server=server, url_base_pathname="/dash/splashsavestate/",
+                    suppress_callback_exceptions=True)
+    dash_app.layout = layout.serve_layout
+    callbacks.register_callbacks(dash_app)
+    spec = next(s for s in dash_app.callback_map.values()
+               if [i["id"] for i in s["inputs"]] == ["splash-save"])
+    state_ids = [s["id"] for s in spec["state"]]
+    # splash-data (the cached render payload, read only to carry
+    # recovery_video_url through untouched) comes first, then the three
+    # live selectors -- never a separate/duplicate player-season-cycle
+    # store that could go stale relative to the dropdowns.
+    assert state_ids[0] == "splash-data"
+    assert state_ids[1:4] == ["splash-player", "splash-season", "splash-cycle"]
+
+
 def _raw_callback(dash_app, *, input_id):
     for spec in dash_app.callback_map.values():
         ids = [i["id"] for i in spec["inputs"]]
