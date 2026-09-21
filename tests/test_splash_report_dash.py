@@ -100,6 +100,62 @@ def test_render_from_data_edit_mode_has_editable_inputs():
     assert "splash-pen-table" in s
 
 
+def _minimal_render_data(pre_throw: str, post_throw: str) -> dict:
+    """A hand-built dict matching the shape `layout.load_data` returns (see
+    that function's own `return {...}`), with EVERY collection field left
+    empty/blank except distinct Pre-Throw/Post-Throw checklist text --
+    deliberately built WITHOUT calling `layout.load_data` itself (which
+    hits the DB) so `render_from_data` can be exercised fully DB-free.
+    `engine` still needs one blank row per `SR.ENGINE_METRIC_KEYS` (matching
+    `SR.read_engine_metrics`'s own blank-state shape) -- `tables.
+    engine_metrics_table` indexes into a `delta` column that a bare `[]`
+    doesn't have."""
+    from app.data import splash_report as SR
+    engine_records = [
+        {"metric_key": k, "label": SR.ENGINE_METRIC_LABELS[k], "base_value": None,
+         "now_value": None, "delta": None, "d1_baseline": SR.D1_BASELINES.get(k),
+         "flag": None}
+        for k in SR.ENGINE_METRIC_KEYS
+    ]
+    return {
+        "profile": {"photo": None, "jersey": None, "name": "P", "class_year": "",
+                   "throws": "Right"},
+        "kpis": {},
+        "plan": {
+            "vision_statement": "", "training_goals": "",
+            "pre_throw_checklist": pre_throw, "post_throw_checklist": post_throw,
+            "feet_set": "", "feet_moving": "", "work_day": "", "recovery_video_url": "",
+        },
+        "cycle": "Fall",
+        "engine": engine_records, "gas": [], "scripts": [], "script_rows": {},
+        "pen": [], "deleted_pen": [], "movement": {}, "drill_options": [], "videos": {},
+    }
+
+
+def test_render_from_data_shows_only_selected_keys_own_checklist_text():
+    """Task 4, brief Step 4: distinguishes intentional identical DB content
+    (a coach genuinely typing the same generic routine for every pitcher)
+    from the render layer showing stale/wrong content for whichever key is
+    actually selected. Two synthetic `data` dicts with distinct Pre-Throw/
+    Post-Throw text (never touching the DB, see `_minimal_render_data`)
+    must each render ONLY their own text -- never the other key's, which
+    is what a caching/staleness bug in `render_from_data` would look like."""
+    from app.dashboards.splash_report import layout
+
+    data_a = _minimal_render_data("KEY-A-PRE-THROW", "KEY-A-POST-THROW")
+    data_b = _minimal_render_data("KEY-B-PRE-THROW", "KEY-B-POST-THROW")
+
+    out_a = str(layout.render_from_data(data_a, editable=False, is_coach=False))
+    out_b = str(layout.render_from_data(data_b, editable=False, is_coach=False))
+
+    assert "KEY-A-PRE-THROW" in out_a and "KEY-A-POST-THROW" in out_a
+    assert "KEY-B-PRE-THROW" in out_b and "KEY-B-POST-THROW" in out_b
+    # the actual isolation assertion: neither key's render tree contains
+    # the OTHER key's text
+    assert "KEY-B-PRE-THROW" not in out_a and "KEY-B-POST-THROW" not in out_a
+    assert "KEY-A-PRE-THROW" not in out_b and "KEY-A-POST-THROW" not in out_b
+
+
 def test_drill_catalog_controls_are_inline_and_coach_only():
     """2026-09-10 feedback: drill add/remove must live directly under each
     dropdown (Feet Set/Feet Moving/Work Day), not a separate "Manage
@@ -400,6 +456,102 @@ def _raw_callback(dash_app, *, input_id):
         if ids == [input_id]:
             return spec["callback"].__wrapped__
     raise AssertionError(f"no callback found with sole Input id {input_id!r}")
+
+
+def test_on_save_calls_save_all_with_that_calls_own_player_season_cycle(server, monkeypatch):
+    """Task 4, brief: "a callback-level test that passes selector values
+    for one key and verifies save_all receives exactly that player,
+    season, and cycle rather than a stale value captured during initial
+    render." Actually INVOKES `_on_save` (unlike
+    test_on_save_state_bound_to_live_selectors_not_a_stale_store above,
+    which only inspects registered State ids) -- same `_raw_callback` +
+    monkeypatch idiom as test_season_change_keeps_valid_player_else_falls_back_to_first.
+    Monkeypatches callbacks.py's own `SR.save_all` (captures its args) and
+    `layout.load_data` (returns {} so the post-save reload needs no DB) --
+    real DB access is never reached."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.dashboards.splash_report import layout, callbacks
+    from app.dashboards.splash_report import callbacks as cb_module
+    from app.data import splash_report as SR
+
+    calls = []
+
+    def fake_save_all(player_id, season_label, cycle, **kwargs):
+        calls.append((player_id, season_label, cycle))
+
+    monkeypatch.setattr(cb_module.SR, "save_all", fake_save_all)
+    monkeypatch.setattr(cb_module.layout, "load_data", lambda *a, **kw: {})
+
+    with server.app_context():
+        coach = User(email="[EMAIL]", name="Coach OS", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/splashonsave/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+        on_save = _raw_callback(dash_app, input_id="splash-save")
+
+        # the rest of _on_save's States (vision/goals/pre/post/feet*/engine
+        # tables/gas/pen/movement + 24 per-script states) -- their content
+        # doesn't matter for this test, only player_id/season/cycle do.
+        other_states = ["V", "G", "Pre", "Post", [], [], [], [], [], [], [], []]
+        script_states = []
+        for _ in range(SR.N_SCRIPTS):
+            script_states += [None, None, None, []]
+
+        with server.test_request_context("/dash/splash_report/"):
+            login_user(coach)
+            on_save(1, {}, -999301, "2091/2092", "Fall", *other_states, *script_states)
+            on_save(1, {}, -999302, "2092/2093", "Winter", *other_states, *script_states)
+
+    # NOT a stale value from a prior call/initial render -- each call's own
+    # player/season/cycle, in order.
+    assert calls == [(-999301, "2091/2092", "Fall"), (-999302, "2092/2093", "Winter")]
+
+
+def test_load_data_callback_reads_the_db_with_each_calls_own_key_not_a_cached_default(
+        server, monkeypatch):
+    """Task 4, Finding 3 (task reviewer): `_load_data` (callbacks.py
+    ~line 84) is the file's own documented split-caching layer --
+    Player/Season/Cycle change re-reads the DB into `splash-data`, and
+    `_render` (the next callback) only re-draws from whatever's already in
+    that Store. `_load_data` itself is a bare passthrough
+    (`return layout.load_data(player_id, season, cycle)`), so if it ever
+    re-keyed incorrectly (e.g. closed over a stale value, or ignored its
+    own arguments) that would be the actual mechanism behind "every pitcher
+    shows the same content." Monkeypatches `layout.load_data` with a stub
+    that echoes its own arguments back in the result, then calls the raw
+    callback twice with two different (player, season, cycle) triples and
+    asserts each call's OWN return value reflects only that call's inputs
+    -- never the previous call's. No DB access needed."""
+    from dash import Dash
+    from app.dashboards.splash_report import layout, callbacks
+    from app.dashboards.splash_report import callbacks as cb_module
+
+    monkeypatch.setattr(
+        cb_module.layout, "load_data",
+        lambda player_id, season, cycle: {"marker": f"{player_id}-{season}-{cycle}"})
+
+    dash_app = Dash(__name__, server=server, url_base_pathname="/dash/splashloadkey/",
+                    suppress_callback_exceptions=True)
+    dash_app.layout = layout.serve_layout
+    callbacks.register_callbacks(dash_app)
+    on_load = dash_app.callback_map["splash-data.data"]["callback"].__wrapped__
+
+    result_a = on_load(-999401, "2081/2082", "Fall")
+    result_b = on_load(-999402, "2082/2083", "Winter")
+
+    assert result_a == {"marker": "-999401-2081/2082-Fall"}
+    assert result_b == {"marker": "-999402-2082/2083-Winter"}
+    # the actual regression check: the second call's result must not carry
+    # anything from the first call
+    assert result_a != result_b
+    assert "-999401" not in result_b["marker"]
 
 
 def test_edit_click_sets_editing_true_for_coach_only(server):
