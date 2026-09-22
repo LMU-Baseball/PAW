@@ -450,6 +450,28 @@ def test_on_filters_scopes_player_options_to_date_range():
     assert "P.all_player_names()" not in src
 
 
+def test_session_date_options_tags_dates_and_filters_by_plan():
+    """The practice-session dropdown must tag each date with its assigned
+    plan(s) and, once a plan is selected, drop dates that don't carry it."""
+    from app.dashboards.hitting_practice import selectors
+    available = ["2026-09-21", "2026-09-18", "2026-09-14"]
+    assignments = {"2026-09-21": ["Fastball", "Slider"], "2026-09-18": ["Curveball"]}
+
+    dates, options = selectors.session_date_options(available, assignments)
+    assert dates == available
+    by_value = {o["value"]: o["label"] for o in options}
+    assert by_value["2026-09-21"] == "2026-09-21 (Fastball, Slider)"
+    assert by_value["2026-09-18"] == "2026-09-18 (Curveball)"
+    assert by_value["2026-09-14"] == "2026-09-14"
+    assert by_value["__all_sessions__"] == "All sessions in range (3)"
+
+    dates, options = selectors.session_date_options(available, assignments, ["Fastball"])
+    assert dates == ["2026-09-21"]
+    by_value = {o["value"]: o["label"] for o in options}
+    assert set(by_value) == {"__all_sessions__", "2026-09-21"}
+    assert by_value["__all_sessions__"] == "All sessions in range (1)"
+
+
 def test_layout_scopes_first_paint_to_season_default_range():
     """Task 3: the initial player list/options at first paint must also be
     scoped to the season-default date range, not the all-time roster."""

@@ -75,21 +75,16 @@ def register_callbacks(dash_app) -> None:
         player = selectors.resolve_player(player, is_coach=is_coach,
                                           own_name=own_name, available=names)
         available_dates = P.practice_dates(start, end, player=player)
-        selected_date = selected_dates or "__all_sessions__"
-        if selected_date != "__all_sessions__" and selected_date not in available_dates:
-            selected_date = "__all_sessions__"
         plan_names = {p.name for p in PP.list_plans()}
         selected_plans = [p for p in (selected_plans or []) if p in plan_names]
-        if selected_plans:
-            assignments = PP.assignments_for_dates(available_dates)
-            plan_dates = {d for d, names_for_date in assignments.items()
-                          if set(names_for_date).intersection(selected_plans)}
-            if selected_date == "__all_sessions__":
-                effective_dates = plan_dates
-            else:
-                effective_dates = {selected_date} & plan_dates
-        else:
-            effective_dates = set(available_dates) if selected_date == "__all_sessions__" else {selected_date}
+        assignments = PP.assignments_for_dates(available_dates)
+        dropdown_dates, session_options = selectors.session_date_options(
+            available_dates, assignments, selected_plans)
+        selected_date = selected_dates or "__all_sessions__"
+        if selected_date != "__all_sessions__" and selected_date not in dropdown_dates:
+            selected_date = "__all_sessions__"
+        effective_dates = (set(dropdown_dates) if selected_date == "__all_sessions__"
+                           else {selected_date})
         return (
             {"player": player,
              "session": "All session types", "exclude_test": True,
@@ -97,9 +92,7 @@ def register_callbacks(dash_app) -> None:
              "end": end.isoformat() if end else None,
              "session_dates": sorted(effective_dates), "plans": selected_plans},
             popts,
-            [{"label": f"All sessions in range ({len(available_dates)})",
-              "value": "__all_sessions__"}]
-            + [{"label": d, "value": d} for d in available_dates],
+            session_options,
             [{"label": d, "value": d} for d in available_dates],
             [{"label": p, "value": p} for p in sorted(plan_names)],
             [{"label": p, "value": p} for p in sorted(plan_names)],

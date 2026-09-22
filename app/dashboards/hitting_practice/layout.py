@@ -108,9 +108,8 @@ def serve_layout() -> html.Div:
     plan_rows = PP.list_plans()
     plan_options = [{"label": p.name, "value": p.name} for p in plan_rows]
     available_dates = P.practice_dates(start_d, end_d, exclude_test=True)
-    session_options = ([{"label": f"All sessions in range ({len(available_dates)})",
-                         "value": "__all_sessions__"}]
-                       + [{"label": d, "value": d} for d in available_dates])
+    assignments0 = PP.assignments_for_dates(available_dates)
+    _, session_options = selectors.session_date_options(available_dates, assignments0)
     opt_values = {o["value"] for o in players}
     on_latest = [n for n in on_latest_all if n in opt_values]
     default_player = selectors.resolve_player(
