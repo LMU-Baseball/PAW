@@ -60,6 +60,7 @@ def create_app(config_object=Config) -> Flask:
     from app.auth import models  # noqa: F401
     from app.data import notes  # noqa: F401  (registers GameNote for create_all)
     from app.data import dev_plans  # noqa: F401  (registers DevPlan for create_all)
+    from app.data import practice_plans  # noqa: F401  (registers practice-plan models)
 
     from app.auth.routes import auth_bp
     from app.main.routes import main_bp
@@ -94,6 +95,8 @@ def create_app(config_object=Config) -> Flask:
 
     with server.app_context():
         db.create_all()
+        from app.data.practice_plans import seed_plans
+        seed_plans()
         # Provision shared logins from env vars when present (lets a shell-less
         # host with an ephemeral disk — e.g. Render free tier — seed its own
         # accounts on every boot). No-op when the PAW_SEED_* vars are unset.

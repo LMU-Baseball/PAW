@@ -6,6 +6,7 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import practice as P
+from app.data import practice_plans as PP
 from app.data import roster_media
 from app.dashboards import date_range as dr
 from app.dashboards.shell import BANNER, PHOTO_PLACEHOLDER, header
@@ -104,6 +105,12 @@ def serve_layout() -> html.Div:
     # matches what _on_filters will show once the date-range callback fires.
     names = P.players_in_range(start_d, end_d)
     players = selectors.player_options(names, is_coach=is_coach, own_name=own_name)
+    plan_rows = PP.list_plans()
+    plan_options = [{"label": p.name, "value": p.name} for p in plan_rows]
+    available_dates = P.practice_dates(start_d, end_d, exclude_test=True)
+    session_options = ([{"label": f"All sessions in range ({len(available_dates)})",
+                         "value": "__all_sessions__"}]
+                       + [{"label": d, "value": d} for d in available_dates])
     opt_values = {o["value"] for o in players}
     on_latest = [n for n in on_latest_all if n in opt_values]
     default_player = selectors.resolve_player(
@@ -127,11 +134,58 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Player", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="prac-player", options=players, value=default_player,
-                         clearable=False,
-                         style={"minWidth": "200px"}),
+                         clearable=False, style={"minWidth": "200px"}),
+        ]),
+        html.Div([
+            html.Label("Practice sessions", style={"color": "white", "fontWeight": "bold"}),
+            dcc.Dropdown(id="prac-session-dates", options=session_options,
+                         value="__all_sessions__", multi=False, clearable=False,
+                         style={"minWidth": "220px"}),
+        ]),
+        html.Div([
+            html.Label("Practice plans", style={"color": "white", "fontWeight": "bold"}),
+            dcc.Dropdown(id="prac-plan-filter", options=plan_options, value=[],
+                         multi=True, placeholder="All plans", style={"minWidth": "200px"}),
         ]),
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
               "flexWrap": "wrap", "padding": "12px 16px", "backgroundColor": BANNER})
+
+    coach_editor = html.Details([
+        html.Summary("Manage practice plans", style={"cursor": "pointer", "fontWeight": "bold"}),
+        html.Div([
+            html.Div("Assignments apply to every player on the selected dates. Saving replaces the selected dates' plan assignments."),
+            dcc.Dropdown(id="prac-plan-assignment-dates",
+                         options=[{"label": d, "value": d} for d in available_dates],
+                         value=[], multi=True, placeholder="Select dates to assign"),
+            dcc.Dropdown(id="prac-plan-assignment-values", options=plan_options,
+                         value=[], multi=True, placeholder="Select plans"),
+            html.Div([
+                html.Button("Save assignments", id="prac-plan-save", n_clicks=0,
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block", "justifySelf": "start"}),
+            ], style={"display": "flex", "justifyContent": "flex-start"}),
+            html.Div(id="prac-plan-status"),
+            html.Div(id="prac-plan-manage-list"),
+            html.Div([
+                dcc.Dropdown(id="prac-plan-manage-select", options=plan_options,
+                             value=None, placeholder="Select plan to rename/archive",
+                             style={"minWidth": "240px"}),
+                dcc.Input(id="prac-plan-rename", type="text", placeholder="Replacement name",
+                          style={"width": "180px"}),
+                html.Button("Rename", id="prac-plan-rename-button", n_clicks=0,
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
+                html.Button("Archive", id="prac-plan-archive", n_clicks=0,
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
+            ], style={"display": "flex", "gap": "6px", "alignItems": "center",
+                      "justifyContent": "flex-start", "flexWrap": "wrap"}),
+            html.Div([
+                dcc.Input(id="prac-plan-new-name", type="text", placeholder="New plan name",
+                          style={"width": "180px"}),
+                html.Button("Add plan", id="prac-plan-add", n_clicks=0,
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
+            ], style={"display": "flex", "gap": "6px", "justifyContent": "flex-start"}),
+        ], style={"display": "grid", "gap": "8px", "padding": "10px 0"}),
+    ], style={"padding": "8px 16px", "borderBottom": "1px solid #ddd"}) if is_coach else html.Div()
+
 
     tabs = dcc.Tabs(id="prac-tabs", value="zones", children=[
         dcc.Tab(label="Pitch Zones", value="zones"),
@@ -145,6 +199,7 @@ def serve_layout() -> html.Div:
             "player": default_player,
             "session": "All session types", "exclude_test": True,
             "start": start_d, "end": end_d,
+            "session_dates": "__all_sessions__", "plans": [],
         }),
         dcc.Store(id="prac-pitch-data"),
         header(back_href="/hitting", back_label="← Hitting"),
@@ -158,6 +213,7 @@ def serve_layout() -> html.Div:
                          "Data refreshes via the HitTrax ELT pipeline (Mon–Sat).",
                          style={"color": "#555", "marginBottom": "8px"}),
                 filters,
+                coach_editor,
             ], className="paw-dash-filters"),
             html.Div([tabs,
                       html.Div(id="prac-tab-content", style={"padding": "8px 16px"})],
