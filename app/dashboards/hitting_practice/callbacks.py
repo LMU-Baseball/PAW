@@ -97,7 +97,8 @@ def register_callbacks(dash_app) -> None:
              "end": end.isoformat() if end else None,
              "session_dates": sorted(effective_dates), "plans": selected_plans},
             popts,
-            [{"label": "All sessions in range", "value": "__all_sessions__"}]
+            [{"label": f"All sessions in range ({len(available_dates)})",
+              "value": "__all_sessions__"}]
             + [{"label": d, "value": d} for d in available_dates],
             [{"label": d, "value": d} for d in available_dates],
             [{"label": p, "value": p} for p in sorted(plan_names)],

@@ -108,7 +108,8 @@ def serve_layout() -> html.Div:
     plan_rows = PP.list_plans()
     plan_options = [{"label": p.name, "value": p.name} for p in plan_rows]
     available_dates = P.practice_dates(start_d, end_d, exclude_test=True)
-    session_options = ([{"label": "All sessions in range", "value": "__all_sessions__"}]
+    session_options = ([{"label": f"All sessions in range ({len(available_dates)})",
+                         "value": "__all_sessions__"}]
                        + [{"label": d, "value": d} for d in available_dates])
     opt_values = {o["value"] for o in players}
     on_latest = [n for n in on_latest_all if n in opt_values]
@@ -138,7 +139,7 @@ def serve_layout() -> html.Div:
         html.Div([
             html.Label("Practice sessions", style={"color": "white", "fontWeight": "bold"}),
             dcc.Dropdown(id="prac-session-dates", options=session_options,
-                         value="__all_sessions__", clearable=False,
+                         value="__all_sessions__", multi=False, clearable=False,
                          style={"minWidth": "220px"}),
         ]),
         html.Div([
@@ -160,8 +161,8 @@ def serve_layout() -> html.Div:
                          value=[], multi=True, placeholder="Select plans"),
             html.Div([
                 html.Button("Save assignments", id="prac-plan-save", n_clicks=0,
-                            style={"width": "auto", "justifySelf": "start"}),
-            ], style={"display": "flex", "justifyContent": "flex-end"}),
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block", "justifySelf": "start"}),
+            ], style={"display": "flex", "justifyContent": "flex-start"}),
             html.Div(id="prac-plan-status"),
             html.Div(id="prac-plan-manage-list"),
             html.Div([
@@ -171,17 +172,17 @@ def serve_layout() -> html.Div:
                 dcc.Input(id="prac-plan-rename", type="text", placeholder="Replacement name",
                           style={"width": "180px"}),
                 html.Button("Rename", id="prac-plan-rename-button", n_clicks=0,
-                            style={"width": "auto"}),
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
                 html.Button("Archive", id="prac-plan-archive", n_clicks=0,
-                            style={"width": "auto"}),
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
             ], style={"display": "flex", "gap": "6px", "alignItems": "center",
-                      "justifyContent": "flex-end", "flexWrap": "wrap"}),
+                      "justifyContent": "flex-start", "flexWrap": "wrap"}),
             html.Div([
                 dcc.Input(id="prac-plan-new-name", type="text", placeholder="New plan name",
                           style={"width": "180px"}),
                 html.Button("Add plan", id="prac-plan-add", n_clicks=0,
-                            style={"width": "auto"}),
-            ], style={"display": "flex", "gap": "6px", "justifyContent": "flex-end"}),
+                            style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
+            ], style={"display": "flex", "gap": "6px", "justifyContent": "flex-start"}),
         ], style={"display": "grid", "gap": "8px", "padding": "10px 0"}),
     ], style={"padding": "8px 16px", "borderBottom": "1px solid #ddd"}) if is_coach else html.Div()
 
