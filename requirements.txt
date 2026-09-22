@@ -32,6 +32,10 @@ paramiko>=3
 # Roster media scrape (scripts/scrape_roster_media.py)
 beautifulsoup4>=4.12
 
+# Per-pitch video clipping (scripts/pitch_video_clips.py) -- portable ffmpeg
+# binary, no system install required
+imageio-ffmpeg>=0.5
+
 # Reports (HTML -> PDF)
 # PINNED, not >=: playwright stamps its browser directory with a build number
 # tied to the package version (1.61.0 -> chromium_headless_shell-1228). A float
