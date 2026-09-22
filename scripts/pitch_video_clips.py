@@ -6,18 +6,28 @@ for at least some games -- the games ingest loader drops them -- so the raw
 per-pitch CSV (still sitting on the Trackman SFTP server) is the only source
 of real per-pitch timestamps.
 
-Why this isn't fully automatic: these cameras split recording into
-fixed-size segment files (observed: ~18 minutes each, ~4GB, consistent with
-a FAT32-formatted card). A segment file's mtime does NOT reliably mark its
-true start -- there's a real, variable gap at every file rollover
+Why this needs at least a little human input: these cameras split recording
+into fixed-size segment files (observed: ~18 minutes each, ~4GB, consistent
+with a FAT32-formatted card). A segment file's mtime does NOT reliably mark
+its true start -- there's a real, variable gap at every file rollover
 (unpredictable in both size and direction, confirmed by comparing a
 segment's last frame to the next segment's first frame -- real game time
 passes that isn't captured on either file). So naive "elapsed nominal
 seconds since segment start" math lands anywhere from 0 to 25+ seconds off
-actual pitch content, and the error is NOT constant within a segment --
-piecewise-linear correction from real anchor points is required. See
+actual pitch content.
+
+That said, this DOES run start-to-finish from as little as **one anchor per
+segment** (even one per whole camera angle, applied to just the first
+segment, if that's all you have time for) -- it does not require dense
+per-segment anchoring to produce a full set of clips. The tradeoff for using
+fewer anchors is accuracy, not coverage: every pitch still gets a clip, but
+`clip` also emits a **flagged list** of the pitches least likely to be
+right (its segment has no/one anchor, it's far from the nearest anchor, or
+it's in the first segment of the recording -- confirmed less predictable
+than later ones). Review the flagged ones; trust the rest by default. See
 docs/pitch-video-clipping.md for the full story, and — importantly — a
-checklist for picking anchor points that won't waste your time.
+checklist for picking anchor points that won't waste your time when you do
+add them.
 
 Two-step workflow:
   1. `fetch-csv` -- pull the raw per-pitch CSV for a game from FileZilla.
@@ -25,14 +35,15 @@ Two-step workflow:
      camera angle, and a small hand-built JSON anchors file (real per-pitch
      timestamps a human has verified against the actual video), cut a clip
      per pitch using piecewise-linear interpolation between anchors within
-     each segment.
+     each segment (or a flat constant shift, for a segment with only one).
 
 Anchors file format -- a JSON object keyed by segment filename, each value a
 list of [nominal_offset_seconds, true_offset_seconds] pairs, sorted by
-nominal_offset (at least 2 pairs per segment you want clips from):
+nominal_offset (one pair is enough to get clips for that segment; two or
+more improves accuracy and shrinks the flagged list):
     {
       "USD_5.15.2026_HomeRight_01.mp4": [[658.57, 674.2], [717.19, 709.2]],
-      "USD_5.15.2026_HomeRight_02.mp4": [[163.2, 184.3], [970.5, 972.9]]
+      "USD_5.15.2026_HomeRight_02.mp4": [[163.2, 184.3]]
     }
 `nominal_offset` = a pitch's real Trackman timestamp minus that segment's
 naive start time (see `segment_windows`). `true_offset` = that same pitch's
@@ -178,15 +189,27 @@ def locate_segment(real_seconds: float,
 
 
 def build_corrector(anchors: list[tuple[float, float]]):
-    """A piecewise-linear function `nominal_offset -> corrected_offset`,
-    given sorted (nominal, true) anchor pairs (at least 2). EXTRAPOLATES
-    using the boundary segment's slope outside the anchor range -- plain
-    `np.interp` clamps outside its range instead, which silently produces
-    identical (wrong) positions for every pitch past the last anchor. Caught
-    that the hard way building this the first time; see
-    docs/pitch-video-clipping.md."""
-    if len(anchors) < 2:
-        raise ValueError("need at least 2 anchors to interpolate/extrapolate")
+    """A function `nominal_offset -> corrected_offset`, given sorted
+    (nominal, true) anchor pairs. Degrades gracefully by anchor count:
+
+    - 1 anchor: constant shift (nominal + (true - nominal_of_anchor)) --
+      applied across the WHOLE segment. This is what makes a single
+      first-pitch anchor per camera angle enough to process an entire
+      recording automatically; `confidence_flag` below is what flags the
+      pitches this one assumption is least likely to hold for.
+    - 2+ anchors: piecewise-linear, EXTRAPOLATING using the boundary
+      segment's slope outside the anchor range -- plain `np.interp` clamps
+      outside its range instead, which silently produces identical (wrong)
+      positions for every pitch past the last anchor. Caught that the hard
+      way building this the first time; see docs/pitch-video-clipping.md.
+    """
+    if len(anchors) == 0:
+        raise ValueError("need at least 1 anchor")
+    if len(anchors) == 1:
+        nominal0, true0 = anchors[0]
+        shift = true0 - nominal0
+        return lambda nominal: nominal + shift
+
     noms = np.array([a[0] for a in anchors])
     trues = np.array([a[1] for a in anchors])
 
@@ -199,6 +222,38 @@ def build_corrector(anchors: list[tuple[float, float]]):
             return float(trues[-1] + slope * (nominal - noms[-1]))
         return float(np.interp(nominal, noms, trues))
     return corrected
+
+
+def confidence_flag(nominal: float, anchors: list[tuple[float, float]],
+                    is_first_segment: bool, gap_threshold: float = 60.0) -> str | None:
+    """Why a pitch's corrected position should be treated as lower
+    confidence and reviewed by hand, or None if it isn't. This -- not
+    after-the-fact analysis of the cut clip's pixels -- is what "flag a
+    couple errors" means here. A motion-based "does this clip contain a
+    real pitch" check was tried and rejected: a known-wrong clip and a
+    known-right one (a routine take, low visual contrast either way)
+    scored nearly identically. Confidence in the TIMING MATH is a signal
+    we can actually trust; confidence in the pixels, for a take, isn't."""
+    if not anchors:
+        return "no anchor for this segment -- position is a naive guess"
+    reasons = []
+    if len(anchors) == 1:
+        # A single anchor applies one flat shift across the WHOLE segment --
+        # every pitch in it carries the same (unmeasured) risk, uniformly.
+        # A "distance from the anchor" check is meaningless here (of course
+        # most of an 18-minute segment is far from one point) and would
+        # flag nearly the entire segment for no informative reason -- tried
+        # that, it did exactly this on the real game. That check only
+        # means something once there are 2+ anchors and "the gap between
+        # adjacent anchors" is a real local-confidence signal.
+        reasons.append("only 1 anchor in this segment (flat constant-shift assumption)")
+    else:
+        nearest_gap = min(abs(nominal - a[0]) for a in anchors)
+        if nearest_gap > gap_threshold:
+            reasons.append(f"{nearest_gap:.0f}s (nominal) from the nearest anchor")
+    if is_first_segment:
+        reasons.append("first segment of the recording -- confirmed less predictable than later ones")
+    return "; ".join(reasons) if reasons else None
 
 
 def safe_filename_part(s) -> str:
@@ -226,24 +281,32 @@ def generate_clips(video_dir: str, angle_prefix: str, csv_path: str, game_id: st
                    pad_after: float = 3.0, gap_pad_before: float = 8.0,
                    gap_pad_after: float = 10.0, gap_threshold: float = 60.0) -> dict:
     """Cut one clip per pitch for `game_id`, for the camera angle whose
-    segment files live in `video_dir` matching `angle_prefix`.
+    segment files live in `video_dir` matching `angle_prefix`. Processes
+    the WHOLE game automatically from as little as a single anchor per
+    segment (even a single anchor for just the first segment, applied as
+    a constant shift, still locates every other segment's pitches via
+    their own file's naive mtime-chained window -- see `segment_windows`)
+    -- this does not require dense per-segment anchoring to run.
 
-    Pitches whose segment has fewer than 2 anchors, or that fall outside
-    every segment's window, are skipped and reported rather than guessed
-    at -- an unanchored segment gets no clips at all instead of clips
-    built on a made-up correction.
+    A pitch is skipped only if it falls outside every segment's window
+    entirely (`skipped_out_of_range`, meaning it doesn't belong to any
+    segment file present in `video_dir` -- a real data problem, not a
+    confidence issue). Every other pitch gets a clip, flagged or not --
+    nothing is silently guessed at without a record of it. See
+    `confidence_flag` for what makes a pitch "flagged" (its segment has
+    no anchor at all, only one anchor, it's far from the nearest anchor,
+    or it's in the first segment of the recording) -- that list is the
+    actual analogue of "flag a couple errors" from the old process:
+    review those, trust the rest by default. Flagged pitches get the
+    wider `gap_pad_*` padding automatically as a safety margin.
 
-    A pitch more than `gap_threshold` seconds (nominal) from its nearest
-    anchor gets the wider `gap_pad_before`/`gap_pad_after` padding instead
-    of `pad_before`/`pad_after`, as a safety margin against interpolation
-    error in sparsely-anchored stretches of a segment.
-
-    Returns {"made": int, "skipped_no_anchors": [PitchNo, ...],
+    Returns {"made": int, "flagged": [{"pitch_no": int, "reason": str}, ...],
              "skipped_out_of_range": [PitchNo, ...]}.
     """
     from app.db import query_df
 
     segments = segment_windows(video_dir, angle_prefix)
+    first_segment_filename = segments[0].filename
     with open(anchors_path) as fh:
         anchors_by_file: dict = json.load(fh)
 
@@ -261,25 +324,22 @@ def generate_clips(video_dir: str, angle_prefix: str, csv_path: str, game_id: st
 
     os.makedirs(out_dir, exist_ok=True)
     made = 0
-    skipped_no_anchors: list[int] = []
+    flagged: list[dict] = []
     skipped_out_of_range: list[int] = []
     correctors = {f: build_corrector([tuple(a) for a in pts])
-                 for f, pts in anchors_by_file.items() if len(pts) >= 2}
+                 for f, pts in anchors_by_file.items() if len(pts) >= 1}
 
     for _, r in df.iterrows():
         seg, nominal = locate_segment(r["sec"], segments)
         if seg is None:
             skipped_out_of_range.append(int(r["PitchNo"]))
             continue
-        if seg.filename not in correctors:
-            skipped_no_anchors.append(int(r["PitchNo"]))
-            continue
 
-        center = correctors[seg.filename](nominal)
-        noms = [a[0] for a in anchors_by_file[seg.filename]]
-        nearest_gap = min(abs(nominal - n) for n in noms)
-        pb, pa = ((gap_pad_before, gap_pad_after) if nearest_gap > gap_threshold
-                 else (pad_before, pad_after))
+        seg_anchors = [tuple(a) for a in anchors_by_file.get(seg.filename, [])]
+        is_first_segment = seg.filename == first_segment_filename
+        reason = confidence_flag(nominal, seg_anchors, is_first_segment, gap_threshold)
+        center = correctors[seg.filename](nominal) if seg.filename in correctors else nominal
+        pb, pa = (gap_pad_before, gap_pad_after) if reason else (pad_before, pad_after)
 
         result = (r["PlayResult"] if r["PlayResult"] and r["PlayResult"] != "Undefined"
                  else r["PitchCall"])
@@ -290,9 +350,10 @@ def generate_clips(video_dir: str, angle_prefix: str, csv_path: str, game_id: st
         cut_clip(os.path.join(video_dir, seg.filename), center, pb, pa,
                 os.path.join(out_dir, fname))
         made += 1
+        if reason:
+            flagged.append({"pitch_no": int(r["PitchNo"]), "reason": reason})
 
-    return {"made": made, "skipped_no_anchors": skipped_no_anchors,
-            "skipped_out_of_range": skipped_out_of_range}
+    return {"made": made, "flagged": flagged, "skipped_out_of_range": skipped_out_of_range}
 
 
 # ---------------------------------------------------------------------------
@@ -328,18 +389,31 @@ def fetch_csv_cmd(date, opponent, game_num, out_path):
 @click.option("--out-dir", required=True)
 @click.option("--pad-before", default=2.0, show_default=True)
 @click.option("--pad-after", default=3.0, show_default=True)
+@click.option("--flagged-out", default=None,
+             help="Optional path to also write the flagged-pitch list as JSON")
 def clip_cmd(video_dir, angle_prefix, csv_path, game_id, anchors_path, out_dir,
-            pad_before, pad_after):
-    """Cut one clip per pitch using the anchors file's piecewise correction."""
+            pad_before, pad_after, flagged_out):
+    """Cut one clip per pitch for the whole game automatically, using
+    whatever anchors are available (as few as one per segment), and flag
+    the pitches least likely to be right so review effort goes only
+    there -- see confidence_flag's docstring for exactly what gets
+    flagged and why."""
     result = generate_clips(video_dir, angle_prefix, csv_path, game_id, anchors_path,
                             out_dir, pad_before, pad_after)
     click.echo(f"made {result['made']} clips in {out_dir}")
-    if result["skipped_no_anchors"]:
-        click.echo(f"skipped {len(result['skipped_no_anchors'])} pitches "
-                   f"(segment has fewer than 2 anchors): {result['skipped_no_anchors']}")
+    if result["flagged"]:
+        click.echo(f"{len(result['flagged'])} flagged for review:")
+        for item in result["flagged"]:
+            click.echo(f"  pitch {item['pitch_no']:>3}: {item['reason']}")
     if result["skipped_out_of_range"]:
         click.echo(f"skipped {len(result['skipped_out_of_range'])} pitches "
-                   f"(outside every segment's window): {result['skipped_out_of_range']}")
+                   f"(outside every segment's window -- not a confidence issue, "
+                   f"check the video files actually cover this game): "
+                   f"{result['skipped_out_of_range']}")
+    if flagged_out:
+        with open(flagged_out, "w") as fh:
+            json.dump(result["flagged"], fh, indent=2)
+        click.echo(f"flagged list written to {flagged_out}")
 
 
 if __name__ == "__main__":

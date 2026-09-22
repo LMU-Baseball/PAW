@@ -12,6 +12,7 @@ import pytest
 from scripts.pitch_video_clips import (
     Segment,
     build_corrector,
+    confidence_flag,
     find_game_csv,
     locate_segment,
     safe_filename_part,
@@ -62,9 +63,20 @@ def test_corrector_extrapolation_does_not_clamp_like_bare_np_interp():
     assert f(250.0) != f(300.0)
 
 
-def test_corrector_requires_at_least_two_anchors():
+def test_corrector_requires_at_least_one_anchor():
     with pytest.raises(ValueError):
-        build_corrector([(100.0, 110.0)])
+        build_corrector([])
+
+
+def test_corrector_single_anchor_is_a_flat_constant_shift():
+    # One anchor per segment is enough to run the whole tool -- this is
+    # what makes that possible: apply that one pitch's drift everywhere
+    # in the segment, not just at the anchor itself.
+    f = build_corrector([(658.57, 674.2)])  # true - nominal = +15.63
+    shift = 674.2 - 658.57
+    assert f(658.57) == pytest.approx(674.2)
+    assert f(0.0) == pytest.approx(0.0 + shift)
+    assert f(1000.0) == pytest.approx(1000.0 + shift)
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +134,57 @@ def test_locate_segment_returns_none_outside_every_window():
     seg, nominal = locate_segment(500.0, segs)
     assert seg is None
     assert nominal is None
+
+
+# ---------------------------------------------------------------------------
+# confidence_flag -- the "flag a couple errors" mechanism: confidence in
+# the timing math, not after-the-fact pixel analysis of the cut clip (that
+# was tried and rejected -- a known-wrong clip and a known-right one, a
+# routine take with low visual contrast, scored nearly identically).
+# ---------------------------------------------------------------------------
+
+def test_confidence_flag_none_when_well_anchored_and_not_first_segment():
+    anchors = [(100.0, 110.0), (200.0, 195.0)]
+    assert confidence_flag(150.0, anchors, is_first_segment=False) is None
+
+
+def test_confidence_flag_flags_zero_anchors():
+    reason = confidence_flag(150.0, [], is_first_segment=False)
+    assert reason is not None and "no anchor" in reason
+
+
+def test_confidence_flag_flags_single_anchor_segment():
+    reason = confidence_flag(150.0, [(100.0, 110.0)], is_first_segment=False)
+    assert reason is not None and "1 anchor" in reason
+
+
+def test_confidence_flag_flags_far_from_nearest_anchor():
+    anchors = [(0.0, 10.0), (1000.0, 990.0)]
+    reason = confidence_flag(500.0, anchors, is_first_segment=False, gap_threshold=60.0)
+    assert reason is not None and "nearest anchor" in reason
+
+
+def test_confidence_flag_single_anchor_never_gets_a_redundant_distance_flag():
+    # Regression: a first cut of this function applied the "far from
+    # nearest anchor" check even with only 1 anchor -- since most of an
+    # 18-minute segment is trivially >60s from one point, that flagged
+    # nearly the entire real game when smoke-tested. "1 anchor" alone is
+    # the whole story for a single-anchor segment; a distance number on
+    # top of it is noise, not signal.
+    reason = confidence_flag(900.0, [(50.0, 60.0)], is_first_segment=False)
+    assert "nearest anchor" not in reason
+    assert reason == "only 1 anchor in this segment (flat constant-shift assumption)"
+
+
+def test_confidence_flag_flags_first_segment_even_when_well_anchored():
+    anchors = [(100.0, 110.0), (200.0, 195.0)]
+    reason = confidence_flag(150.0, anchors, is_first_segment=True)
+    assert reason is not None and "first segment" in reason
+
+
+def test_confidence_flag_can_combine_multiple_reasons():
+    reason = confidence_flag(150.0, [(100.0, 110.0)], is_first_segment=True)
+    assert "1 anchor" in reason and "first segment" in reason
 
 
 # ---------------------------------------------------------------------------

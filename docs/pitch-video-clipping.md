@@ -49,12 +49,23 @@ python scripts/pitch_video_clips.py fetch-csv \
 `--opponent` must match the CSV filename exactly (check a FileZilla listing
 if unsure — team names in there aren't always what you'd guess).
 
-### 2. Build the anchors file — the part that actually takes time
+### 2. Build the anchors file
 
 One JSON file per camera angle, anchors keyed by segment filename (see the
-script's module docstring for the exact format). You need **at least 2
-anchors per segment** you want clips from; segments with 0 or 1 anchor are
-skipped entirely (reported, not guessed at).
+script's module docstring for the exact format). **You don't need a
+perfectly-anchored segment to get clips out of it** — `clip` runs on
+whatever you give it, down to a single anchor for a whole segment (even
+zero: an un-anchored segment still gets naive, unshifted clips with wide
+padding). What changes with fewer anchors is confidence, not coverage:
+every pitch gets a clip either way, and `clip` prints a **flagged list** of
+the pitches least likely to be right, so review effort goes only where it's
+actually needed — mirroring how this worked before this tool existed: pick
+the first pitch, let it process the whole game, fix the couple it flags.
+
+Start with the minimum (one anchor per segment — even just the first pitch
+of the whole recording, applied to segment 1 only) and only add more where
+the flagged list is worth shrinking. More anchors per segment = smaller
+flagged list = less to review by hand; it's a dial, not a requirement.
 
 **How to find an anchor**: pick a pitch, watch the batter's front foot.
 The moment it plants is the reliable tell that a pitch is arriving — this
@@ -62,8 +73,9 @@ works on *every* pitch, take or swing, unlike waiting for contact. Note the
 video timestamp, look up that pitch's real Trackman time (from the CSV),
 and you have one (nominal, true) pair.
 
-**Picking a GOOD anchor pitch is the actual skill here** — this is what ate
-most of the time on the test game:
+**If you do want to add more anchors to shrink the flagged list, picking a
+GOOD one is the actual skill** — this is what ate most of the time on the
+test game:
 
 - **Pick isolated plays**, not pitches in the middle of a busy stretch
   (back-to-back swings, a foul-ball scramble, a mound visit). Automated
@@ -98,17 +110,23 @@ python scripts/pitch_video_clips.py clip \
     --pad-before 2 --pad-after 3
 ```
 
-Pitches whose segment isn't in the anchors file (or has fewer than 2
-anchors) are skipped and listed in the output — not silently given a wide
-guess. Pitches more than 60s (nominal) from their nearest anchor
-automatically get wider padding (8s/10s instead of the 2s/3s default) as a
-safety margin, since interpolation gets less trustworthy the further you
-are from a confirmed point.
+Every pitch in the game gets a clip — flagged or not. A pitch is flagged
+when its segment has no anchor, has only one anchor (a flat constant-shift
+assumption across the whole segment — real but unmeasured risk), is more
+than 60s (nominal) from the nearest of 2+ anchors, or is in the first
+segment of the recording (confirmed less predictable than later ones,
+regardless of anchor count). Flagged pitches automatically get wider
+padding (8s/10s instead of the 2s/3s default) as a safety margin. Add
+`--flagged-out <path>` to also save that list as JSON for tracking which
+ones still need a look.
 
-### 4. Spot-check before trusting the batch
+### 4. Review the flagged list, spot-check the rest
 
-Pull a handful of clips — one near each anchor, one or two from the middle
-of a gap between anchors — and confirm the pitch is actually in frame.
+The flagged list from step 3 is your punch list — that's the "couple
+errors" to go fix by hand (re-anchor that pitch's segment and re-run, or
+just widen that one clip). For everything else, spot-check a handful before
+fully trusting the batch: pull a clip near each anchor and a couple from
+mid-segment, confirm the pitch is actually in frame.
 `ffmpeg -i <clip> -vf "fps=4,scale=400:225,drawtext=text='%{pts\:hms}',tile=..." -frames:v 1 out.jpg`
 makes a quick timestamped contact-sheet for eyeballing without watching
 full clips one at a time.
@@ -122,6 +140,13 @@ full clips one at a time.
   real event from a decoy. Treat it as a fast first pass to narrow down a
   window, not a source of truth — confirm anything it finds by eye, and
   fall back to a human-verified front-foot check when it's ambiguous.
+- **Motion-energy-based auto-validation of finished clips** — the tempting
+  "let's just check the output instead of the input" idea, i.e. analyze a
+  cut clip's pixels for "does something happen here" and flag it if not.
+  Tried it, rejected it: a clip known to be wrong and a clip known to be
+  right (a routine take — low visual contrast either way) scored nearly
+  identically (1.40 vs 1.43 on a peak/baseline motion ratio). Confidence
+  has to come from the timing math (`confidence_flag`), not the pixels.
 - **Stream-copy (`-c copy`) trimming.** Keyframe-snapped seeks shift the
   actual clip start by up to a couple seconds — meaningless slop when the
   whole point is timing accuracy. `cut_clip` always re-encodes.
