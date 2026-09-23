@@ -28,6 +28,7 @@ python-dotenv>=1.0
 
 # Data ingestion (Trackman SFTP / HitTrax FTPS loaders)
 paramiko>=3
+requests>=2.31        # Trackman Data API (OAuth2 + REST) -- Edgertronic video
 
 # Roster media scrape (scripts/scrape_roster_media.py)
 beautifulsoup4>=4.12

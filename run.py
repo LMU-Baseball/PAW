@@ -22,4 +22,14 @@ if __name__ == "__main__":
     # download hangs then disconnects. debug=True still gives the interactive
     # debugger and Jinja template auto-reload; only Python code edits now need a
     # manual restart.
-    app.run(host=host, port=port, debug=True, use_reloader=False)
+    #
+    # threaded=True: without it this single-threaded dev server serializes
+    # EVERY request -- confirmed live (2026-09-22) that it made bullpen video
+    # look broken, not just slow: Dash's own polling traffic held the one
+    # worker busy while a ~3-4MB video clip (each fetch costs ~1.5-2s of real
+    # DB round-trip, unrelated to threading) sat queued behind it, so Chrome's
+    # <video> request could take 10s+ to even start and looked hung. Threads
+    # are safe here -- SQLAlchemy's engine is pooled/thread-safe -- and
+    # production never uses this path at all (gunicorn, multiple worker
+    # processes, see docs/DEPLOY.md), so this only changes local dev.
+    app.run(host=host, port=port, debug=True, use_reloader=False, threaded=True)

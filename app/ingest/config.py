@@ -40,3 +40,16 @@ def hittrax_cfg() -> dict:
         "password": _require("HT_FTPS_PASSWORD"),
         "remote_dir": _require("HT_FTPS_REMOTE_DIR"),
     }
+
+
+def trackman_api_cfg() -> dict:
+    """Trackman Data API OAuth2 client credentials, read from TM_API_* env
+    vars -- separate from `trackman_cfg()`'s TM_SFTP_* settings (a different
+    product/mechanism: the Data API is a REST API for Edgertronic video +
+    ball-tracking data, not the CSV/SFTP export). Only a Client ID + Secret
+    are needed (the `client_credentials` OAuth2 grant) -- no separate
+    Trackman user login."""
+    return {
+        "client_id": _require("TM_API_CLIENT_ID"),
+        "client_secret": _require("TM_API_CLIENT_SECRET"),
+    }
