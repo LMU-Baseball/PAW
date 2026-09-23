@@ -640,6 +640,24 @@ def _script_copy_paste_row(script_number) -> html.Div:
     ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
 
 
+def _elastic_script_rows(rows: list[dict]) -> list[dict]:
+    """Trim a script's rows (always N_SCRIPT_ROWS long, from `read_all_
+    script_rows`/`read_script_rows`) down to just past the last filled one
+    -- last-filled row_num + 1 blank row underneath it, floor of 1 row so
+    an empty script still shows a single row to type into. Mirrors, in
+    Python for the initial page render, the same trim/extend logic the
+    clientside callback (`callbacks.register_callbacks`'s per-script
+    "elastic rows" callback) applies live as a coach types -- see that
+    callback's docstring for why this needs a JS twin instead of a plain
+    server round trip."""
+    last_filled = 0
+    for row in rows:
+        if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info")):
+            last_filled = int(row["row_num"])
+    visible = max(1, min(SR.N_SCRIPT_ROWS, last_filled + 1))
+    return rows[:visible]
+
+
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
@@ -667,7 +685,8 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
-        html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number, editable=editable),
+        html.Div(tables.script_pitch_table(pd.DataFrame(_elastic_script_rows(rows)),
+                                           script_number, editable=editable),
                  style={"marginTop": "6px"}),
         *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it

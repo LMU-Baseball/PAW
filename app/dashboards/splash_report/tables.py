@@ -176,7 +176,10 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
 
 def script_pitch_table(df: pd.DataFrame, script_number: int, *,
                        editable: bool) -> dash_table.DataTable:
-    """# (readonly 1-12) / Type / Ball / Info -- always exactly 12 rows."""
+    """# (readonly) / Type / Ball / Info -- elastic length (1 row up to
+    `app.data.splash_report.N_SCRIPT_ROWS`), see `layout._elastic_script_
+    rows` and the matching clientside callback for how many rows `df`
+    actually has."""
     columns = [
         {"name": "#", "id": "row_num", "editable": False},
         {"name": "Type", "id": "pitch_type", "editable": editable},
