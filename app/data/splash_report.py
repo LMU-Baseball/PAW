@@ -58,6 +58,7 @@ READINGS_TABLE = "splash_engine_readings"
 GAS_TABLE = "splash_gas_station"
 SCRIPTS_TABLE = "splash_scripts"
 SCRIPT_ROWS_TABLE = "splash_script_rows"
+SCRIPT_TEMPLATES_TABLE = "splash_script_templates"
 PEN_TABLE = "splash_pen_results"
 MOVEMENT_TABLE = "splash_movement"
 DRILL_CATALOG_TABLE = "splash_drill_catalog"
@@ -322,6 +323,25 @@ _SCRIPT_ROWS_DDL = f"""
         PRIMARY KEY (player_id, season_label, cycle, script_number, row_num)
     )"""
 
+# One shared template per script_type (2026-09-23, Brad: "Archive" button --
+# "coach can just pull that archive whenever he selects the type of the
+# script"), NOT per-player -- team-wide, like a starting point every coach
+# edits from. Archiving overwrites whatever was archived before for that
+# type; there's no history. Deliberately holds only the pitch-rows table
+# ("archive what is on that script from this table specifically") -- not
+# goal/measurable, which stay per-player/per-script.
+_SCRIPT_TEMPLATES_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {SCRIPT_TEMPLATES_TABLE} (
+        script_type    VARCHAR(16) NOT NULL,
+        row_num        TINYINT NOT NULL,
+        pitch_type     VARCHAR(64),
+        ball_info      VARCHAR(64),
+        info           VARCHAR(255),
+        updated_by     INT,
+        updated_at     DATETIME,
+        PRIMARY KEY (script_type, row_num)
+    )"""
+
 _PEN_DDL = f"""
     CREATE TABLE IF NOT EXISTS {PEN_TABLE} (
         id             INT AUTO_INCREMENT PRIMARY KEY,
@@ -396,7 +416,7 @@ _VIDEOS_DDL = f"""
     )"""
 
 _ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
-           _PEN_DDL, _MOVEMENT_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
+           _SCRIPT_TEMPLATES_DDL, _PEN_DDL, _MOVEMENT_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
 
 
 _TABLES_ENSURED = False
@@ -1062,6 +1082,56 @@ def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: di
         resolved.extend(_resolve_script_rows(player_id, season_label, cycle, script_number, rows))
     _multi_row_upsert(SCRIPT_ROWS_TABLE,
                       ("player_id", "season_label", "cycle", "script_number", "row_num"),
+                      ("pitch_type", "ball_info", "info"), resolved, updated_by)
+
+
+def get_script_template(script_type: str) -> list[dict]:
+    """[{row_num, pitch_type, ball_info, info}, ...] archived for this
+    script_type, oldest row_num first -- [] if nothing's been archived for
+    it yet. Non-blank rows only (a template with 30 mostly-blank rows would
+    defeat `layout._elastic_script_rows` immediately re-trimming it back
+    down on the very next render)."""
+    if not script_type:
+        return []
+    ensure_tables()
+    df = query_df(
+        f"SELECT row_num, pitch_type, ball_info, info FROM {SCRIPT_TEMPLATES_TABLE} "
+        f"WHERE script_type = :t ORDER BY row_num",
+        {"t": script_type})
+    if df.empty:
+        return []
+    return [{"row_num": int(r["row_num"]),
+             "pitch_type": "" if pd.isna(r["pitch_type"]) else str(r["pitch_type"]),
+             "ball_info": "" if pd.isna(r["ball_info"]) else str(r["ball_info"]),
+             "info": "" if pd.isna(r["info"]) else str(r["info"])}
+            for _, r in df.iterrows()]
+
+
+def save_script_template(script_type: str, rows: list[dict], updated_by=None) -> None:
+    """Archives `rows` (a script's current pitch rows) as THE shared
+    template for `script_type` -- team-wide, overwrites whatever was
+    archived before, no history (see SCRIPT_TEMPLATES_TABLE's comment).
+    Blank rows are dropped rather than saved, and any old template rows
+    past the new (shorter) content are deleted, so re-archiving a script
+    that's since been trimmed doesn't leave stale trailing rows behind."""
+    if not script_type:
+        return
+    ensure_tables()
+    non_blank = [row for row in rows
+                if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info"))]
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SCRIPT_TEMPLATES_TABLE} WHERE script_type = :t"),
+                    {"t": script_type})
+    # Renumbered 1..len, not the source script's own row_num values -- a
+    # blank row in the MIDDLE of the source (row 2 blank, row 3 filled)
+    # would otherwise leave a gap (row_num 1, 3) in the template, which
+    # breaks `layout._elastic_script_rows`'s "row_num matches position"
+    # assumption once it's pulled back into a fresh script.
+    resolved = [{"script_type": script_type, "row_num": idx,
+                "pitch_type": row.get("pitch_type"), "ball_info": row.get("ball_info"),
+                "info": row.get("info")}
+               for idx, row in enumerate(non_blank, start=1)]
+    _multi_row_upsert(SCRIPT_TEMPLATES_TABLE, ("script_type", "row_num"),
                       ("pitch_type", "ball_info", "info"), resolved, updated_by)
 
 

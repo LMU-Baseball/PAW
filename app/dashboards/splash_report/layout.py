@@ -613,18 +613,22 @@ _SCRIPT_LINK_BTN_STYLE = {"border": "none", "background": "none", "color": CRIMS
 
 
 def _script_copy_paste_row(script_number) -> html.Div:
-    """Small red Copy/Paste/Undo links at the bottom of a script card
-    (2026-09-22, Brad's screenshot; narrowed to table-only + Undo added
-    2026-09-23 per follow-up feedback) -- Copy stashes this script's 12
-    pitch rows ONLY (never Type/Goal/Measurable, which stay manual) into a
-    page-lifetime `splash-script-clipboard` Store (`callbacks.
-    _on_script_copy`); Paste overwrites another script's rows from
-    whatever's currently in that Store (`callbacks._on_script_paste`),
-    working across players (the Store outlives a player switch) and also
-    snapshotting the target script's pre-paste rows into
-    `splash-script-undo-buffer` so Undo can restore them
-    (`callbacks._on_script_undo`). Edit-mode only (there's nothing to
-    copy/paste INTO in read-only view)."""
+    """Small red Copy/Paste/Undo/Archive links at the bottom of a script
+    card (2026-09-22, Brad's screenshot; narrowed to table-only + Undo
+    added 2026-09-23, Archive added same day per follow-up feedback) --
+    Copy stashes this script's pitch rows ONLY (never Type/Goal/
+    Measurable, which stay manual) into a page-lifetime
+    `splash-script-clipboard` Store (`callbacks._on_script_copy`); Paste
+    overwrites another script's rows from whatever's currently in that
+    Store (`callbacks._on_script_paste`), working across players (the
+    Store outlives a player switch) and also snapshotting the target
+    script's pre-paste rows into `splash-script-undo-buffer` so Undo can
+    restore them (`callbacks._on_script_undo`). Archive saves this
+    script's CURRENT rows as the shared team-wide template for its
+    script_type (`callbacks._on_script_archive` -> `SR.save_script_
+    template`) -- selecting that type on a blank script elsewhere
+    auto-pulls it back (`callbacks._on_script_type_change`). Edit-mode
+    only (there's nothing to copy/paste/archive in read-only view)."""
     return html.Div([
         html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
                    title="Copy this script's pitch table (# / Type / Ball / Info)",
@@ -637,6 +641,12 @@ def _script_copy_paste_row(script_number) -> html.Div:
         html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
                    title="Undo the last paste into this script",
                    style=_SCRIPT_LINK_BTN_STYLE),
+        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+        html.Button("Archive", id=f"splash-script-archive-{script_number}", n_clicks=0,
+                   title="Save this script's pitch table as the shared default for its Type",
+                   style=_SCRIPT_LINK_BTN_STYLE),
+        html.Span(id=f"splash-script-archive-status-{script_number}",
+                 style={"fontSize": "11px", "color": "#1e5b28", "marginLeft": "4px"}),
     ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
 
 
