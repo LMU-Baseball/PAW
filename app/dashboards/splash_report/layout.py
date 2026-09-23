@@ -526,19 +526,31 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
     eng = pd.DataFrame(engine_records)
     strength = eng[eng["metric_key"].isin(SR.STRENGTH_METRICS)] if not eng.empty else eng
     rom = eng[eng["metric_key"].isin(SR.ROM_METRICS)] if not eng.empty else eng
+    if not rom.empty:
+        # Table-only shortening (2026-09-23, Brad: save space, line the two
+        # tables up on phone) -- "Scaption ROM" is the widest label in
+        # either table, wider than every Strength row, which is what threw
+        # the two tables out of alignment. Scoped to just this table's
+        # DataFrame, not SR.ENGINE_METRIC_LABELS itself, because the body
+        # visual's ROM readout panel (`body_visual.py`) reads that same
+        # shared dict and has room for the full "Scaption ROM" -- no
+        # complaint was raised about that one.
+        rom = rom.copy()
+        rom.loc[rom["metric_key"] == "ScaptionROM", "label"] = "SCAP ROM"
     # flex:1 on each table used to stretch it across half of a very wide
     # container, leaving a big blank gap between two content-sized tables
     # -- size to content instead so they sit close together.
     # 2026-09-14: "Strength" / "Range of Motion" moved into the tables' own
     # red header bar (white text, top-left cell) instead of a separate black
     # label above each table -- see `tables.engine_metrics_table`'s
-    # `label_header`.
+    # `label_header`. Header shortened to "ROM" (2026-09-23, Brad) to match
+    # the same save-space/line-up-on-phone ask.
     return html.Div([
         html.Div(tables.engine_metrics_table(strength, "splash-engine-strength-table",
                                              label_header="Strength", editable=editable),
                 style={"flex": "0 0 auto"}),
         html.Div(tables.engine_metrics_table(rom, "splash-engine-rom-table",
-                                             label_header="Range of Motion", editable=editable),
+                                             label_header="ROM", editable=editable),
                 style={"flex": "0 0 auto"}),
     ], style={"display": "flex", "gap": "24px", "flexWrap": "wrap", "marginBottom": "12px"})
 
