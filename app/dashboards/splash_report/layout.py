@@ -662,7 +662,7 @@ def _elastic_script_rows(rows: list[dict]) -> list[dict]:
     server round trip."""
     last_filled = 0
     for row in rows:
-        if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info")):
+        if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info", "result")):
             last_filled = int(row["row_num"])
     visible = max(1, min(SR.N_SCRIPT_ROWS, last_filled + 1))
     return rows[:visible]
@@ -672,6 +672,7 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     goal = script_row["goal"]
     measurable = script_row["measurable"]
     script_type = script_row.get("script_type") or ""
+    pd_result = script_row.get("pitch_design_result") or ""
     goal_child = dcc.Input(id=f"splash-script-goal-{script_number}", value=goal,
                            type="text", style={"width": "100%"}) if editable \
         else html.Div(goal or "—")
@@ -680,13 +681,38 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
         if editable else html.Div(measurable or "—")
     # Drives the Pen Results value's meaning (velo/execution = raw result %,
     # pitch design = % in the target movement window) and which scripts feed
-    # the pitch-design movement plot (2026-09-16 coaches' meeting).
+    # the pitch-design movement plot (2026-09-16 coaches' meeting). Also
+    # (2026-09-23) which Result widget `script_pitch_table` shows, and
+    # which of the two blocks below (pitch_design_result input / Velo
+    # summary) is visible -- `callbacks`'s per-script "Result visibility"
+    # clientside callback keeps that in sync live as this dropdown changes,
+    # without a full page re-render.
     type_child = dcc.Dropdown(
         id=f"splash-script-type-{script_number}",
         options=[{"label": t, "value": t} for t in SR.SCRIPT_TYPES],
         value=script_type or None, clearable=True,
         style={"fontFamily": "Teko, sans-serif"}) if editable \
         else html.Div(script_type or "—")
+    # Pitch Design's single end-of-bullpen number (Trackman average) --
+    # entered ONCE, not per pitch (no Result column in that script's
+    # table -- see `tables.script_pitch_table`). Always rendered (never
+    # conditionally omitted), just hidden via style when the current type
+    # isn't Pitch Design -- same reasoning as `script_wrap` below: an
+    # omitted element would be an invalid State target for the Save
+    # callback the moment a coach switches Type without a full re-render.
+    pd_result_child = html.Div([
+        html.Span("Trackman Avg ", style={"fontSize": "11px", "color": "#666"}),
+        dcc.Input(id=f"splash-script-pdresult-{script_number}", value=pd_result,
+                 type="text", style={"width": "100%"}) if editable
+        else html.Div(pd_result or "—"),
+    ], id=f"splash-script-pdresult-wrap-{script_number}", style={
+        "marginTop": "4px", "display": "block" if script_type == "Pitch Design" else "none"})
+    velo_summary_child = html.Div(
+        id=f"splash-script-velosummary-{script_number}",
+        style={"fontSize": "12px", "color": "#555", "marginTop": "4px"})
+    velo_summary_wrap = html.Div(velo_summary_child,
+        id=f"splash-script-velosummary-wrap-{script_number}",
+        style={"display": "block" if script_type == "Velo" else "none"})
     card = html.Div([
         html.Div(f"Script #{script_number}", style={"fontWeight": "bold", "color": CRIMSON}),
         html.Div([html.Span("Type ", style={"fontSize": "11px", "color": "#666"}),
@@ -695,9 +721,12 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
+        pd_result_child,
         html.Div(tables.script_pitch_table(pd.DataFrame(_elastic_script_rows(rows)),
-                                           script_number, editable=editable),
+                                           script_number, script_type=script_type,
+                                           editable=editable),
                  style={"marginTop": "6px"}),
+        velo_summary_wrap,
         *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
     # the card shrinks to fit its content, and in a shrink-to-fit box a
@@ -710,9 +739,13 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     # from 280px -- Brad: still white space to the right of the 4-column
     # #/Type/Ball/Info table, which only needs ~150-160px) -- narrow enough
     # to fit the table with a little breathing room, wide enough that more
-    # cards fit per row is the actual point of the fix.
+    # cards fit per row is the actual point of the fix. Widened to 300px
+    # for a Velo/Execution script (2026-09-23) -- the new Result column
+    # needs the extra room; Pitch Design's 4-column table doesn't grow, so
+    # its card stays narrow.
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px", "width": "220px",
+              "padding": "10px", "marginBottom": "12px",
+              "width": "300px" if script_type in ("Velo", "Execution") else "220px",
               "boxSizing": "border-box"})
     # ALWAYS rendered (never conditionally omitted) so its Save-form Inputs
     # stay valid targets for `callbacks._script_states()` regardless of

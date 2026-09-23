@@ -41,6 +41,7 @@ def _script_states() -> list:
         states.append(State(f"splash-script-measurable-{n}", "value"))
         states.append(State(f"splash-script-type-{n}", "value"))
         states.append(State(f"splash-script-rows-{n}", "data"))
+        states.append(State(f"splash-script-pdresult-{n}", "value"))
     return states
 
 
@@ -146,8 +147,9 @@ def register_callbacks(dash_app) -> None:
         }
         script_fields, script_pitch_rows = {}, {}
         for i, n in enumerate(range(1, SR.N_SCRIPTS + 1)):
-            goal_v, measurable_v, type_v, rows_v = script_args[i * 4:i * 4 + 4]
-            script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v}
+            goal_v, measurable_v, type_v, rows_v, pd_result_v = script_args[i * 5:i * 5 + 5]
+            script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v,
+                                "pitch_design_result": pd_result_v}
             script_pitch_rows[n] = rows_v or []
         # The Movement Log is now ONE shared table (`splash-movement-table`,
         # a Script # column instead of six separate per-script grids -- see
@@ -553,8 +555,8 @@ def register_callbacks(dash_app) -> None:
         i = int(trig.rsplit("-", 1)[1]) - 1
         script_type = types[i]
         current_rows = rows[i] or []
-        is_blank = not any((r.get("pitch_type") or r.get("ball_info") or r.get("info"))
-                           for r in current_rows)
+        is_blank = not any((r.get("pitch_type") or r.get("ball_info") or r.get("info")
+                           or r.get("result")) for r in current_rows)
         if not script_type or not is_blank:
             return out
         template = SR.get_script_template(script_type)
@@ -583,7 +585,8 @@ def register_callbacks(dash_app) -> None:
                     var r = rows[i];
                     var filled = (r.pitch_type && String(r.pitch_type).trim()) ||
                                  (r.ball_info && String(r.ball_info).trim()) ||
-                                 (r.info && String(r.info).trim());
+                                 (r.info && String(r.info).trim()) ||
+                                 (r.result && String(r.result).trim());
                     if (filled) {{ lastFilled = r.row_num; }}
                 }}
                 var visible = Math.max(1, Math.min({SR.N_SCRIPT_ROWS}, lastFilled + 1));
@@ -591,7 +594,7 @@ def register_callbacks(dash_app) -> None:
                 if (visible < rows.length) {{ return rows.slice(0, visible); }}
                 var out = rows.slice();
                 for (var n = rows.length + 1; n <= visible; n++) {{
-                    out.push({{row_num: n, pitch_type: '', ball_info: '', info: ''}});
+                    out.push({{row_num: n, pitch_type: '', ball_info: '', info: '', result: ''}});
                 }}
                 return out;
             }}
@@ -599,6 +602,57 @@ def register_callbacks(dash_app) -> None:
             Output(f"splash-script-rows-{_n}", "data", allow_duplicate=True),
             Input(f"splash-script-rows-{_n}", "data"),
             prevent_initial_call=True,
+        )
+
+    # Result column visibility + live Velo summary (2026-09-23, Brad --
+    # Result is coach-typed live from the phone during a bullpen, not
+    # pulled from anywhere). Two purely-visual clientside callbacks per
+    # script, reacting live without a full page re-render:
+    #
+    # 1. Which of the two extra blocks (`splash-script-pdresult-wrap-N`,
+    #    `splash-script-velosummary-wrap-N`) is visible follows the Type
+    #    dropdown directly -- both blocks are ALWAYS in the DOM (never
+    #    conditionally omitted, same reasoning as `script_wrap`'s own
+    #    comment: an omitted element is an invalid State/Output target the
+    #    instant a coach switches Type without a full re-render), just
+    #    hidden via style.
+    for _n in range(1, SR.N_SCRIPTS + 1):
+        dash_app.clientside_callback(
+            """
+            function(scriptType) {
+                var pd = scriptType === 'Pitch Design' ? 'block' : 'none';
+                var velo = scriptType === 'Velo' ? 'block' : 'none';
+                return [{display: pd, marginTop: '4px'}, {display: velo}];
+            }
+            """,
+            Output(f"splash-script-pdresult-wrap-{_n}", "style"),
+            Output(f"splash-script-velosummary-wrap-{_n}", "style"),
+            Input(f"splash-script-type-{_n}", "value"),
+        )
+
+    # 2. The Velo summary itself: max + average over whatever's currently
+    #    typed into the Result column, recomputed on every edit. Non-numeric
+    #    entries (a coach's stray text, or another script type's Ball/Strike
+    #    values if this ever fires for one) are skipped, not treated as 0.
+    for _n in range(1, SR.N_SCRIPTS + 1):
+        dash_app.clientside_callback(
+            """
+            function(rows) {
+                if (!rows || !rows.length) { return ''; }
+                var vals = [];
+                for (var i = 0; i < rows.length; i++) {
+                    var v = parseFloat(rows[i].result);
+                    if (!isNaN(v)) { vals.push(v); }
+                }
+                if (!vals.length) { return 'No results entered yet.'; }
+                var max = Math.max.apply(null, vals);
+                var avg = vals.reduce(function(a, b) { return a + b; }, 0) / vals.length;
+                return 'Max ' + max.toFixed(1) + ' \\u00b7 Avg ' + avg.toFixed(1) +
+                       ' (n=' + vals.length + ')';
+            }
+            """,
+            Output(f"splash-script-velosummary-{_n}", "children"),
+            Input(f"splash-script-rows-{_n}", "data"),
         )
 
     # "Compare Scripts" narrows which scripts' lines the pen-results trend

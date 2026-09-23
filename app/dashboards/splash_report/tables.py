@@ -174,20 +174,43 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
                  cell_conditional=cell_conditional)
 
 
-def script_pitch_table(df: pd.DataFrame, script_number: int, *,
+_RESULT_DROPDOWN = {"result": {"options": [{"label": v, "value": v} for v in ("Ball", "Strike")]}}
+
+
+def script_pitch_table(df: pd.DataFrame, script_number: int, *, script_type: str,
                        editable: bool) -> dash_table.DataTable:
-    """# (readonly) / Type / Ball / Info -- elastic length (1 row up to
-    `app.data.splash_report.N_SCRIPT_ROWS`), see `layout._elastic_script_
-    rows` and the matching clientside callback for how many rows `df`
-    actually has."""
+    """# (readonly) / Type / Ball / Info / Result -- elastic length (1 row
+    up to `app.data.splash_report.N_SCRIPT_ROWS`), see `layout._elastic_
+    script_rows` and the matching clientside callback for how many rows
+    `df` actually has.
+
+    Result (2026-09-23, Brad: coach-typed live from the phone during a
+    bullpen, not pulled from anywhere) depends on `script_type`:
+      - "Execution": a Ball/Strike dropdown per pitch.
+      - "Velo": a raw number per pitch (no units, so `layout.script_card`
+        can aggregate max/avg over the column without parsing units back
+        out).
+      - "Pitch Design" (or unset): no Result column at all -- nothing is
+        tagged per pitch during a pitch-design bullpen; that script gets
+        ONE end-of-bullpen number instead (`layout.script_card`'s
+        `pitch_design_result` input), not a per-row column.
+    """
     columns = [
         {"name": "#", "id": "row_num", "editable": False},
         {"name": "Type", "id": "pitch_type", "editable": editable},
         {"name": "Ball", "id": "ball_info", "editable": editable},
         {"name": "Info", "id": "info", "editable": editable},
     ]
+    dropdown = None
+    if script_type == "Execution":
+        columns.append({"name": "Result", "id": "result", "editable": editable,
+                        "presentation": "dropdown"})
+        dropdown = _RESULT_DROPDOWN
+    elif script_type == "Velo":
+        columns.append({"name": "Result", "id": "result", "editable": editable,
+                        "type": "numeric"})
     return _table(f"splash-script-rows-{script_number}", columns,
-                 df.to_dict("records"), editable=editable)
+                 df.to_dict("records"), editable=editable, dropdown=dropdown)
 
 
 def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:

@@ -303,6 +303,7 @@ _SCRIPTS_DDL = f"""
         goal           VARCHAR(255),
         measurable     VARCHAR(255),
         script_type    VARCHAR(16),
+        pitch_design_result VARCHAR(16),
         updated_by     INT,
         updated_at     DATETIME,
         PRIMARY KEY (player_id, season_label, cycle, script_number)
@@ -318,6 +319,7 @@ _SCRIPT_ROWS_DDL = f"""
         pitch_type     VARCHAR(64),
         ball_info      VARCHAR(64),
         info           VARCHAR(255),
+        result         VARCHAR(16),
         updated_by     INT,
         updated_at     DATETIME,
         PRIMARY KEY (player_id, season_label, cycle, script_number, row_num)
@@ -467,6 +469,16 @@ def ensure_tables(engine=None) -> None:
         _ensure_column(conn, VIDEOS_TABLE, "drill_category", "drill_category VARCHAR(32)")
         # And for splash_videos.link_url (2026-09-16 round 2 -- see add_video_link).
         _ensure_column(conn, VIDEOS_TABLE, "link_url", "link_url VARCHAR(1024)")
+        # Result column (2026-09-23, Brad: coach-typed live from the phone
+        # during a bullpen -- ball/strike for Execution, a raw velo number
+        # for Velo; Pitch Design has no per-row result at all) -- see
+        # `tables.script_pitch_table`.
+        _ensure_column(conn, SCRIPT_ROWS_TABLE, "result", "result VARCHAR(16)")
+        # Pitch Design's single end-of-bullpen number (Trackman average) --
+        # entered ONCE per script, not per pitch, so it lives on
+        # splash_scripts, not splash_script_rows.
+        _ensure_column(conn, SCRIPTS_TABLE, "pitch_design_result",
+                       "pitch_design_result VARCHAR(16)")
     _TABLES_ENSURED = True
 
 
@@ -975,8 +987,8 @@ def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
     script_type blank ("") for any script with no saved row yet."""
     ensure_tables()
     df = query_df(
-        f"SELECT script_number, goal, measurable, script_type FROM {SCRIPTS_TABLE} "
-        f"WHERE {_key_where()}",
+        f"SELECT script_number, goal, measurable, script_type, pitch_design_result "
+        f"FROM {SCRIPTS_TABLE} WHERE {_key_where()}",
         {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
     by_num = {int(r["script_number"]): r for _, r in df.iterrows()} if not df.empty else {}
     rows = []
@@ -987,20 +999,28 @@ def read_scripts(player_id, season_label, cycle) -> pd.DataFrame:
             "goal": "" if r is None or pd.isna(r["goal"]) else str(r["goal"]),
             "measurable": "" if r is None or pd.isna(r["measurable"]) else str(r["measurable"]),
             "script_type": "" if r is None or pd.isna(r["script_type"]) else str(r["script_type"]),
+            "pitch_design_result": "" if r is None or pd.isna(r["pitch_design_result"])
+                                   else str(r["pitch_design_result"]),
         })
     return pd.DataFrame(rows)
 
 
 def upsert_scripts(player_id, season_label, cycle, rows: list[dict], updated_by=None) -> None:
-    """`rows`: [{"script_number","goal","measurable","script_type"}, ...]."""
+    """`rows`: [{"script_number","goal","measurable","script_type",
+    "pitch_design_result"}, ...]. `pitch_design_result` is the single
+    end-of-bullpen Trackman-average number a coach types for a Pitch
+    Design script (no per-pitch Result there -- see `script_pitch_table`);
+    blank/unused for Velo/Execution scripts."""
     pid, sl = int(player_id), season_label
     resolved = [{"player_id": pid, "season_label": sl, "cycle": cycle,
                 "script_number": int(row["script_number"]), "goal": row.get("goal"),
-                "measurable": row.get("measurable"), "script_type": row.get("script_type")}
+                "measurable": row.get("measurable"), "script_type": row.get("script_type"),
+                "pitch_design_result": row.get("pitch_design_result")}
                for row in rows
                if row.get("script_number") is not None and 1 <= int(row["script_number"]) <= N_SCRIPTS]
     _multi_row_upsert(SCRIPTS_TABLE, ("player_id", "season_label", "cycle", "script_number"),
-                      ("goal", "measurable", "script_type"), resolved, updated_by)
+                      ("goal", "measurable", "script_type", "pitch_design_result"),
+                      resolved, updated_by)
 
 
 def _reindex_script_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -1016,6 +1036,7 @@ def _reindex_script_rows(df: pd.DataFrame) -> pd.DataFrame:
             "pitch_type": "" if r is None or pd.isna(r["pitch_type"]) else str(r["pitch_type"]),
             "ball_info": "" if r is None or pd.isna(r["ball_info"]) else str(r["ball_info"]),
             "info": "" if r is None or pd.isna(r["info"]) else str(r["info"]),
+            "result": "" if r is None or pd.isna(r["result"]) else str(r["result"]),
         })
     return pd.DataFrame(rows)
 
@@ -1026,7 +1047,7 @@ def read_script_rows(player_id, season_label, cycle, script_number) -> pd.DataFr
     one query beats six for that case."""
     ensure_tables()
     df = query_df(
-        f"SELECT row_num, pitch_type, ball_info, info FROM {SCRIPT_ROWS_TABLE} "
+        f"SELECT row_num, pitch_type, ball_info, info, result FROM {SCRIPT_ROWS_TABLE} "
         f"WHERE {_key_where()} AND script_number = :script_number",
         {"player_id": int(player_id), "season_label": season_label, "cycle": cycle,
          "script_number": int(script_number)})
@@ -1039,12 +1060,12 @@ def read_all_script_rows(player_id, season_label, cycle) -> dict:
     to be six separate `read_script_rows` round trips with one."""
     ensure_tables()
     df = query_df(
-        f"SELECT script_number, row_num, pitch_type, ball_info, info "
+        f"SELECT script_number, row_num, pitch_type, ball_info, info, result "
         f"FROM {SCRIPT_ROWS_TABLE} WHERE {_key_where()}",
         {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
     by_script = ({n: g for n, g in df.groupby("script_number")} if not df.empty else {})
     return {n: _reindex_script_rows(by_script.get(n, pd.DataFrame(
-        columns=["row_num", "pitch_type", "ball_info", "info"])))
+        columns=["row_num", "pitch_type", "ball_info", "info", "result"])))
             for n in range(1, N_SCRIPTS + 1)}
 
 
@@ -1053,20 +1074,20 @@ def _resolve_script_rows(player_id, season_label, cycle, script_number, rows: li
     return [{"player_id": pid, "season_label": season_label, "cycle": cycle,
              "script_number": int(script_number), "row_num": int(row["row_num"]),
              "pitch_type": row.get("pitch_type"), "ball_info": row.get("ball_info"),
-             "info": row.get("info")}
+             "info": row.get("info"), "result": row.get("result")}
             for row in rows
             if row.get("row_num") is not None and 1 <= int(row["row_num"]) <= N_SCRIPT_ROWS]
 
 
 def upsert_script_rows(player_id, season_label, cycle, script_number, rows: list[dict],
                        updated_by=None) -> None:
-    """`rows`: [{"row_num","pitch_type","ball_info","info"}, ...] for ONE
-    script. Saving all six scripts at once should use
+    """`rows`: [{"row_num","pitch_type","ball_info","info","result"}, ...]
+    for ONE script. Saving all six scripts at once should use
     `upsert_all_script_rows` instead -- one round trip beats six."""
     resolved = _resolve_script_rows(player_id, season_label, cycle, script_number, rows)
     _multi_row_upsert(SCRIPT_ROWS_TABLE,
                       ("player_id", "season_label", "cycle", "script_number", "row_num"),
-                      ("pitch_type", "ball_info", "info"), resolved, updated_by)
+                      ("pitch_type", "ball_info", "info", "result"), resolved, updated_by)
 
 
 def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: dict,
@@ -1082,15 +1103,18 @@ def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: di
         resolved.extend(_resolve_script_rows(player_id, season_label, cycle, script_number, rows))
     _multi_row_upsert(SCRIPT_ROWS_TABLE,
                       ("player_id", "season_label", "cycle", "script_number", "row_num"),
-                      ("pitch_type", "ball_info", "info"), resolved, updated_by)
+                      ("pitch_type", "ball_info", "info", "result"), resolved, updated_by)
 
 
 def get_script_template(script_type: str) -> list[dict]:
-    """[{row_num, pitch_type, ball_info, info}, ...] archived for this
-    script_type, oldest row_num first -- [] if nothing's been archived for
-    it yet. Non-blank rows only (a template with 30 mostly-blank rows would
-    defeat `layout._elastic_script_rows` immediately re-trimming it back
-    down on the very next render)."""
+    """[{row_num, pitch_type, ball_info, info, result}, ...] archived for
+    this script_type, oldest row_num first -- [] if nothing's been
+    archived for it yet. Non-blank rows only (a template with 30 mostly-
+    blank rows would defeat `layout._elastic_script_rows` immediately
+    re-trimming it back down on the very next render). `result` always
+    comes back "" -- a template is a starting point for a NEW bullpen, so
+    a previous bullpen's actual recorded results never carry over (see
+    `save_script_template`, which never persists them either)."""
     if not script_type:
         return []
     ensure_tables()
@@ -1103,7 +1127,7 @@ def get_script_template(script_type: str) -> list[dict]:
     return [{"row_num": int(r["row_num"]),
              "pitch_type": "" if pd.isna(r["pitch_type"]) else str(r["pitch_type"]),
              "ball_info": "" if pd.isna(r["ball_info"]) else str(r["ball_info"]),
-             "info": "" if pd.isna(r["info"]) else str(r["info"])}
+             "info": "" if pd.isna(r["info"]) else str(r["info"]), "result": ""}
             for _, r in df.iterrows()]
 
 

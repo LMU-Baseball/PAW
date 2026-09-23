@@ -822,12 +822,12 @@ def test_on_save_calls_save_all_with_that_calls_own_player_season_cycle(server, 
         on_save = _raw_callback(dash_app, input_id="splash-save")
 
         # the rest of _on_save's States (vision/goals/pre/post/feet*/engine
-        # tables/gas/pen/movement + 24 per-script states) -- their content
+        # tables/gas/pen/movement + 30 per-script states) -- their content
         # doesn't matter for this test, only player_id/season/cycle do.
         other_states = ["V", "G", "Pre", "Post", [], [], [], [], [], [], [], []]
         script_states = []
         for _ in range(SR.N_SCRIPTS):
-            script_states += [None, None, None, []]
+            script_states += [None, None, None, [], None]
 
         with server.test_request_context("/dash/splash_report/"):
             login_user(coach)
