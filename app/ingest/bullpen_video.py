@@ -23,6 +23,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+import requests
+
 from app.data import bullpen_video as BV
 from app.ingest import trackman_video as TV
 
@@ -122,11 +124,14 @@ def load_bullpen_video(session: TV.Session, date_from: str, date_to: str, *,
                 # Edgertronic download token -- nothing to do about it here.
                 continue
             blob_names = TV.list_container_blobs(token_info)
-        except TV.TrackmanAPIError:
+        except (TV.TrackmanAPIError, requests.exceptions.RequestException):
             # One session's API call failing (seen live 2026-09-22: a 404 on
-            # video metadata for an otherwise-valid session) must not sink
-            # every OTHER session in a multi-day batch pull -- count it and
-            # move on, same spirit as the per-clip try/except below.
+            # video metadata for an otherwise-valid session, and separately a
+            # raw connection reset partway through a multi-day pull -- the
+            # `requests` layer raises its own exceptions for those, not
+            # TrackmanAPIError, which only covers a non-2xx HTTP response)
+            # must not sink every OTHER session in a batch pull -- count it
+            # and move on, same spirit as the per-clip try/except below.
             result.sessions_errored += 1
             continue
 
@@ -146,7 +151,7 @@ def load_bullpen_video(session: TV.Session, date_from: str, date_to: str, *,
                                duration_sec=clip.get("videoDurationInSeconds"),
                                width=clip.get("width"), height=clip.get("height"),
                                framerate=clip.get("framerate"))
-                except (TV.TrackmanAPIError, RemuxError):
+                except (TV.TrackmanAPIError, RemuxError, requests.exceptions.RequestException):
                     result.clips_errored += 1
                     continue
             result.clips_downloaded += 1

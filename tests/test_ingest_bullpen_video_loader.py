@@ -273,6 +273,36 @@ def test_one_sessions_api_error_does_not_sink_the_rest_of_the_batch(monkeypatch)
     assert result.clips_downloaded == 2
 
 
+def test_one_sessions_connection_error_does_not_sink_the_rest_of_the_batch(monkeypatch):
+    """Confirmed live (2026-09-22): a multi-day pull hit a raw connection
+    reset mid-run (`requests.exceptions.ConnectionError`, not an HTTP error
+    response, so NOT a TrackmanAPIError) and the whole run aborted."""
+    import requests
+
+    class _FlakySession(_FakeSession):
+        def practice_video_metadata(self, session_id):
+            if session_id == "s1":
+                raise requests.exceptions.ConnectionError("connection reset")
+            return super().practice_video_metadata(session_id)
+
+    session = _FlakySession(
+        sessions=[{"sessionId": "s1"}, {"sessionId": "s2"}],
+        metadata_by_session={"s2": [_clip("p2")]})
+    monkeypatch.setattr(loader.BV, "existing_play_ids", lambda ids: set())
+    monkeypatch.setattr(loader.TV, "edgertronic_token", lambda tokens: {"token": "x"})
+    monkeypatch.setattr(loader.TV, "list_container_blobs",
+                        lambda ti: ["Plays/p2/Edgertronic/clip.mp4"])
+    monkeypatch.setattr(loader.TV, "blob_for_play",
+                        lambda blobs, pid: f"Plays/{pid}/Edgertronic/clip.mp4")
+
+    result = load_bullpen_video(session, "2026-09-15T00:00:00Z", "2026-09-16T00:00:00Z",
+                                dry_run=True)
+
+    assert result.sessions_errored == 1
+    assert result.clips_found == 1   # s2's p2, despite s1's connection error
+    assert result.clips_downloaded == 1
+
+
 def test_one_clips_download_error_does_not_sink_the_rest_of_the_session(monkeypatch):
     session = _FakeSession(
         sessions=[{"sessionId": "s1"}],
