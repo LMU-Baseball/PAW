@@ -37,9 +37,12 @@ def test_build_overlay_png_is_transparent_rgba_at_requested_size():
     img = Image.open(__import__("io").BytesIO(png))
     assert img.mode == "RGBA"
     assert img.size == (640, 480)
-    # A background corner must be fully transparent (alpha=0) so the
-    # overlay only draws its own elements onto the video, not a white box.
-    assert img.getpixel((5, 5))[3] == 0
+    # The open middle (outside the top/bottom text bands and the zone/
+    # movement panel on the right) must be fully transparent (alpha=0) so
+    # the overlay only draws its own elements onto the video -- not a
+    # white or dark box over the actual pitch action. (5,5) is now inside
+    # the semi-opaque top band on purpose, so that's not a valid probe.
+    assert img.getpixel((50, 240))[3] == 0
 
 
 def test_build_overlay_png_handles_missing_location_and_break_gracefully():
