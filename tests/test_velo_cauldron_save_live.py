@@ -122,8 +122,8 @@ def _isna(v) -> bool:
     return v is None or (isinstance(v, float) and pd.isna(v))
 
 
-def _velo_pitcher_id(season: str, pitcher_name: str) -> int:
-    board = VB.board_rows(season, VB.default_week_for(season))
+def _velo_pitcher_id(season: str, cycle: str, pitcher_name: str) -> int:
+    board = VB.board_rows(season, cycle)
     match = board[board["pitcher_name"] == pitcher_name]
     assert not match.empty, (
         f"expected pitcher {pitcher_name!r} not found on the {season} velo board -- "
@@ -131,49 +131,43 @@ def _velo_pitcher_id(season: str, pitcher_name: str) -> int:
     return int(match.iloc[0]["pitcher_id"])
 
 
-def _velo_entry_row(season: str, week_start: str, pitcher_id: int) -> dict | None:
-    """The full `velo_board_entries` row (as a dict) for one pitcher/week, or
-    `None` if no row exists yet -- so a restore can tell "never had a row"
-    apart from "had a row with a blank field"."""
-    entries = VB.read_entries(season, week_start)
-    if entries.empty:
+def _velo_cycle_row(season: str, cycle: str, pitcher_id: int) -> dict | None:
+    """The full `velo_board_cycle_overrides` row (as a dict) for one
+    pitcher/season/cycle, or `None` if no row exists yet -- so a restore can
+    tell "never had a row" apart from "had a row with a blank field"."""
+    overrides = VB.read_cycle_overrides(season, cycle)
+    if overrides.empty:
         return None
-    match = entries[entries["pitcher_id"].astype(int) == pitcher_id]
+    match = overrides[overrides["pitcher_id"].astype(int) == pitcher_id]
     return match.iloc[0].to_dict() if not match.empty else None
 
 
-def _restore_velo_entry(season: str, week_start: str, pitcher_id: int,
-                        pitcher_name: str, orig_row: dict | None) -> None:
-    """Write `orig_row` back verbatim (the direct data-layer write this
-    teardown promises), or -- if no row existed before this test ever
-    touched it -- write velo_goal/assessment back to None (absent), per
-    `velo_board.py`'s own contract that a None field means 'no value', not a
-    literal placeholder value."""
+def _restore_velo_cycle_row(season: str, cycle: str, pitcher_id: int,
+                            orig_row: dict | None) -> None:
+    """Write `orig_row`'s velo_goal/assessment back verbatim (the direct
+    data-layer write this teardown promises), or -- if no row existed
+    before this test ever touched it -- write both back to None (absent),
+    per `velo_board.py`'s own contract that a None field means 'no value',
+    not a literal placeholder value."""
     if orig_row is not None:
-        restore = {**orig_row, "pitcher_id": pitcher_id,
-                   "season_label": season, "week_start": week_start}
+        VB.set_cycle_override(pitcher_id, season, cycle,
+                              velo_goal=orig_row.get("velo_goal"),
+                              assessment=orig_row.get("assessment"))
     else:
-        restore = {"pitcher_id": pitcher_id, "pitcher_name": pitcher_name,
-                   "season_label": season, "week_start": week_start,
-                   "velo_goal": None, "assessment": None}
-    VB.upsert_entries([restore])
+        VB.set_cycle_override(pitcher_id, season, cycle, velo_goal=None, assessment=None)
 
     # Prove the restore actually worked -- re-read the row directly via the
     # data layer immediately after writing it, so a future regression in
     # this teardown itself is caught here, not just trusted.
-    after = _velo_entry_row(season, week_start, pitcher_id)
-    if orig_row is None:
-        assert after is None or _isna(after.get("velo_goal")), (
+    after = _velo_cycle_row(season, cycle, pitcher_id)
+    want = orig_row.get("velo_goal") if orig_row is not None else None
+    got = after.get("velo_goal") if after is not None else None
+    if _isna(want):
+        assert after is None or _isna(got), (
             f"teardown failed to restore velo_goal to absent: {after!r}")
     else:
-        assert after is not None, "teardown failed to restore the velo_board_entries row at all"
-        want = orig_row.get("velo_goal")
-        got = after.get("velo_goal")
-        if _isna(want):
-            assert _isna(got), f"teardown failed to restore velo_goal to {want!r}, got {got!r}"
-        else:
-            assert got is not None and float(got) == pytest.approx(float(want), abs=1e-6), (
-                f"teardown failed to restore velo_goal: wanted {want!r}, got {got!r}")
+        assert got is not None and float(got) == pytest.approx(float(want), abs=1e-6), (
+            f"teardown failed to restore velo_goal: wanted {want!r}, got {got!r}")
 
 
 def _cauldron_player_id(season: str, player_name: str) -> int:
@@ -300,17 +294,17 @@ def test_velo_board_save_persists_across_fresh_session(browser):
     not a soft reload) reads back the exact value, both as the same coach and
     as a different (player) account viewing the same shared table.
 
-    The edit is made against a real `velo_board_entries` row, so this test
-    captures that row's PRE-edit state via the data layer up front and
+    The edit is made against a real `velo_board_cycle_overrides` row, so this
+    test captures that row's PRE-edit state via the data layer up front and
     restores it in a `finally` block no matter how the test exits (pass,
     assertion failure, or an unrelated exception) -- this is a LIVE
     production DB, and a coach's real numbers must never be left overwritten
-    by a test run. See `_restore_velo_entry` above."""
+    by a test run. See `_restore_velo_cycle_row` above."""
     new_value = round(random.uniform(130.0, 149.9), 1)
 
-    week = VB.default_week_for(SEASON)
-    pitcher_id = _velo_pitcher_id(SEASON, PITCHER_NAME)
-    orig_row = _velo_entry_row(SEASON, week, pitcher_id)
+    cycle = VB.velo_cycle_for_date()   # matches the page's own default Cycle selection
+    pitcher_id = _velo_pitcher_id(SEASON, cycle, PITCHER_NAME)
+    orig_row = _velo_cycle_row(SEASON, cycle, pitcher_id)
 
     ctx1 = ctx2 = ctx3 = None
     try:
@@ -407,7 +401,7 @@ def test_velo_board_save_persists_across_fresh_session(browser):
                     ctx.close()
                 except Exception:
                     pass
-        _restore_velo_entry(SEASON, week, pitcher_id, PITCHER_NAME, orig_row)
+        _restore_velo_cycle_row(SEASON, cycle, pitcher_id, orig_row)
 
 
 # ================================ CAULDRON ===================================

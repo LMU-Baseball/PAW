@@ -1,10 +1,10 @@
-"""Season <-> Week coherence on the velo board and the Competitive Cauldron.
+"""Season <-> Week coherence on the Competitive Cauldron (velo board section
+below covers Season <-> Cycle instead -- see that section's own docstring).
 
-Both boards have a Season selector and a Mon-start Week picker. They used to be
-fully independent, so changing Season left the week wherever it was: the velo
-table then showed season-level columns (Season Max / Avg / trend) for the NEW
-season alongside weekly Velo Goal / Assessment for a week that isn't in it, and
-nothing stopped a user picking a week from years away.
+The Cauldron has a Season selector and a Mon-start Week picker. They used to be
+fully independent, so changing Season left the week wherever it was: the board
+then showed season-level columns for the NEW season alongside a week that isn't
+in it, and nothing stopped a user picking a week from years away.
 
 The week is now snapped to `velo_board.default_week_for(season)` whenever it
 falls outside the selected season, and the picker is re-bounded to
@@ -76,9 +76,16 @@ def test_default_week_differs_across_seasons():
     assert velo_board.default_week_for("2025/2026") != velo_board.default_week_for(OTHER_SEASON)
 
 
-# --- velo board -------------------------------------------------------------
+# --- velo board (Season <-> Cycle, replaced the Week picker 2026-09-22) -----
+#
+# Cycle (Fall/Spring, `app.data.velo_board.VELO_CYCLES` -- switches Jan 1,
+# not Built on the Bluff's separate Fall/Winter/Spring `splash_report.
+# CYCLES`) is a fixed set of two values independent of which Season is
+# selected -- there's no "does the cycle still fall inside this season"
+# drift case a Week picker had, so the callback is a plain re-read with no
+# snapping/bounding logic.
 
-def test_velo_season_change_snaps_and_bounds_week(server):
+def test_velo_season_or_cycle_change_rereads_board(server):
     from app.dashboards.velo_board import layout, callbacks
     with server.app_context():
         coach = _coach(server, "vbsync@lmu.edu")
@@ -86,42 +93,22 @@ def test_velo_season_change_snaps_and_bounds_week(server):
                    suppress_callback_exceptions=True)
         app.layout = layout.serve_layout
         callbacks.register_callbacks(app)
-        cb = _callback(app, ["velo-season", "velo-week"])
+        cb = _callback(app, ["velo-season", "velo-cycle"])
         with server.test_request_context("/dash/velo_board/"):
             login_user(coach)
-            # A stale week from a DIFFERENT season, exactly the drift case.
-            rows, week, lo, hi = cb(OTHER_SEASON, "2026-03-02")
-    assert week == velo_board.default_week_for(OTHER_SEASON)
-    assert (lo, hi) == season_bounds(OTHER_SEASON)
+            rows = cb(OTHER_SEASON, "Fall")
     assert rows is not no_update
 
 
-def test_velo_in_season_week_leaves_picker_alone(server):
-    """A week that is already valid for the selected season must not be moved --
-    the callback must not fight the user's own selection -- and the week Output
-    must be no_update so the callback doesn't re-fire on its own echo."""
-    from app.dashboards.velo_board import layout, callbacks
-    with server.app_context():
-        coach = _coach(server, "vbweek@lmu.edu")
-        app = Dash(__name__, server=server, url_base_pathname="/dash/vbweek/",
-                   suppress_callback_exceptions=True)
-        app.layout = layout.serve_layout
-        callbacks.register_callbacks(app)
-        cb = _callback(app, ["velo-season", "velo-week"])
-        with server.test_request_context("/dash/velo_board/"):
-            login_user(coach)
-            rows, week, lo, hi = cb("2025/2026", "2026-03-02")
-    assert week is no_update
-    assert (lo, hi) == season_bounds("2025/2026")
-    assert rows is not no_update
-
-
-def test_velo_week_picker_is_bounded_on_first_paint(server):
+def test_velo_cycle_dropdown_has_both_cycles_and_no_winter(server):
+    from app.data import velo_board
     from app.dashboards.velo_board import grid
     with server.app_context():
-        s = str(grid.board_filters("2025/2026", "2026-03-02"))
-    lo, hi = season_bounds("2025/2026")
-    assert lo in s and hi in s
+        s = str(grid.board_filters("2025/2026", "Fall"))
+    assert "velo-cycle" in s
+    for c in velo_board.VELO_CYCLES:
+        assert c in s
+    assert "Winter" not in s
 
 
 # --- cauldron ---------------------------------------------------------------

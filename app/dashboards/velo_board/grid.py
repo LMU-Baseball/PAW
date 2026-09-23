@@ -3,18 +3,27 @@
 The board is now ONE unified table (`visual.board_table`, id `velo-grid`) that
 everyone sees read-only and a coach edits IN PLACE. This module owns:
 
-- `board_filters(season, week)`: the Season/Week selectors, rendered for EVERY
-  account. They only choose WHICH rows the shared table shows, so a player
-  browses seasons/weeks exactly like a coach (team-transparent view).
+- `board_filters(season, cycle)`: the Season/Cycle selectors, rendered for
+  EVERY account. They only choose WHICH rows the shared table shows, so a
+  player browses seasons/cycles exactly like a coach (team-transparent
+  view). Cycle replaced a Week date-picker 2026-09-22 (Brad) -- Assessment
+  and Velo Goal are both cycle-scoped values, not weekly ones, so a Week
+  filter no longer matched what the grid actually showed. Fall/Spring only
+  (switches Jan 1, `velo_board.VELO_CYCLES`) -- the velo board's own
+  2-cycle split, not Built on the Bluff's 3-cycle Fall/Winter/Spring
+  (same date, Brad: "remove winter as a cycle").
 - `coach_controls()`: the coach-only Edit/Save buttons + status line (no table
   and no filters -- the table is shared, rendered by `layout` for all users).
-- `save_board(grid_data, season, week, updated_by)`: maps the edited table rows
-  back to storage. Velo Goal + Assessment persist WEEKLY to `velo_board_entries`
-  (`upsert_entries`). Season Max / Season Avg are SEASON-level coach corrections
-  written to `velo_board_overrides` (`set_override`) ONLY where the coach's
-  value differs from the computed leaderboard baseline -- so an untouched row
-  still surfaces a fresh higher reading, and reverting a cell to the baseline
-  clears the override.
+- `save_board(grid_data, season, cycle, updated_by)`: maps the edited table
+  rows back to storage. Velo Goal + Assessment persist to
+  `velo_board_cycle_overrides` (`set_cycle_override`) -- Assessment only
+  written when the coach's value differs from the auto cycle-bullpen
+  baseline (`velo_board.cycle_assessment`), same "no-op unless changed"
+  idiom Season Max/Avg already use. Season Max / Season Avg are SEASON-level
+  coach corrections written to `velo_board_overrides` (`set_override`) ONLY
+  where the coach's value differs from the computed leaderboard baseline --
+  so an untouched row still surfaces a fresh higher reading, and reverting a
+  cell to the baseline clears the override.
 """
 from __future__ import annotations
 
@@ -23,7 +32,7 @@ import math
 from dash import dcc, html
 
 from app.data import velo_board
-from app.data.seasons import available_seasons, season_bounds
+from app.data.seasons import available_seasons
 from app.dashboards import shell
 
 _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
@@ -31,13 +40,12 @@ _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px"
                 "display": "block", "marginBottom": "4px", "textAlign": "center"}
 
 
-def board_filters(season_label: str, week_start: str) -> html.Div:
-    """A centered Season/Week selector row, rendered for EVERY account.
+def board_filters(season_label: str, cycle: str) -> html.Div:
+    """A centered Season/Cycle selector row, rendered for EVERY account.
 
-    These are pure VIEW controls -- they pick which season/week the shared
+    These are pure VIEW controls -- they pick which season/cycle the shared
     `velo-grid` table shows -- so players get them too. Write access stays
     coach-only via `coach_controls` + the save callback's `is_coach` re-check."""
-    _s_start, _s_end = season_bounds(season_label)
     return html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
@@ -47,12 +55,11 @@ def board_filters(season_label: str, week_start: str) -> html.Div:
                 value=season_label, clearable=False, style={"minWidth": "150px"}),
         ]),
         html.Div([
-            html.Label("Week (starts Monday)", style=_LABEL_STYLE),
-            # Bounded to the selected season so the two controls can't drift
-            # apart; the season callback re-bounds + snaps this on a change.
-            dcc.DatePickerSingle(
-                id="velo-week", date=week_start,
-                min_date_allowed=_s_start, max_date_allowed=_s_end),
+            html.Label("Cycle", style=_LABEL_STYLE),
+            dcc.Dropdown(
+                id="velo-cycle",
+                options=[{"label": c, "value": c} for c in velo_board.VELO_CYCLES],
+                value=cycle, clearable=False, style={"minWidth": "130px"}),
         ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
               "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})
@@ -88,23 +95,16 @@ def _round1(v):
         return None
 
 
-def save_board(grid_data: list[dict], season_label: str, week_start: str,
+def save_board(grid_data: list[dict], season_label: str, cycle: str,
                updated_by=None) -> None:
-    """Persist the edited unified table: weekly velo_goal/assessment ->
-    `velo_board_entries`; changed season_max/season_avg -> `velo_board_overrides`."""
-    entry_rows = [{
-        "pitcher_id": r.get("pitcher_id"),
-        "pitcher_name": r.get("pitcher_name"),
-        "season_label": season_label,
-        "week_start": week_start,
-        "velo_goal": _coerce_numeric(r.get("velo_goal")),
-        "assessment": _coerce_numeric(r.get("assessment")),
-    } for r in grid_data if r.get("pitcher_id") is not None]
-    velo_board.upsert_entries(entry_rows, updated_by=updated_by)
-
+    """Persist the edited unified table: Velo Goal (typed as-is) + Assessment
+    (only when changed vs. the cycle's auto bullpen baseline) both go to
+    `velo_board_cycle_overrides`; changed season_max/season_avg ->
+    `velo_board_overrides`."""
     baseline = velo_board.leaderboard(season_label)
     base_by_name = ({row["pitcher_name"]: row for _, row in baseline.iterrows()}
                     if baseline is not None and not baseline.empty else {})
+    auto_assess = velo_board.cycle_assessment(season_label, cycle)
     for r in grid_data:
         pid = r.get("pitcher_id")
         if pid is None:
@@ -120,3 +120,11 @@ def save_board(grid_data: list[dict], season_label: str, week_start: str,
         oa = ga if (ga is not None and ga != ba) else None
         velo_board.set_override(pid, season_label, season_max=om, season_avg=oa,
                                 updated_by=updated_by)
+
+        ba_auto = _round1(auto_assess.get(int(pid)))
+        ga_val = _round1(_coerce_numeric(r.get("assessment")))
+        oassess = ga_val if (ga_val is not None and ga_val != ba_auto) else None
+        velo_board.set_cycle_override(
+            pid, season_label, cycle,
+            velo_goal=_coerce_numeric(r.get("velo_goal")), assessment=oassess,
+            updated_by=updated_by)

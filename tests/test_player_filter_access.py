@@ -143,11 +143,11 @@ def _render_board_as(server, role, module_path, url):
             return str(layout.serve_layout())
 
 
-def test_player_gets_velo_season_and_week_filters(server):
+def test_player_gets_velo_season_and_cycle_filters(server):
     s = _render_board_as(server, "player", "app.dashboards.velo_board.layout",
                          "/dash/velo_board/")
     assert "velo-season" in s, "player has no Season filter on the velo board"
-    assert "velo-week" in s, "player has no Week filter on the velo board"
+    assert "velo-cycle" in s, "player has no Cycle filter on the velo board"
     # ...and still no write controls.
     assert "velo-edit" not in s and "velo-save" not in s
 
@@ -167,7 +167,7 @@ def test_coach_still_gets_board_write_controls(server):
     """The split must not have cost the coach anything."""
     velo = _render_board_as(server, "coach", "app.dashboards.velo_board.layout",
                             "/dash/velo_board/")
-    assert all(t in velo for t in ("velo-season", "velo-week", "velo-edit", "velo-save"))
+    assert all(t in velo for t in ("velo-season", "velo-cycle", "velo-edit", "velo-save"))
     cauldron = _render_board_as(server, "coach", "app.dashboards.cauldron.layout",
                                 "/dash/cauldron/")
     assert all(t in cauldron for t in ("cauldron-season", "cauldron-week",
@@ -202,7 +202,7 @@ def test_cauldron_week_callback_is_renderable_for_a_player(server):
 
 
 def test_velo_filter_callback_is_renderable_for_a_player(server):
-    """Same for the velo board's Season/Week -> table-rows callback."""
+    """Same for the velo board's Season/Cycle -> table-rows callback."""
     from dash import Dash
     from app.dashboards.velo_board import layout, callbacks
     with server.app_context():
@@ -213,8 +213,8 @@ def test_velo_filter_callback_is_renderable_for_a_player(server):
     player_html = _render_board_as(server, "player", "app.dashboards.velo_board.layout",
                                    "/dash/velo_board/")
     specs = [spec for spec in dash_app.callback_map.values()
-             if [i["id"] for i in spec["inputs"]] == ["velo-season", "velo-week"]]
-    assert specs, "no callback driven by velo-season + velo-week"
+             if [i["id"] for i in spec["inputs"]] == ["velo-season", "velo-cycle"]]
+    assert specs, "no callback driven by velo-season + velo-cycle"
     for spec in specs:
         outs = spec["output"] if isinstance(spec["output"], list) else [spec["output"]]
         for dep in list(spec["inputs"]) + list(outs):
