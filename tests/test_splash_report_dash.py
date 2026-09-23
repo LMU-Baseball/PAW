@@ -304,6 +304,38 @@ def test_script_card_copy_paste_undo_buttons_edit_mode_only():
     assert "splash-script-undo-1" not in view_s
 
 
+def _rows(*filled_row_nums, n=SR.N_SCRIPT_ROWS):
+    """n blank rows, with `info` filled in for the given row_nums."""
+    filled = set(filled_row_nums)
+    return [{"row_num": i, "pitch_type": "", "ball_info": "",
+            "info": "x" if i in filled else ""} for i in range(1, n + 1)]
+
+
+def test_elastic_script_rows_empty_script_shows_one_row():
+    from app.dashboards.splash_report import layout
+    out = layout._elastic_script_rows(_rows())
+    assert [r["row_num"] for r in out] == [1]
+
+
+def test_elastic_script_rows_shows_up_to_last_filled_plus_one():
+    from app.dashboards.splash_report import layout
+    out = layout._elastic_script_rows(_rows(1, 2, 3))
+    assert [r["row_num"] for r in out] == [1, 2, 3, 4]
+
+
+def test_elastic_script_rows_ignores_a_gap_before_the_last_filled_row():
+    """A blank row in the middle (row 2) must not hide row 3's real data."""
+    from app.dashboards.splash_report import layout
+    out = layout._elastic_script_rows(_rows(1, 3))
+    assert [r["row_num"] for r in out] == [1, 2, 3, 4]
+
+
+def test_elastic_script_rows_caps_at_n_script_rows():
+    from app.dashboards.splash_report import layout
+    out = layout._elastic_script_rows(_rows(SR.N_SCRIPT_ROWS))
+    assert len(out) == SR.N_SCRIPT_ROWS
+
+
 def test_movement_chart_inside_bullpen_scripts_card_above_script_grid():
     """2026-09-16 round 5: the shared HB/IVB chart stays under Script Pen
     Results, inside the one "Bullpen Scripts" card (`layout.scripts_section`)

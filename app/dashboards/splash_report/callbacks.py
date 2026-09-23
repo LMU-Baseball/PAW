@@ -501,6 +501,45 @@ def register_callbacks(dash_app) -> None:
         out_rows[i] = buf.get("rows")
         return (*out_rows, None)   # single-use: clear the buffer after undoing
 
+    # Elastic script rows (2026-09-23, Brad: a script's pitch table used to
+    # hard-stop at a fixed row count with no way to add more once full;
+    # should "expand and be elastic" as a coach types, and shrink back when
+    # rows are cleared). Clientside (not a server round trip) so it's
+    # instant on every keystroke's blur. Self-referencing -- Input and
+    # Output are both this table's own `data` -- which is safe here because
+    # the logic converges: after it appends/trims rows, the very next
+    # firing (triggered by that same write) recomputes the identical
+    # desired length and returns no_update instead of writing again.
+    # `layout._elastic_script_rows` applies the same trim server-side for
+    # the initial page render; this is its live-editing JS twin.
+    for _n in range(1, SR.N_SCRIPTS + 1):
+        dash_app.clientside_callback(
+            f"""
+            function(rows) {{
+                if (!rows || !rows.length) {{ return window.dash_clientside.no_update; }}
+                var lastFilled = 0;
+                for (var i = 0; i < rows.length; i++) {{
+                    var r = rows[i];
+                    var filled = (r.pitch_type && String(r.pitch_type).trim()) ||
+                                 (r.ball_info && String(r.ball_info).trim()) ||
+                                 (r.info && String(r.info).trim());
+                    if (filled) {{ lastFilled = r.row_num; }}
+                }}
+                var visible = Math.max(1, Math.min({SR.N_SCRIPT_ROWS}, lastFilled + 1));
+                if (visible === rows.length) {{ return window.dash_clientside.no_update; }}
+                if (visible < rows.length) {{ return rows.slice(0, visible); }}
+                var out = rows.slice();
+                for (var n = rows.length + 1; n <= visible; n++) {{
+                    out.push({{row_num: n, pitch_type: '', ball_info: '', info: ''}});
+                }}
+                return out;
+            }}
+            """,
+            Output(f"splash-script-rows-{_n}", "data", allow_duplicate=True),
+            Input(f"splash-script-rows-{_n}", "data"),
+            prevent_initial_call=True,
+        )
+
     # "Compare Scripts" narrows which scripts' lines the pen-results trend
     # graph AND the shared movement chart show -- a normal (server) callback
     # since it re-renders both Plotly figures from splash-data, not just a

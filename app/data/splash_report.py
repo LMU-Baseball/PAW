@@ -98,7 +98,13 @@ GAS_STATION_DRILL_CATEGORIES: tuple[str, ...] = (
 MAX_VIDEO_BYTES = 150 * 1024 * 1024  # 150 MB
 
 N_SCRIPTS = 6
-N_SCRIPT_ROWS = 12
+# 12 -> 30 (2026-09-23, Brad): a script's pitch table used to hard-stop at
+# 12 rows with no way to add more once full. 30 is the new SAFETY CAP, not
+# the default display count -- the table only shows rows up to the last
+# filled one (+1 blank), growing/trimming as a coach types (see
+# `layout._elastic_script_rows` and `callbacks`'s matching clientside
+# callback), so a short script still looks like a short table.
+N_SCRIPT_ROWS = 30
 
 # A script's type (2026-09-16 coaches' meeting) drives what the Pen Results
 # "value" % on that script actually means and whether pitch-design's

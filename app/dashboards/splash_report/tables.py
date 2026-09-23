@@ -37,6 +37,18 @@ def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
 _ENGINE_CELL_STYLE = {"textAlign": "center", "padding": "10px 16px",
                       "fontFamily": "Teko, sans-serif", "fontSize": "19px"}
 _ENGINE_HEADER_STYLE = {**_HEADER_STYLE, "fontSize": "16px", "padding": "8px 16px"}
+# Fixed per-column widths (2026-09-23, Brad: Strength and ROM don't line up,
+# make them the same width so they stack nicely on phone) -- style_table's
+# "fit-content" sizes each table to ITS OWN content, so the wider ROM labels
+# ("Total Arc") pushed that table wider than Strength's ("Scaption"). Same
+# widths on both calls (`engine_tables_block` builds both from this one
+# function) makes the two tables always match, regardless of label length.
+_ENGINE_COL_WIDTHS = [
+    {"if": {"column_id": "label"}, "width": "110px"},
+    {"if": {"column_id": "base_value"}, "width": "70px"},
+    {"if": {"column_id": "now_value"}, "width": "70px"},
+    {"if": {"column_id": "delta"}, "width": "60px"},
+]
 
 
 _FLAG_STYLE = {
@@ -85,7 +97,7 @@ def engine_metrics_table(df: pd.DataFrame, table_id: str, *,
     ]
     return _table(table_id, columns, d.to_dict("records"), editable=False,
                  extra_style=extra_style, cell_style=_ENGINE_CELL_STYLE,
-                 header_style=_ENGINE_HEADER_STYLE)
+                 header_style=_ENGINE_HEADER_STYLE, cell_conditional=_ENGINE_COL_WIDTHS)
 
 
 def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
@@ -164,7 +176,10 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
 
 def script_pitch_table(df: pd.DataFrame, script_number: int, *,
                        editable: bool) -> dash_table.DataTable:
-    """# (readonly 1-12) / Type / Ball / Info -- always exactly 12 rows."""
+    """# (readonly) / Type / Ball / Info -- elastic length (1 row up to
+    `app.data.splash_report.N_SCRIPT_ROWS`), see `layout._elastic_script_
+    rows` and the matching clientside callback for how many rows `df`
+    actually has."""
     columns = [
         {"name": "#", "id": "row_num", "editable": False},
         {"name": "Type", "id": "pitch_type", "editable": editable},
