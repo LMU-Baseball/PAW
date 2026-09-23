@@ -1055,19 +1055,29 @@ def serve_layout() -> html.Div:
     return html.Div([
         dcc.Store(id="splash-editing", data=False),
         dcc.Store(id="splash-data", data=data),
-        # Page-lifetime clipboard for the per-script Copy/Paste buttons
+        # Clipboard for the per-script Copy/Paste buttons
         # (`_script_copy_paste_row`) -- never persisted to the DB, just
-        # holds whatever was last copied until a Paste (or a page reload)
-        # replaces/clears it. Outlives a player switch on purpose (Copy on
-        # one player, Paste on another) -- both this and the Store below
-        # sit OUTSIDE `splash-body`, which is what makes that possible:
-        # `splash-body` (and every script-scoped Button inside it) gets
-        # torn down and rebuilt on every player/season/cycle/edit change.
-        dcc.Store(id="splash-script-clipboard"),
+        # holds whatever was last copied until a Paste (or a browser-side
+        # clear) replaces/clears it. Outlives a player switch on purpose
+        # (Copy on one player, Paste on another) -- both this and the Store
+        # below sit OUTSIDE `splash-body`, which is what makes that
+        # possible: `splash-body` (and every script-scoped Button inside
+        # it) gets torn down and rebuilt on every player/season/cycle/edit
+        # change. `storage_type="local"` (2026-09-23, Brad) -- the default
+        # "memory" only lives in one tab's React state, so a coach copying
+        # in one browser tab and pasting in another (two separate Dash
+        # sessions) silently did nothing; localStorage is shared by every
+        # tab on the same browser+origin, so a Paste in tab B now sees what
+        # was copied in tab A.
+        dcc.Store(id="splash-script-clipboard", storage_type="local"),
         # {"script_number", "rows"} snapshot of a script's pitch rows from
         # immediately before the most recent Paste into it -- lets a single
         # Undo click (`callbacks._on_script_undo`) restore them. Single-
-        # level (one paste's worth), not a full history stack.
+        # level (one paste's worth), not a full history stack. Deliberately
+        # stays `storage_type="memory"` (this tab only), unlike the
+        # clipboard above -- Undo means "undo what I just did in THIS tab";
+        # sharing it via localStorage would let a stale buffer from tab A
+        # get undone by a click in tab B, reverting the wrong player/script.
         dcc.Store(id="splash-script-undo-buffer"),
         header(back_href="/pitching", back_label="← Pitching"),
         _page_title_banner(),
