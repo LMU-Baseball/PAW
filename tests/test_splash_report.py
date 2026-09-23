@@ -196,14 +196,14 @@ def test_scripts_reindexed_to_fixed_six():
 
 def test_script_rows_reindexed_to_fixed_twelve():
     rows = SR.read_script_rows(TEST_PID, SEASON, CYCLE, 1)
-    assert list(rows["row_num"]) == list(range(1, 13))
+    assert list(rows["row_num"]) == list(range(1, SR.N_SCRIPT_ROWS + 1))
     assert (rows["pitch_type"] == "").all()
 
     SR.upsert_script_rows(TEST_PID, SEASON, CYCLE, 1,
                           [{"row_num": 1, "pitch_type": "FB", "ball_info": "5+", "info": "vRHH"}],
                           updated_by=1)
     rows2 = SR.read_script_rows(TEST_PID, SEASON, CYCLE, 1)
-    assert len(rows2) == 12
+    assert len(rows2) == SR.N_SCRIPT_ROWS
     assert rows2.iloc[0]["pitch_type"] == "FB"
     assert rows2.iloc[1]["pitch_type"] == ""  # untouched row still blank, not missing
 
@@ -250,6 +250,62 @@ def test_upsert_all_script_rows_writes_every_script_in_one_call():
                               {1: [{"row_num": 1, "pitch_type": "SL", "ball_info": "", "info": ""}]},
                               updated_by=1)
     assert SR.read_all_script_rows(TEST_PID, SEASON, CYCLE)[1].iloc[0]["pitch_type"] == "SL"
+
+
+_TEST_SCRIPT_TYPE = "__TestType__"  # <= 16 chars -- script_type is VARCHAR(16)
+
+
+@pytest.fixture
+def _clean_script_template():
+    yield
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SR.SCRIPT_TEMPLATES_TABLE} WHERE script_type = :t"),
+                    {"t": _TEST_SCRIPT_TYPE})
+
+
+def test_script_template_save_and_get_roundtrip(_clean_script_template):
+    assert SR.get_script_template(_TEST_SCRIPT_TYPE) == []
+    SR.save_script_template(_TEST_SCRIPT_TYPE, [
+        {"row_num": 1, "pitch_type": "FB", "ball_info": "5+", "info": "vRHH"},
+        {"row_num": 2, "pitch_type": "SL", "ball_info": "", "info": ""},
+    ], updated_by=1)
+    out = SR.get_script_template(_TEST_SCRIPT_TYPE)
+    assert [r["pitch_type"] for r in out] == ["FB", "SL"]
+    assert [r["row_num"] for r in out] == [1, 2]
+
+
+def test_script_template_drops_blank_rows_and_closes_gaps(_clean_script_template):
+    """A blank row in the MIDDLE of the source (row 2) must not leave a
+    gap in the saved template -- row_num is renumbered 1..len over the
+    non-blank rows only, so a later pull-back always has contiguous rows
+    for `layout._elastic_script_rows` to size against."""
+    SR.save_script_template(_TEST_SCRIPT_TYPE, [
+        {"row_num": 1, "pitch_type": "FB", "ball_info": "", "info": ""},
+        {"row_num": 2, "pitch_type": "", "ball_info": "", "info": ""},
+        {"row_num": 3, "pitch_type": "CB", "ball_info": "", "info": ""},
+    ], updated_by=1)
+    out = SR.get_script_template(_TEST_SCRIPT_TYPE)
+    assert [r["pitch_type"] for r in out] == ["FB", "CB"]
+    assert [r["row_num"] for r in out] == [1, 2]
+
+
+def test_script_template_re_archiving_overwrites_not_appends(_clean_script_template):
+    SR.save_script_template(_TEST_SCRIPT_TYPE,
+                            [{"row_num": 1, "pitch_type": "FB", "ball_info": "", "info": ""},
+                             {"row_num": 2, "pitch_type": "SL", "ball_info": "", "info": ""}],
+                            updated_by=1)
+    SR.save_script_template(_TEST_SCRIPT_TYPE,
+                            [{"row_num": 1, "pitch_type": "CH", "ball_info": "", "info": ""}],
+                            updated_by=1)
+    out = SR.get_script_template(_TEST_SCRIPT_TYPE)
+    assert [r["pitch_type"] for r in out] == ["CH"]   # not ["CH", "SL"]
+
+
+def test_script_template_empty_type_is_a_noop():
+    SR.save_script_template("", [{"row_num": 1, "pitch_type": "FB",
+                                  "ball_info": "", "info": ""}], updated_by=1)
+    assert SR.get_script_template("") == []
+    assert SR.get_script_template(None) == []
 
 
 def test_multi_row_upsert_helpers_are_empty_safe():

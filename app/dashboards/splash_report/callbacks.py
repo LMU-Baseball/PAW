@@ -501,6 +501,67 @@ def register_callbacks(dash_app) -> None:
         out_rows[i] = buf.get("rows")
         return (*out_rows, None)   # single-use: clear the buffer after undoing
 
+    # Archive (2026-09-23, Brad: "an archive button... it will automatically
+    # archive what is on that script from this table specifically. That way
+    # coach can just pull that archive whenever he selects the type of the
+    # script") -- saves THIS script's current rows as the shared, team-wide
+    # template for its Type (`SR.save_script_template`), overwriting
+    # whatever was archived before for that type. A server round trip (not
+    # clientside like copy/paste) since it's a real DB write. The matching
+    # "pull" half is `_on_script_type_change` below.
+    @dash_app.callback(
+        *[Output(f"splash-script-archive-status-{n}", "children")
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        *[Input(f"splash-script-archive-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-type-{n}", "value") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-rows-{n}", "data") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_archive(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, types, rows = args[:n], args[n:2 * n], args[2 * n:3 * n]
+        out = [no_update] * n
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-archive-", n_clicks)
+        if spurious:
+            return out
+        script_type = types[i]
+        if not script_type:
+            out[i] = "Set a Type first"
+            return out
+        SR.save_script_template(script_type, rows[i], updated_by=getattr(current_user, "id", None))
+        out[i] = f"Saved as the {script_type} default"
+        return out
+
+    # The "pull" half of Archive: selecting a Type auto-fills this script's
+    # rows from that type's shared template -- but ONLY when the script is
+    # currently blank, so switching Type on an already-filled-in script
+    # never silently overwrites a coach's real entries.
+    @dash_app.callback(
+        *[Output(f"splash-script-rows-{n}", "data", allow_duplicate=True)
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        *[Input(f"splash-script-type-{n}", "value") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-rows-{n}", "data") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_type_change(*args):
+        n = SR.N_SCRIPTS
+        types, rows = args[:n], args[n:2 * n]
+        out = [no_update] * n
+        trig = ctx.triggered_id or ""
+        if not trig.startswith("splash-script-type-"):
+            return out
+        i = int(trig.rsplit("-", 1)[1]) - 1
+        script_type = types[i]
+        current_rows = rows[i] or []
+        is_blank = not any((r.get("pitch_type") or r.get("ball_info") or r.get("info"))
+                           for r in current_rows)
+        if not script_type or not is_blank:
+            return out
+        template = SR.get_script_template(script_type)
+        if template:
+            out[i] = template
+        return out
+
     # Elastic script rows (2026-09-23, Brad: a script's pitch table used to
     # hard-stop at a fixed row count with no way to add more once full;
     # should "expand and be elastic" as a coach types, and shrink back when
