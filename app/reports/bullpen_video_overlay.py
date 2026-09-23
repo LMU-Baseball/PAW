@@ -30,20 +30,20 @@ from PIL import Image
 from app.data.bullpen import _EDGE, _SZ
 from app.reports.plots import _add_ellipse, _color_for
 
-_RED = "#FF1E1E"  # bright red text (2026-09-23, Brad -- distinct from the
-# app's deep-maroon CRIMSON, which read too dark/muddy against video)
 _LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                           "static", "reports", "lion.png")
 _TEXT_OUTLINE = [pe.withStroke(linewidth=3, foreground="white")]
 
 
-def _outlined_text(fig, x, y, s, *, fontsize, ha, va="center", fontweight="bold"):
-    """Red text with a white outline (2026-09-23, Brad: "make the text red
-    and outline white... hard to see" against a busy video background) --
-    matplotlib's path_effects.withStroke draws the outline as part of the
-    text's own rendering, so it stays crisp at any size, not a cheap
-    drop-shadow hack."""
-    fig.text(x, y, s, fontsize=fontsize, fontweight=fontweight, color=_RED,
+def _outlined_text(fig, x, y, s, *, fontsize, ha, color, va="center", fontweight="bold"):
+    """`color` text with a white outline (2026-09-23, Brad: "make the text
+    red and outline white... hard to see" against a busy video background,
+    then a follow-up: "keep the text the color of the pitch so it is all
+    consistent" -- every text element uses THIS pitch's own color, not a
+    fixed red, so the whole overlay reads as one pitch's data). Matplotlib's
+    path_effects.withStroke draws the outline as part of the text's own
+    rendering, so it stays crisp at any size, not a cheap drop-shadow hack."""
+    fig.text(x, y, s, fontsize=fontsize, fontweight=fontweight, color=color,
              ha=ha, va=va, path_effects=_TEXT_OUTLINE)
 
 
@@ -123,7 +123,7 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
 
     # -- Top band text: pitch type (after the logo) + velo/break (right) --
     logo_frac = (logo_px + width * 0.03) / width
-    _outlined_text(fig, 0.015 + logo_frac, 0.945, pitch_type, fontsize=32, ha="left")
+    _outlined_text(fig, 0.015 + logo_frac, 0.945, pitch_type, fontsize=32, ha="left", color=color)
     metrics = []
     if velo is not None and pd.notna(velo):
         metrics.append(f"{velo:.1f} mph")
@@ -131,7 +131,7 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
         metrics.append(f"VB: {vb:.1f}")
     if hb is not None and pd.notna(hb):
         metrics.append(f"HB: {hb:.1f}")
-    _outlined_text(fig, 0.97, 0.945, "   ".join(metrics), fontsize=18, ha="right")
+    _outlined_text(fig, 0.97, 0.945, "   ".join(metrics), fontsize=18, ha="right", color=color)
 
     # -- Right side, upper: strike zone + this pitch's location -----------
     # White lines (not app.reports.plots._draw_zone's black/gray -- that's
@@ -177,10 +177,10 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
         spine.set_alpha(0.6)
 
     # -- Bottom band: player / date / pitch count ---------------------------
-    _outlined_text(fig, 0.03, 0.038, player_name, fontsize=15, ha="left")
-    _outlined_text(fig, 0.5, 0.038, date, fontsize=15, ha="center")
+    _outlined_text(fig, 0.03, 0.038, player_name, fontsize=15, ha="left", color=color)
+    _outlined_text(fig, 0.5, 0.038, date, fontsize=15, ha="center", color=color)
     _outlined_text(fig, 0.97, 0.038, f"Pitch {pitch_index}/{pitch_count}",
-                   fontsize=15, ha="right")
+                   fontsize=15, ha="right", color=color)
 
     buf = io.BytesIO()
     try:
