@@ -1,6 +1,7 @@
 """velo_board_entries storage layer (live DB): ensure_tables idempotency and
 upsert-then-update-in-place semantics."""
 import pandas as pd
+import pytest
 
 from app.data import velo_board as V
 
@@ -8,6 +9,23 @@ from app.data import velo_board as V
 def test_ensure_tables_idempotent():
     V.ensure_tables()
     V.ensure_tables()  # second call is a no-op, not an error
+
+
+def test_velo_cycle_for_date_switches_on_jan_1():
+    assert V.velo_cycle_for_date("2026-08-01") == "Fall"
+    assert V.velo_cycle_for_date("2026-12-31") == "Fall"
+    assert V.velo_cycle_for_date("2027-01-01") == "Spring"
+    assert V.velo_cycle_for_date("2027-07-31") == "Spring"
+
+
+def test_velo_cycle_bounds_fall_and_spring():
+    assert V.velo_cycle_bounds("2026/2027", "Fall") == ("2026-08-01", "2026-12-31")
+    assert V.velo_cycle_bounds("2026/2027", "Spring") == ("2027-01-01", "2027-07-31")
+
+
+def test_velo_cycle_bounds_rejects_winter():
+    with pytest.raises(ValueError, match="unknown cycle"):
+        V.velo_cycle_bounds("2026/2027", "Winter")
 
 
 def test_board_rows_applies_override_and_reranks(monkeypatch):
@@ -24,20 +42,44 @@ def test_board_rows_applies_override_and_reranks(monkeypatch):
          "versus": "SMC", "trend": 0.1},
     ])
     monkeypatch.setattr(V, "leaderboard", lambda s: lb)
-    monkeypatch.setattr(V, "read_entries", lambda s, w=None: pd.DataFrame(
-        [{"pitcher_id": 1, "velo_goal": 96.0, "assessment": 90.0}]))
     # A's 100.0 is a bad reading -> coach overrode season_max to 94.0 (avg untouched)
     monkeypatch.setattr(V, "read_overrides", lambda s: pd.DataFrame(
         [{"pitcher_id": 1, "season_max": 94.0, "season_avg": None}]))
+    # A's auto cycle-bullpen Assessment is 88.0; B has none (absent from dict)
+    monkeypatch.setattr(V, "cycle_assessment", lambda s, c: {1: 88.0})
+    monkeypatch.setattr(V, "read_cycle_overrides", lambda s, c: pd.DataFrame(
+        [{"pitcher_id": 1, "velo_goal": 96.0, "assessment": None}]))
 
-    df = V.board_rows("2025/2026", "2026-05-11")
+    df = V.board_rows("2025/2026", "Spring")
     by_id = {int(r["pitcher_id"]): r for _, r in df.iterrows()}
     assert by_id[1]["season_max"] == 94.0        # override applied
     assert by_id[1]["season_avg"] == 89.0        # None override -> keep computed
-    assert by_id[1]["velo_goal"] == 96.0         # weekly goal merged in
+    assert by_id[1]["velo_goal"] == 96.0         # cycle-scoped goal merged in
+    assert by_id[1]["cycle"] == "Spring"
+    assert by_id[1]["assessment"] == 88.0        # auto cycle-bullpen max, no override
+    assert pd.isna(by_id[2]["assessment"])       # no bullpen data this cycle
     # re-ranked by effective season_max: B (95) now above the corrected A (94)
     assert int(df.iloc[0]["pitcher_id"]) == 2
     assert int(df.iloc[1]["pitcher_id"]) == 1
+
+
+def test_board_rows_assessment_override_beats_auto(monkeypatch):
+    from app.data import pitching_caps
+    roster = pd.DataFrame([{"PitcherId": 1, "Pitcher": "A"}])
+    monkeypatch.setattr(pitching_caps, "lmu_pitchers", lambda season=None: roster)
+    monkeypatch.setattr(V, "leaderboard", lambda s: pd.DataFrame(
+        [{"pitcher_name": "A", "season_max": 90.0, "season_max_date": "2026-04-01",
+          "season_avg": 88.0, "last_velo": 88.0, "last_date": "2026-04-01",
+          "versus": "SMC", "trend": 0.0}]))
+    monkeypatch.setattr(V, "read_overrides", lambda s: pd.DataFrame(
+        columns=["pitcher_id", "season_max", "season_avg"]))
+    monkeypatch.setattr(V, "cycle_assessment", lambda s, c: {1: 88.0})
+    # coach corrected the auto 88.0 up to 91.0
+    monkeypatch.setattr(V, "read_cycle_overrides", lambda s, c: pd.DataFrame(
+        [{"pitcher_id": 1, "velo_goal": None, "assessment": 91.0}]))
+
+    df = V.board_rows("2025/2026", "Spring")
+    assert df.iloc[0]["assessment"] == 91.0
 
 
 def test_clip_velo_outliers_drops_far_above_median():
@@ -77,6 +119,19 @@ def test_set_override_roundtrip():
     row = ovr[ovr["pitcher_id"] == 9990001].iloc[0]
     assert float(row["season_max"]) == 93.5
     assert float(row["season_avg"]) == 88.2
+
+
+def test_set_cycle_override_roundtrip():
+    V.ensure_tables()
+    V.set_cycle_override(9990002, "TEST-OVR", "Fall", velo_goal=95.0, assessment=92.3,
+                         updated_by=1)
+    ovr = V.read_cycle_overrides("TEST-OVR", "Fall")
+    row = ovr[ovr["pitcher_id"] == 9990002].iloc[0]
+    assert float(row["velo_goal"]) == 95.0
+    assert float(row["assessment"]) == 92.3
+    # a different cycle for the same pitcher/season is untouched
+    other = V.read_cycle_overrides("TEST-OVR", "Spring")
+    assert other[other["pitcher_id"] == 9990002].empty
 
 
 def test_upsert_inserts_then_updates():

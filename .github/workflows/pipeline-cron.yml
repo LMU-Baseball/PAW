@@ -83,6 +83,42 @@ jobs:
           TM_SFTP_PASS: ${{ secrets.TM_SFTP_PASS }}
           PYTHONIOENCODING: utf-8
 
+  bullpen-video:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      # Edgertronic per-pitch bullpen video, via the TrackMan Data API (not
+      # SFTP -- see app.ingest.trackman_video/bullpen_video). Insert-only,
+      # PlayID-deduped like every other loader here; bytes land straight in
+      # bullpen_video_clips (a DB BLOB, see app.data.bullpen_video's module
+      # docstring for why -- this job's runner has no persistent disk, same
+      # as games/bullpen/hittrax above, so local-disk storage was never an
+      # option). --days 3 overlaps the last couple of runs on purpose so a
+      # late-arriving session (video is "post session," not instant) still
+      # gets picked up; --limit keeps a first-real-run's download volume
+      # bounded until clip sizes/timings over this connection are proven out
+      # -- raise or drop it once that's confirmed.
+      #
+      # Each clip is remuxed from TrackMan's raw QuickTime .mov to MP4
+      # before it's stored (app.ingest.bullpen_video.remux_to_mp4) --
+      # confirmed live that Chrome's <video> hangs forever on the raw .mov
+      # container even though the codec inside is already plain H.264, so
+      # this needs `ffmpeg` on PATH. No extra install step below because
+      # ubuntu-latest ships ffmpeg preinstalled.
+      - run: python -m flask --app run ingest bullpen-video --no-dry-run --days 3 --limit 200
+        env:
+          MYSQL_HOST: ${{ secrets.MYSQL_HOST }}
+          MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD: ${{ secrets.MYSQL_PASSWORD }}
+          MYSQL_DB: ${{ secrets.MYSQL_DB }}
+          TM_API_CLIENT_ID: ${{ secrets.TM_API_CLIENT_ID }}
+          TM_API_CLIENT_SECRET: ${{ secrets.TM_API_CLIENT_SECRET }}
+          PYTHONIOENCODING: utf-8
+
   hittrax:
     runs-on: ubuntu-latest
     steps:

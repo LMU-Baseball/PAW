@@ -9,7 +9,7 @@ def test_board_table_editable_columns_hidden_id_and_trend_format():
     df = pd.DataFrame([
         {"pitcher_id": 1, "pitcher_name": "A", "season_max": 100.0,
          "season_max_date": "2026-04-15", "season_avg": 89.0, "last_velo": 89.3,
-         "last_date": "2026-05-15", "versus": "USD", "trend": 0.4,
+         "last_date": "2026-05-15", "versus": "USD", "trend": 0.4, "cycle": "Spring",
          "velo_goal": 96.0, "assessment": 90.0},
     ])
     dt = V.board_table(df)
@@ -20,6 +20,10 @@ def test_board_table_editable_columns_hidden_id_and_trend_format():
     for cid in ("season_max", "season_avg", "velo_goal", "assessment"):
         assert "editable" not in col_by_id[cid]
     assert col_by_id["pitcher_name"]["editable"] is False
+    # Cycle is NOT a table column (2026-09-22, Brad: "the filter at the top
+    # is enough") -- `cycle` may still ride along in `board_rows`'s frame,
+    # but it must never become a visible/rendered column here.
+    assert "cycle" not in col_by_id
     # pitcher_id rides in the data but is not a visible column
     assert "pitcher_id" not in col_by_id
     assert dt.data[0]["pitcher_id"] == 1

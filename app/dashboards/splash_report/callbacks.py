@@ -412,6 +412,95 @@ def register_callbacks(dash_app) -> None:
         Input("splash-script-select", "value"),
     )
 
+    # Per-script Copy/Paste/Undo (2026-09-22, Brad's screenshot; narrowed to
+    # the pitch TABLE only + cross-player fix + Undo added 2026-09-23 per
+    # follow-up feedback: "just the table contents, the boxes on top can be
+    # entered manually," and copying script 1 of one player then pasting
+    # into script 2 of a DIFFERENT player pasted that second player's OWN
+    # script 1, not the first player's).
+    #
+    # Root cause of the cross-player bug: `splash-body` (every script-scoped
+    # Button lives inside it) gets torn down and rebuilt from scratch on
+    # ANY player/season/cycle/Edit/Save change, and the fresh Copy/Paste/
+    # Undo Buttons are hardcoded back to n_clicks=0. Dash's front end diffs
+    # each Input's new rendered value against the last value IT saw for
+    # that component id -- going from a real click's n_clicks=1 down to a
+    # freshly-mounted button's n_clicks=0 is still a "changed" value, so it
+    # re-fires the callback even though nothing was clicked. Reading State
+    # at THAT spurious firing picks up whatever player/script is on screen
+    # NOW, silently overwriting the clipboard with the wrong content. Fix:
+    # a real click always moves n_clicks from its current value to a MORE
+    # positive one (0 -> 1, 1 -> 2, ...), so the triggered button's own new
+    # n_clicks is never falsy for a genuine click -- treat a falsy value as
+    # the spurious re-fire and ignore it. Applied uniformly below.
+    #
+    # Plain per-index ids (not ALL/MATCH) -- same idiom as every other
+    # script-scoped id on this page (`splash-script-goal-{n}` etc.) --
+    # `ctx.triggered_id` says which of the N_SCRIPTS buttons fired.
+    def _spurious_refire(triggered_id: str, prefix: str, n_clicks_list) -> tuple[int, bool]:
+        """(index, is_spurious) for a Copy/Paste/Undo callback firing --
+        shared by all three below."""
+        if not triggered_id.startswith(prefix):
+            return -1, True
+        i = int(triggered_id.rsplit("-", 1)[1]) - 1
+        return i, not n_clicks_list[i]
+
+    @dash_app.callback(
+        Output("splash-script-clipboard", "data"),
+        *[Input(f"splash-script-copy-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-rows-{n}", "data") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_copy(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, rows = args[:n], args[n:2 * n]
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-copy-", n_clicks)
+        if spurious:
+            return no_update
+        return {"rows": rows[i]}
+
+    @dash_app.callback(
+        *[Output(f"splash-script-rows-{n}", "data", allow_duplicate=True)
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        Output("splash-script-undo-buffer", "data", allow_duplicate=True),
+        *[Input(f"splash-script-paste-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        State("splash-script-clipboard", "data"),
+        *[State(f"splash-script-rows-{n}", "data") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_paste(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, clip, rows = args[:n], args[n], args[n + 1:2 * n + 1]
+        out_rows = [no_update] * n
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-paste-", n_clicks)
+        if spurious or not clip:
+            return (*out_rows, no_update)
+        out_rows[i] = clip.get("rows")
+        # Snapshot this script's PRE-paste rows so Undo can restore them --
+        # single-level (this paste only), not a full history stack.
+        return (*out_rows, {"script_number": i + 1, "rows": rows[i]})
+
+    @dash_app.callback(
+        *[Output(f"splash-script-rows-{n}", "data", allow_duplicate=True)
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        Output("splash-script-undo-buffer", "data", allow_duplicate=True),
+        *[Input(f"splash-script-undo-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        State("splash-script-undo-buffer", "data"),
+        prevent_initial_call=True,
+    )
+    def _on_script_undo(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, buf = args[:n], args[n]
+        out_rows = [no_update] * n
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-undo-", n_clicks)
+        # Only undoes if the buffer's snapshot actually belongs to THIS
+        # script -- clicking Undo where nothing was just pasted (or after
+        # it's already been used once) is a no-op, not an error.
+        if spurious or not buf or buf.get("script_number") != i + 1:
+            return (*out_rows, no_update)
+        out_rows[i] = buf.get("rows")
+        return (*out_rows, None)   # single-use: clear the buffer after undoing
+
     # "Compare Scripts" narrows which scripts' lines the pen-results trend
     # graph AND the shared movement chart show -- a normal (server) callback
     # since it re-renders both Plotly figures from splash-data, not just a

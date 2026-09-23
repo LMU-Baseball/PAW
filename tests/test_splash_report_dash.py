@@ -3,8 +3,10 @@ gate, and role-branched layout (coach gets Edit/Save controls, player doesn't
 -- both see the same view content, team-transparent like every other
 dashboard)."""
 import pytest
+from dash import no_update
 
 from app import create_app
+from app.data import splash_report as SR
 from config import Config
 
 TEST_PID = -999102  # sandboxed fake player id; never collides with real GAMES data
@@ -179,6 +181,36 @@ def test_drill_catalog_controls_are_inline_and_coach_only():
     assert "splash-drill-add-btn" not in coach_viewing  # only shows next to the live dropdown
 
 
+def test_drill_section_view_mode_links_a_drill_with_a_matching_video():
+    """2026-09-22, Brad: Feet Set/Feet Moving drills should render as a
+    clickable Google-Drive link when the coach has added a video under that
+    exact drill name (`videos["Drills"]`), same idiom as the Gas Station
+    exercise column."""
+    from app.dashboards.splash_report import layout
+    drill_videos = [{"title": "CVB - Drift (x5)", "category": "Drills",
+                     "link_url": "https://drive.google.com/file/d/abc/view"}]
+    out = layout._drill_section(
+        "Feet Set", "CVB - Drift (x5)\nUnlinked Drill", editable=False, is_coach=False,
+        dd_id="splash-feetset", section_key="feetset", drill_options=[],
+        drill_videos=drill_videos)
+    s = str(out)
+    assert "https://drive.google.com/file/d/abc/view" in s
+    assert "CVB - Drift (x5)" in s and "Unlinked Drill" in s
+
+
+def test_drill_section_edit_mode_ignores_drill_videos():
+    """The dropdown (edit mode) shows plain selections -- video links are a
+    read-only-view affordance only."""
+    from app.dashboards.splash_report import layout
+    drill_videos = [{"title": "CVB - Drift (x5)", "category": "Drills",
+                     "link_url": "https://drive.google.com/file/d/abc/view"}]
+    out = layout._drill_section(
+        "Feet Set", "CVB - Drift (x5)", editable=True, is_coach=False,
+        dd_id="splash-feetset", section_key="feetset", drill_options=["CVB - Drift (x5)"],
+        drill_videos=drill_videos)
+    assert "https://drive.google.com/file/d/abc/view" not in str(out)
+
+
 def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
     """2026-09-10 planning session: script cards are collapsed behind the
     "Show Scripts" multi-select ("only show when clicked"), but they must
@@ -196,6 +228,80 @@ def test_scripts_section_cards_always_rendered_but_collapsed_by_default():
         for n in range(1, 7):
             assert f"splash-script-wrap-{n}" in s
             assert f"splash-script-rows-{n}" in s  # the pitch table itself, always mounted
+
+
+def _find_component(node, comp_id):
+    """Depth-first search for a Dash component whose id == comp_id."""
+    if getattr(node, "id", None) == comp_id:
+        return node
+    children = getattr(node, "children", None)
+    if children is None:
+        return None
+    if not isinstance(children, (list, tuple)):
+        children = [children]
+    for c in children:
+        found = _find_component(c, comp_id)
+        if found is not None:
+            return found
+    return None
+
+
+def test_scripts_with_data_only_flags_scripts_with_actual_pitch_rows():
+    """A script's Type/Goal/Measurable header being set doesn't count on its
+    own -- only real data typed into the 12-row pitch table does (2026-09-22,
+    Brad's correction: "I meant that data in these tables")."""
+    from app.dashboards.splash_report import layout
+    scripts_records = [
+        {"script_number": 1, "goal": "Fastball command", "measurable": "", "script_type": ""},
+        {"script_number": 2, "goal": "", "measurable": "", "script_type": "Velo"},
+        {"script_number": 3, "goal": "", "measurable": "", "script_type": ""},
+    ]
+    script_rows = {
+        # script 1's header is filled in, but its table is empty -> NOT flagged
+        "1": [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""} for i in range(1, 13)],
+        "2": [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""} for i in range(1, 13)],
+        # script 3 has no header fields set, but row 5 has a pitch type typed in -> flagged
+        "3": [{"row_num": i, "pitch_type": "FB" if i == 5 else "", "ball_info": "", "info": ""}
+             for i in range(1, 13)],
+    }
+    assert layout._scripts_with_data(scripts_records, script_rows) == [3]
+
+
+def test_scripts_with_data_empty_when_nothing_entered():
+    from app.dashboards.splash_report import layout
+    scripts_records = [{"script_number": n, "goal": "", "measurable": "", "script_type": ""}
+                       for n in range(1, 7)]
+    script_rows = {str(n): [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""}
+                            for i in range(1, 13)] for n in range(1, 7)}
+    assert layout._scripts_with_data(scripts_records, script_rows) == []
+
+
+def test_scripts_section_show_scripts_defaults_to_scripts_with_data():
+    """2026-09-22, Brad: a script whose pitch table already has numbers in it
+    should show up open when a coach switches players, instead of "Show
+    Scripts" starting blank every time."""
+    from app.dashboards.splash_report import layout
+    scripts_records = [{"script_number": n, "goal": "", "measurable": "", "script_type": ""}
+                       for n in range(1, 7)]
+    script_rows = {str(n): [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""}
+                            for i in range(1, 13)] for n in range(1, 7)}
+    script_rows["4"][0]["pitch_type"] = "Fastball"   # only script 4's table has data
+    out = layout.scripts_section([], [], scripts_records, script_rows, {},
+                                 editable=False, is_coach=False)
+    dd = _find_component(out, "splash-script-select")
+    assert dd.value == [4]
+
+
+def test_script_card_copy_paste_undo_buttons_edit_mode_only():
+    from app.dashboards.splash_report import layout
+    row = {"goal": "", "measurable": "", "script_type": ""}
+    rows = [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""} for i in range(1, 13)]
+    edit_s = str(layout.script_card(1, row, rows, editable=True))
+    view_s = str(layout.script_card(1, row, rows, editable=False))
+    assert "splash-script-copy-1" in edit_s and "splash-script-paste-1" in edit_s
+    assert "splash-script-undo-1" in edit_s
+    assert "splash-script-copy-1" not in view_s and "splash-script-paste-1" not in view_s
+    assert "splash-script-undo-1" not in view_s
 
 
 def test_movement_chart_inside_bullpen_scripts_card_above_script_grid():
@@ -418,6 +524,193 @@ def test_register_callbacks_adds_callbacks(server):
     before = len(app.callback_map)
     callbacks.register_callbacks(app)
     assert len(app.callback_map) > before
+
+
+def _script_copy_paste_specs(server):
+    """The registered Copy (single Output), Paste (7 Outputs: 6 rows +
+    the undo buffer), and Undo (same 7 Outputs) callback specs, keyed the
+    same way `dash._callback.py::add_context` finds them at request time --
+    used to drive both the pure-logic checks and the Dash-grouping-shape
+    check below with the SAME real spec Dash itself would dispatch to (not
+    a hand-rolled substitute)."""
+    from dash import Dash
+    from app.dashboards.splash_report import layout, callbacks
+    app = Dash(__name__, server=server, url_base_pathname="/dash/splashcp/",
+              suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    copy_spec = paste_spec = undo_spec = None
+    for spec in app.callback_map.values():
+        out = spec["output"]
+        outs = out if isinstance(out, list) else [out]
+        ids = [o["id"] if isinstance(o, dict) else o.component_id for o in outs]
+        if ids == ["splash-script-clipboard"]:
+            copy_spec = spec
+        elif ids == [f"splash-script-rows-{n}" for n in range(1, SR.N_SCRIPTS + 1)] + \
+                ["splash-script-undo-buffer"]:
+            inputs = [i["id"] if isinstance(i, dict) else i.component_id
+                     for i in spec["inputs"]]
+            if inputs[0].startswith("splash-script-paste-"):
+                paste_spec = spec
+            elif inputs[0].startswith("splash-script-undo-"):
+                undo_spec = spec
+    assert copy_spec is not None and paste_spec is not None and undo_spec is not None
+    return copy_spec, paste_spec, undo_spec
+
+
+def _rows_with(ball_info_at_row_1="") -> list:
+    rows = [{"row_num": i, "pitch_type": "", "ball_info": "", "info": ""} for i in range(1, 13)]
+    rows[0]["ball_info"] = ball_info_at_row_1
+    return rows
+
+
+def test_script_paste_return_shape_matches_its_registered_outputs(server, monkeypatch):
+    """Regression for a real bug (2026-09-22, live-tested by Brad): a Dash
+    callback with N flat Outputs must return an N-length flat sequence, not
+    a differently-shaped grouping -- Dash accepts a wrong shape fine at the
+    Python level (no exception in the function itself) but blows up with
+    `SchemaLengthValidationError` inside `dash._grouping.flatten_grouping`
+    when preparing the HTTP response, a 500 the browser surfaced as "Paste
+    does nothing," not as a visible error. This test runs the ACTUAL return
+    value through Dash's own grouping validator against the REAL registered
+    Output schema, so a future reshuffle of this callback's Outputs/return
+    shape fails a test instead of only failing silently in the browser."""
+    from dash._grouping import flatten_grouping
+    from app.dashboards.splash_report import callbacks
+
+    _, paste_spec, _ = _script_copy_paste_specs(server)
+    paste_fn = paste_spec["callback"].__wrapped__
+
+    class FakeCtx:
+        triggered_id = "splash-script-paste-2"
+
+    monkeypatch.setattr(callbacks, "ctx", FakeCtx())
+    clip = {"rows": _rows_with("10")}
+    n = SR.N_SCRIPTS
+    n_clicks = [0] * n
+    n_clicks[1] = 1   # script 2's Paste button fired
+    current_rows = [_rows_with() for _ in range(n)]
+    result = paste_fn(*n_clicks, clip, *current_rows)
+
+    # This is the exact call Dash makes before writing the HTTP response --
+    # raises SchemaLengthValidationError on a wrongly-shaped return.
+    flat = flatten_grouping(result, paste_spec["output"])
+    assert len(flat) == n + 1
+    assert flat[1][0]["ball_info"] == "10"   # script 2 (index 1) got the pasted rows
+    for i in range(n):
+        if i != 1:
+            assert flat[i] is no_update      # every other script untouched
+    assert flat[n] == {"script_number": 2, "rows": _rows_with()}   # undo snapshot
+
+
+def test_script_copy_then_paste_roundtrip_across_players(server, monkeypatch):
+    """The pure copy-then-paste data flow works across a player switch in
+    between (2026-09-22, Brad: copied script 1 of one player, pasted into
+    script 2 of a different player) -- the clipboard Store lives outside
+    `splash-body`, so it must survive that switch untouched."""
+    from app.dashboards.splash_report import callbacks
+
+    copy_spec, paste_spec, _ = _script_copy_paste_specs(server)
+    copy_fn = copy_spec["callback"].__wrapped__
+    paste_fn = paste_spec["callback"].__wrapped__
+    n = SR.N_SCRIPTS
+
+    class FakeCtx:
+        triggered_id = None
+
+    fake_ctx = FakeCtx()
+    monkeypatch.setattr(callbacks, "ctx", fake_ctx)
+
+    # Player A: copy script 1 (real click -> n_clicks 0 -> 1)
+    fake_ctx.triggered_id = "splash-script-copy-1"
+    rows_a = [_rows_with("10") if i == 0 else _rows_with() for i in range(n)]
+    copy_n_clicks = [0] * n
+    copy_n_clicks[0] = 1
+    clip = copy_fn(*copy_n_clicks, *rows_a)
+    assert clip == {"rows": rows_a[0]}
+
+    # Switch to player B: `splash-body` (and every script Button in it)
+    # rebuilds from scratch, resetting every button's n_clicks back to 0 --
+    # simulated here by a SECOND invocation of the copy callback where the
+    # triggered button's OWN n_clicks is back to 0 (the spurious re-fire),
+    # with player B's own (different) rows now in scope.
+    rows_b = [_rows_with("999") if i == 0 else _rows_with() for i in range(n)]
+    spurious_n_clicks = [0] * n   # freshly mounted: every button back to 0
+    spurious_result = copy_fn(*spurious_n_clicks, *rows_b)
+    assert spurious_result is no_update   # clipboard must NOT be overwritten
+
+    # Player B: paste into script 2. Must get player A's script 1 content,
+    # not player B's own script 1.
+    fake_ctx.triggered_id = "splash-script-paste-2"
+    paste_n_clicks = [0] * n
+    paste_n_clicks[1] = 1
+    result = paste_fn(*paste_n_clicks, clip, *rows_b)
+    new_rows = result[:n]
+    assert new_rows[1][0]["ball_info"] == "10"    # player A's value, not "999"
+    assert new_rows[0] is no_update               # script 1 (the copy source) untouched
+
+
+def test_script_copy_ignores_spurious_zero_click_refire(server, monkeypatch):
+    """A remount that resets some OTHER script's Copy button to n_clicks=0
+    must not be mistaken for a click on THIS script -- only the button
+    whose own n_clicks is genuinely positive triggers a copy."""
+    from app.dashboards.splash_report import callbacks
+
+    copy_spec, _, _ = _script_copy_paste_specs(server)
+    copy_fn = copy_spec["callback"].__wrapped__
+    n = SR.N_SCRIPTS
+
+    class FakeCtx:
+        triggered_id = "splash-script-copy-3"   # Dash says script 3's button fired...
+
+    monkeypatch.setattr(callbacks, "ctx", FakeCtx())
+    n_clicks = [0] * n   # ...but script 3's OWN n_clicks is 0 (a reset, not a real click)
+    rows = [_rows_with() for _ in range(n)]
+    assert copy_fn(*n_clicks, *rows) is no_update
+
+
+def test_script_undo_restores_pre_paste_rows(server, monkeypatch):
+    """Undo on the script that was just pasted into restores its rows from
+    the undo buffer, then clears the buffer (single-use)."""
+    from app.dashboards.splash_report import callbacks
+
+    _, _, undo_spec = _script_copy_paste_specs(server)
+    undo_fn = undo_spec["callback"].__wrapped__
+    n = SR.N_SCRIPTS
+
+    class FakeCtx:
+        triggered_id = "splash-script-undo-2"
+
+    monkeypatch.setattr(callbacks, "ctx", FakeCtx())
+    n_clicks = [0] * n
+    n_clicks[1] = 1
+    buf = {"script_number": 2, "rows": _rows_with("old-value")}
+    result = undo_fn(*n_clicks, buf)
+    new_rows = result[:n]
+    assert new_rows[1][0]["ball_info"] == "old-value"
+    assert new_rows[0] is no_update
+    assert result[n] is None   # buffer cleared after a successful undo
+
+
+def test_script_undo_noop_when_buffer_belongs_to_a_different_script(server, monkeypatch):
+    """Clicking Undo on script 3 when the last paste was into script 2 does
+    nothing -- it never touches the wrong script's rows."""
+    from app.dashboards.splash_report import callbacks
+
+    _, _, undo_spec = _script_copy_paste_specs(server)
+    undo_fn = undo_spec["callback"].__wrapped__
+    n = SR.N_SCRIPTS
+
+    class FakeCtx:
+        triggered_id = "splash-script-undo-3"
+
+    monkeypatch.setattr(callbacks, "ctx", FakeCtx())
+    n_clicks = [0] * n
+    n_clicks[2] = 1
+    buf = {"script_number": 2, "rows": _rows_with("old-value")}
+    result = undo_fn(*n_clicks, buf)
+    assert all(v is no_update for v in result[:n])
+    assert result[n] is no_update   # buffer left alone, not consumed
 
 
 def test_on_save_state_bound_to_live_selectors_not_a_stale_store(server):

@@ -1,9 +1,12 @@
 """Top Gun Velo Board storage layer: coach-editable pitcher-velo grid.
 
-One row per (pitcher, season, week) so a coach can record/adjust a pitcher's
-weekly velo numbers; the leaderboard and grid UI both read off this table.
-Mirrors `app.data.precalc`'s ensure_tables/upsert idiom (CREATE TABLE IF NOT
-EXISTS with an explicit PRIMARY KEY; `INSERT ... ON DUPLICATE KEY UPDATE` for
+Season Max/Avg are season-scoped (`OVERRIDES_TABLE`, one row per pitcher per
+season); Velo Goal + Assessment are CYCLE-scoped (`CYCLE_OVERRIDES_TABLE`,
+one row per pitcher per season per Fall/Spring cycle, VELO_CYCLES -- the
+board's own filter bar picks Season + Cycle, not a week, as of 2026-09-22).
+Mirrors
+`app.data.precalc`'s ensure_tables/upsert idiom (CREATE TABLE IF NOT EXISTS
+with an explicit PRIMARY KEY; `INSERT ... ON DUPLICATE KEY UPDATE` for
 upserts) against the pooled RDS analytics engine.
 """
 from __future__ import annotations
@@ -19,6 +22,14 @@ from app.data.cache import cached
 from app.data.seasons import season_bounds
 from app.db import get_engine, query_df
 
+# Superseded 2026-09-22: the velo board's filter bar moved from Week to
+# Cycle (Fall/Spring, VELO_CYCLES), and Velo Goal moved with it -- off this
+# per-week table onto CYCLE_OVERRIDES_TABLE (alongside Assessment, which had
+# already moved there). Left in place (ensure_tables still creates it,
+# read_entries/upsert_entries still work) so a pre-existing deployment's
+# history isn't stranded and nothing errors if some other caller still
+# touches it -- same "known dead table" status as splash_report.ENGINE_TABLE.
+# Nothing in this module writes to it anymore.
 VELO_BOARD_TABLE = "velo_board_entries"
 OVERRIDES_TABLE = "velo_board_overrides"
 
@@ -67,13 +78,52 @@ _OVERRIDES_DDL = f"""
         PRIMARY KEY (pitcher_id, season_label)
     )"""
 
+CYCLE_OVERRIDES_TABLE = "velo_board_cycle_overrides"
+
+# The velo board's per-CYCLE (not per-week, not per-season) coach values
+# (2026-09-22): Velo Goal is hand-typed here directly (no auto value to
+# override); Assessment is auto-computed (see `cycle_assessment`) with a
+# coach's correction stored here the same "auto value + can still correct
+# it" idiom as `OVERRIDES_TABLE` for Season Max/Avg. SEPARATE from
+# OVERRIDES_TABLE because it's cycle-scoped, not season-scoped -- Season
+# Max/Avg stay one row per (pitcher, season); this needs one row per
+# (pitcher, season, cycle).
+_CYCLE_OVERRIDES_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {CYCLE_OVERRIDES_TABLE} (
+        pitcher_id    BIGINT NOT NULL,
+        season_label  VARCHAR(16) NOT NULL,
+        cycle         VARCHAR(16) NOT NULL,
+        velo_goal     FLOAT,
+        assessment    FLOAT,
+        updated_by    INT,
+        updated_at    DATETIME,
+        PRIMARY KEY (pitcher_id, season_label, cycle)
+    )"""
+
+
+def _ensure_column(conn, table, col, coldef) -> None:
+    """Additive, idempotent migration: ADD COLUMN only when it's missing
+    (MySQL has no portable ADD COLUMN IF NOT EXISTS, so gate on
+    information_schema). Mirrors app.data.splash_report's helper of the
+    same name/shape -- `velo_goal` was added to CYCLE_OVERRIDES_TABLE after
+    it first shipped with just `assessment`."""
+    exists = conn.execute(text(
+        "SELECT COUNT(*) FROM information_schema.columns "
+        "WHERE table_schema = DATABASE() AND table_name = :t AND column_name = :c"),
+        {"t": table, "c": col}).scalar()
+    if not exists:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {coldef}"))
+
 
 def ensure_tables(engine=None) -> None:
-    """Idempotently create velo_board_entries + velo_board_overrides."""
+    """Idempotently create velo_board_entries + velo_board_overrides +
+    velo_board_cycle_overrides."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         conn.execute(text(_DDL))
         conn.execute(text(_OVERRIDES_DDL))
+        conn.execute(text(_CYCLE_OVERRIDES_DDL))
+        _ensure_column(conn, CYCLE_OVERRIDES_TABLE, "velo_goal", "velo_goal FLOAT")
 
 
 def read_overrides(season_label) -> pd.DataFrame:
@@ -108,6 +158,42 @@ def set_override(pitcher_id, season_label, season_max=None, season_avg=None,
         })
 
 
+def read_cycle_overrides(season_label, cycle) -> pd.DataFrame:
+    """Coach Velo Goal + Assessment-correction values for one (season,
+    cycle) -- see `CYCLE_OVERRIDES_TABLE`'s docstring for why this is
+    separate from `read_overrides`."""
+    ensure_tables()
+    return query_df(
+        f"SELECT * FROM {CYCLE_OVERRIDES_TABLE} WHERE season_label = :s AND cycle = :c",
+        {"s": season_label, "c": cycle})
+
+
+def set_cycle_override(pitcher_id, season_label, cycle, velo_goal=None, assessment=None,
+                       updated_by=None) -> None:
+    """Upsert a pitcher's (season, cycle) Velo Goal + Assessment correction.
+    `velo_goal` is stored as typed (no auto value underneath it);
+    `assessment=None` means 'no correction' -- `board_rows` falls back to
+    the auto-computed `cycle_assessment` value for that field only."""
+    ensure_tables()
+    sql = text(f"""
+        INSERT INTO {CYCLE_OVERRIDES_TABLE}
+            (pitcher_id, season_label, cycle, velo_goal, assessment, updated_by, updated_at)
+        VALUES (:pitcher_id, :season_label, :cycle, :velo_goal, :assessment, :updated_by, :updated_at)
+        ON DUPLICATE KEY UPDATE velo_goal = VALUES(velo_goal), assessment = VALUES(assessment),
+            updated_by = VALUES(updated_by), updated_at = VALUES(updated_at)
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, {
+            "pitcher_id": int(pitcher_id),
+            "season_label": season_label,
+            "cycle": cycle,
+            "velo_goal": _clean(velo_goal),
+            "assessment": _clean(assessment),
+            "updated_by": _clean(updated_by),
+            "updated_at": _now(),
+        })
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -129,7 +215,10 @@ def _clean(value):
 def upsert_entries(rows: list[dict], updated_by=None) -> None:
     """Insert or update each row keyed by (pitcher_id, season_label,
     week_start). Missing optional columns default to None; NaN scrubbed to
-    NULL. One transaction for the whole batch."""
+    NULL. One transaction for the whole batch.
+
+    Superseded 2026-09-22 (see VELO_BOARD_TABLE's docstring) -- nothing in
+    this module calls this anymore; left for any pre-existing caller."""
     ensure_tables()
     if not rows:
         return
@@ -526,21 +615,133 @@ def leaderboard(season_label) -> pd.DataFrame:
     return _leaderboard_batched(season_label)
 
 
+# ============================ CYCLE ASSESSMENT ================================
+#
+# The velo board's Assessment column (2026-09-22, Brad): a pitcher's single
+# FASTEST pitch (any pitch type -- NOT restricted to Fastball/Sinker like
+# every other velo on this board) thrown in a BULLPEN within one training
+# cycle -- BULLPEN-only (no GAMES) and cycle-scoped, not season-scoped.
+#
+# VELO_CYCLES is the velo board's OWN two-cycle Fall/Spring split (switches
+# Jan 1), deliberately separate from `app.data.splash_report.CYCLES`'s
+# three-cycle Fall/Winter/Spring split (2026-09-22, Brad: "remove winter as
+# a cycle [for the velo board], fall and spring are the only ones and it
+# switches January 1st"). Built on the Bluff keeps its original Fall/Winter/
+# Spring structure -- its tables are keyed by that 3-cycle scheme (migrated
+# from the source Google Sheet's one-tab-per-cycle layout), so changing the
+# shared CYCLES/cycle_bounds would silently orphan that history. The velo
+# board only ever needed a cycle for THIS Assessment column, so it gets its
+# own bounds instead of reusing the shared ones.
+VELO_CYCLES: tuple[str, ...] = ("Fall", "Spring")
+
+
+def velo_cycle_for_date(d=None) -> str:
+    """Fall (Aug-Dec) / Spring (Jan-Jul) for a date, switching Jan 1 -- the
+    velo board's own 2-cycle split (see VELO_CYCLES's comment for why this
+    differs from `app.data.splash_report.cycle_for_date`'s 3-cycle
+    version). Picks the default Cycle dropdown value only."""
+    from datetime import date as _date
+    d = _date.fromisoformat(str(d)[:10]) if d else _date.today()
+    return "Fall" if d.month >= 8 else "Spring"
+
+
+def velo_cycle_bounds(season_label: str, cycle: str) -> tuple[str, str]:
+    """(start, end) ISO dates for the velo board's own Fall/Spring cycle
+    within a season's Aug 1 -> Jul 31 academic year -- Fall = Aug-Dec,
+    Spring = Jan-Jul, switching Jan 1 (see VELO_CYCLES's comment)."""
+    a, b = season_label.split("/")
+    a, b = int(a), int(b)
+    if cycle == "Fall":
+        return f"{a}-08-01", f"{a}-12-31"
+    if cycle == "Spring":
+        return f"{b}-01-01", f"{b}-07-31"
+    raise ValueError(f"unknown cycle: {cycle!r}")
+
+
+# Resolved by PITCHER NAME, not the sibling-id chain the rest of this module
+# uses (`pitching_caps._sibling_pitcher_ids`) -- that chain only links a
+# pitcher to a real Trackman id once they've thrown in a tracked GAME this
+# season (`lmu_pitchers`' docstring), so early in a cycle, when only
+# bullpens have happened yet, every pitcher is still a roster placeholder
+# id and the sibling-id lookup would come up empty. Assessment's whole
+# point is to work from bullpens ALONE, so it can't depend on a game having
+# happened first -- BULLPEN's own `Pitcher` column ("Last, First") is
+# matched directly against the roster's name instead, which works whether
+# that roster row currently holds a placeholder id or an already-reconciled
+# real one.
+
+def _cycle_assessment_batch(season_label, cycle) -> dict:
+    """{pitcher_id: max BULLPEN RelSpeed (any pitch type) within `cycle`'s
+    date window for `season_label`} for every rostered pitcher -- one
+    batched BULLPEN query instead of one per pitcher, mirroring
+    `_leaderboard_batched`. A pitcher with no bullpen reading in the cycle
+    is simply absent from the returned dict."""
+    from app.data import pitching_caps as PC
+    from app.data.roster_media import _norm_name
+
+    roster = PC.lmu_pitchers(season_label)
+    if roster.empty:
+        return {}
+    start, end = velo_cycle_bounds(season_label, cycle)
+
+    canon_by_name = {_norm_name(r["Pitcher"]): int(r["PitcherId"])
+                     for _, r in roster.iterrows()}
+
+    bull = query_df(
+        "SELECT Pitcher AS pitcher, RelSpeed AS rel_speed FROM BULLPEN "
+        "WHERE `Date` BETWEEN :s AND :e",
+        {"s": str(start), "e": str(end)})
+    if bull.empty:
+        return {}
+    bull = bull.dropna(subset=["rel_speed", "pitcher"]).copy()
+    bull["canon"] = bull["pitcher"].map(lambda n: canon_by_name.get(_norm_name(n)))
+    bull = bull.dropna(subset=["canon"])
+    if bull.empty:
+        return {}
+
+    # No `_clip_velo_outliers` here (unlike season_max/avg): that helper's
+    # median-based ceiling assumes a same-pitch-type population -- mixing
+    # every pitch type in would drag a pitcher's median down toward their
+    # offspeed stuff and risk clipping a genuine fastball as a false
+    # "outlier." Assessment is asking for the literal single fastest pitch,
+    # so a raw max is what's wanted; a coach can still correct a bad reading
+    # via the override same as any other cell.
+    out = {}
+    for pid, grp in bull.groupby("canon"):
+        vals = grp["rel_speed"].dropna()
+        if not vals.empty:
+            out[int(pid)] = float(vals.max())
+    return out
+
+
+@cached
+def cycle_assessment(season_label, cycle) -> dict:
+    """{pitcher_id: max cycle-bullpen velo} for `season_label`/`cycle` --
+    cached (pure Trackman read, no coach-edited columns) same as
+    `leaderboard`; `board_rows` applies any coach override on top,
+    uncached, so a correction shows immediately."""
+    return _cycle_assessment_batch(season_label, cycle)
+
+
 _BOARD_COLS = ["pitcher_id", "pitcher_name", "season_max", "season_max_date",
                "season_avg", "last_velo", "last_date", "versus", "trend",
-               "velo_goal", "assessment"]
+               "cycle", "velo_goal", "assessment"]
 
 
-def board_rows(season_label, week_start) -> pd.DataFrame:
+def board_rows(season_label, cycle) -> pd.DataFrame:
     """One row per rostered pitcher for the UNIFIED velo table: the leaderboard
-    columns -- with any coach season_max/season_avg override applied (and rows
-    re-ranked by the effective season_max) -- plus this week's velo_goal /
-    assessment. `pitcher_id` rides along (hidden) for save-mapping. Raw values
-    (numeric velos, ISO dates, numeric trend); the view formats read-only cells.
+    columns (season-scoped, unaffected by `cycle`) -- with any coach
+    season_max/season_avg override applied (and rows re-ranked by the
+    effective season_max) -- plus the selected Cycle, a coach-typed Velo
+    Goal, and the cycle's auto Assessment (with any coach override
+    applied). `pitcher_id` rides along (hidden) for save-mapping. Raw
+    values (numeric velos, ISO dates, numeric trend); the view formats
+    read-only cells.
 
-    Overrides are applied HERE, not inside the @cached `leaderboard`, so a
-    coach's correction shows immediately (this function isn't cached) without
-    touching the leaderboard cache or its byte-parity oracle."""
+    Overrides are applied HERE, not inside the @cached `leaderboard`/
+    `cycle_assessment`, so a coach's correction shows immediately (this
+    function isn't cached) without touching either cache or the
+    leaderboard's byte-parity oracle."""
     from app.data import pitching_caps  # lazy
 
     roster = pitching_caps.lmu_pitchers(season_label)
@@ -550,17 +751,18 @@ def board_rows(season_label, week_start) -> pd.DataFrame:
     lb = leaderboard(season_label)
     lb_by_name = {r["pitcher_name"]: r for _, r in lb.iterrows()} if not lb.empty else {}
 
-    entries = read_entries(season_label, week_start)
-    goal_by_id = (dict(zip(entries["pitcher_id"].astype(int), entries["velo_goal"]))
-                  if not entries.empty else {})
-    assess_by_id = (dict(zip(entries["pitcher_id"].astype(int), entries["assessment"]))
-                    if not entries.empty else {})
-
     overrides = read_overrides(season_label)
     ovr_max = (dict(zip(overrides["pitcher_id"].astype(int), overrides["season_max"]))
                if not overrides.empty else {})
     ovr_avg = (dict(zip(overrides["pitcher_id"].astype(int), overrides["season_avg"]))
                if not overrides.empty else {})
+
+    auto_assess = cycle_assessment(season_label, cycle)
+    cyc_overrides = read_cycle_overrides(season_label, cycle)
+    goal_by_id = (dict(zip(cyc_overrides["pitcher_id"].astype(int), cyc_overrides["velo_goal"]))
+                 if not cyc_overrides.empty else {})
+    ovr_assess = (dict(zip(cyc_overrides["pitcher_id"].astype(int), cyc_overrides["assessment"]))
+                 if not cyc_overrides.empty else {})
 
     rows = []
     for _, r in roster.iterrows():
@@ -573,6 +775,7 @@ def board_rows(season_label, week_start) -> pd.DataFrame:
             return _clean(v)
 
         om, oa = _clean(ovr_max.get(pid)), _clean(ovr_avg.get(pid))
+        oassess = _clean(ovr_assess.get(pid))
         rows.append({
             "pitcher_id": pid,
             "pitcher_name": name,
@@ -583,8 +786,9 @@ def board_rows(season_label, week_start) -> pd.DataFrame:
             "last_date": _lb("last_date"),
             "versus": _lb("versus"),
             "trend": _lb("trend"),
+            "cycle": cycle,
             "velo_goal": _clean(goal_by_id.get(pid)),
-            "assessment": _clean(assess_by_id.get(pid)),
+            "assessment": oassess if oassess is not None else _clean(auto_assess.get(pid)),
         })
     df = pd.DataFrame(rows, columns=_BOARD_COLS)
     return df.sort_values("season_max", ascending=False, na_position="last",

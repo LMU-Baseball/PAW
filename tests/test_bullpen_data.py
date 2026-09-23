@@ -84,6 +84,25 @@ def test_strike_pct_zone_plus_edge():
     assert B.strike_pct(pd.DataFrame({"plate_loc_side": [], "plate_loc_height": []})) is None
 
 
+def test_pocket_label_nine_cells():
+    # _SZ = x0=-0.83, x1=0.83, y0=1.5, y1=3.5 -- thirds are ~0.553 wide, ~0.667 tall.
+    assert B.pocket_label(0.0, 2.5) == "Mid-Center"      # dead center
+    assert B.pocket_label(-0.7, 3.4) == "High-Left"      # upper-left corner
+    assert B.pocket_label(0.7, 1.6) == "Low-Right"       # lower-right corner
+    assert B.pocket_label(0.0, 1.6) == "Low-Center"
+
+
+def test_pocket_label_clamps_pitches_well_outside_the_box():
+    assert B.pocket_label(3.0, 2.5) == "Mid-Right"   # way outside, still a definite cell
+    assert B.pocket_label(-3.0, 10.0) == "High-Left"
+
+
+def test_pocket_label_missing_location_returns_none():
+    assert B.pocket_label(None, 2.5) is None
+    assert B.pocket_label(0.0, None) is None
+    assert B.pocket_label(float("nan"), 2.5) is None
+
+
 def test_avg_fb_velo():
     df = pd.DataFrame({"tagged_pitch_type": ["Fastball", "Fastball", "Slider"],
                        "rel_speed": [90.0, 92.0, 80.0]})

@@ -114,6 +114,7 @@ def serve_layout() -> html.Div:
     tabs = dcc.Tabs(id="bp-tabs", value="session", children=[
         dcc.Tab(label="Session Detail", value="session"),
         dcc.Tab(label="Development Trends", value="trends"),
+        dcc.Tab(label="Video", value="video"),
     ])
 
     return html.Div([

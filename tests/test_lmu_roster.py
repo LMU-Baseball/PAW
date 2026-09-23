@@ -199,6 +199,40 @@ def test_reconcile_ids_migrates_matched_pitcher_and_is_idempotent(monkeypatch):
                       {"s": SEASON, "p1": placeholder_id, "p2": 777001})
 
 
+def test_reconcile_ids_migrates_velo_board_cycle_overrides(monkeypatch):
+    """velo_board_cycle_overrides (Velo Goal + Assessment, 2026-09-22) must
+    migrate off a placeholder id the same way velo_board_overrides already
+    does -- it was added to _RECONCILE_TABLES alongside it."""
+    from app.data import velo_board
+    velo_board.ensure_tables()
+
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9303, "first_name": "Cyclic", "last_name": "Overider",
+         "class_year": "FR", "position": "RHP"},
+    ]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777002], "Pitcher": ["Overider, Cyclic"]}))
+
+    placeholder_id = -9303
+    try:
+        velo_board.set_cycle_override(placeholder_id, SEASON, "Fall", velo_goal=94.0)
+
+        migrated = LR.reconcile_ids(SEASON)
+        assert migrated == 1
+
+        overrides = velo_board.read_cycle_overrides(SEASON, "Fall")
+        ids = set(overrides["pitcher_id"].astype(int))
+        assert 777002 in ids
+        assert placeholder_id not in ids
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as c:
+            c.execute(text("DELETE FROM velo_board_cycle_overrides WHERE season_label=:s "
+                            "AND pitcher_id IN (:p1, :p2)"),
+                      {"s": SEASON, "p1": placeholder_id, "p2": 777002})
+
+
 def test_reconcile_ids_survives_a_collision_and_still_migrates_other_pitchers(monkeypatch):
     """A row can already exist under a pitcher's real id for a table's other
     key dimensions (e.g. a coach re-assigned the real id's Cauldron team

@@ -1,8 +1,9 @@
 """Top Gun Velo Board dashboard shell: role-branched layout.
 
-Every logged-in user (player or coach) sees the branded header, the Season/Week
-filters (`grid.board_filters`) and the heat leaderboard -- the filters are pure
-VIEW controls, so a player browses any season/week just like a coach.
+Every logged-in user (player or coach) sees the branded header, the
+Season/Cycle filters (`grid.board_filters`) and the heat leaderboard -- the
+filters are pure VIEW controls, so a player browses any season/cycle just
+like a coach.
 
 A coach ALSO sees the Edit/Save buttons (`grid.coach_controls`), placed above
 the filters in their own coach-only section -- players never receive those
@@ -18,9 +19,9 @@ from dash import dcc, html
 from flask_login import current_user
 
 from app.data import seasons
-from app.data import velo_board
 from app.dashboards import shell
 from app.dashboards.velo_board import grid, visual
+from app.data import velo_board
 
 
 def serve_layout() -> html.Div:
@@ -28,26 +29,26 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     is_coach = bool(getattr(current_user, "is_coach", False))
 
-    # Velo Board's whole purpose is "what happened this week": default straight
-    # to today's real calendar season (bypassing current_season()'s GAMES-only
-    # preference) so the board shows the actual current week, even if it's
-    # still empty, rather than a frozen prior-season snapshot. See spec
-    # docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4.
+    # Velo Board's whole purpose is "what's happening right now": default
+    # straight to today's real calendar season (bypassing current_season()'s
+    # GAMES-only preference) so the board shows the actual current cycle,
+    # even if it's still empty, rather than a frozen prior-season snapshot.
+    # See spec docs/superpowers/specs/2026-08-25-post-slaa-fixes-design.md §4.
     season = seasons.season_label_for(date.today().isoformat())
-    week = velo_board.default_week_for(season)
+    cycle = velo_board.velo_cycle_for_date(date.today())
 
-    board = velo_board.board_rows(season, week)
+    board = velo_board.board_rows(season, cycle)
     children = [
-        dcc.Store(id="velo-selection", data={"season": season, "week": week}),
+        dcc.Store(id="velo-selection", data={"season": season, "cycle": cycle}),
         shell.header(back_href="/pitching", back_label="← Pitching"),
         visual.top_gun_header(),
     ]
-    # Control bar above the shared table: the Season/Week filters are for
+    # Control bar above the shared table: the Season/Cycle filters are for
     # EVERYONE; only a coach additionally gets the Edit/Save buttons on top.
     controls = []
     if is_coach:
         controls.append(html.Div(grid.coach_controls(), id="velo-coach-section"))
-    controls.append(grid.board_filters(season, week))
+    controls.append(grid.board_filters(season, cycle))
     children.append(html.Div(controls,
                              style={"borderBottom": f"2px solid {shell.CRIMSON}",
                                     "backgroundColor": "rgba(255,255,255,0.55)"}))

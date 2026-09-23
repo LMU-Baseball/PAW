@@ -59,6 +59,7 @@ _RECONCILE_TABLES = (
     ("cauldron_daily", "player_id"),
     ("velo_board_entries", "pitcher_id"),
     ("velo_board_overrides", "pitcher_id"),
+    ("velo_board_cycle_overrides", "pitcher_id"),
 )
 
 
@@ -246,14 +247,14 @@ def union_with_roster(df: pd.DataFrame, season_label: str, groups: tuple[str, ..
 
 def reconcile_ids(season_label: str, engine=None) -> int:
     """Migrate any cauldron_teams/cauldron_daily/velo_board_entries/
-    velo_board_overrides row saved against a pitcher placeholder id
-    (-roster_id) over to that pitcher's real Trackman PitcherId, once one
-    exists (matched by name). Idempotent: once migrated, a placeholder id no
+    velo_board_overrides/velo_board_cycle_overrides row saved against a
+    pitcher placeholder id (-roster_id) over to that pitcher's real
+    Trackman PitcherId, once one exists (matched by name). Idempotent: once migrated, a placeholder id no
     longer has any row referencing it, so re-running is a safe no-op. Only
     PITCHER placeholders are ever reconciled -- Cauldron and Velo Board are
     both pitcher-only systems (see _RECONCILE_TABLES); hitter/catcher
     placeholders never persist anywhere, so there's nothing to migrate for
-    them. Returns the total number of rows migrated across all four tables.
+    them. Returns the total number of rows migrated across all five tables.
     """
     engine = engine or get_engine()
     roster = load_roster(season_label)

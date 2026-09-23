@@ -115,6 +115,28 @@ def strike_pct(df) -> float | None:
     return round(100.0 * float((inx & iny).mean()), 1)
 
 
+_POCKET_ROWS = ("Low", "Mid", "High")
+_POCKET_COLS = ("Left", "Center", "Right")
+
+
+def pocket_label(plate_loc_side, plate_loc_height) -> str | None:
+    """Which of the 9 rulebook-zone cells (row x col, catcher's-view left/
+    right -- same PlateLocSide sign convention `charts.location_fig` plots
+    directly, no handedness flip) a location falls in, e.g. "High-Left".
+    Buckets against `_SZ`'s thirds, clamped at the edges, so every located
+    pitch gets a cell even well outside the box (a pitch two feet outside
+    still reads "Mid-Right", not a dead end) -- None only for a missing
+    location, matching `strike_pct`'s own null handling."""
+    if plate_loc_side is None or plate_loc_height is None or pd.isna(plate_loc_side) or pd.isna(plate_loc_height):
+        return None
+    x, y = float(plate_loc_side), float(plate_loc_height)
+    x_third = (_SZ["x1"] - _SZ["x0"]) / 3.0
+    y_third = (_SZ["y1"] - _SZ["y0"]) / 3.0
+    col = 0 if x < _SZ["x0"] + x_third else (2 if x > _SZ["x1"] - x_third else 1)
+    row = 0 if y < _SZ["y0"] + y_third else (2 if y > _SZ["y1"] - y_third else 1)
+    return f"{_POCKET_ROWS[row]}-{_POCKET_COLS[col]}"
+
+
 def avg_fb_velo(df) -> float | None:
     if df is None or df.empty or "tagged_pitch_type" not in df.columns:
         return None

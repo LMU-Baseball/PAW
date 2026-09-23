@@ -45,6 +45,27 @@ def test_cycle_for_date():
     assert SR.cycle_for_date("2026-04-01") == "Spring"
 
 
+def test_cycle_bounds():
+    assert SR.cycle_bounds("2025/2026", "Fall") == ("2025-08-01", "2025-11-30")
+    assert SR.cycle_bounds("2025/2026", "Winter") == ("2025-12-01", "2026-02-28")
+    assert SR.cycle_bounds("2025/2026", "Spring") == ("2026-03-01", "2026-07-31")
+    # leap year: 2028's Feb has 29 days
+    assert SR.cycle_bounds("2027/2028", "Winter") == ("2027-12-01", "2028-02-29")
+    with pytest.raises(ValueError):
+        SR.cycle_bounds("2025/2026", "Summer")
+
+
+def test_cycle_bounds_matches_cycle_for_date():
+    """Every date `cycle_for_date` maps to a cycle should fall inside that
+    cycle's own `cycle_bounds` window for the same season."""
+    season = "2025/2026"
+    for d in ("2025-08-01", "2025-11-30", "2025-12-01", "2026-02-28",
+             "2026-03-01", "2026-07-31"):
+        cycle = SR.cycle_for_date(d)
+        start, end = SR.cycle_bounds(season, cycle)
+        assert start <= d <= end
+
+
 def test_plan_roundtrip_and_defaults():
     empty = SR.read_plan(TEST_PID, SEASON, CYCLE)
     assert empty == {c: "" for c in (

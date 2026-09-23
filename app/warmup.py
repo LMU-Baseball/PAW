@@ -126,16 +126,15 @@ def warm_caches() -> None:
     board_season = season
 
     _safe(lambda: velo_board.leaderboard(board_season))  # player-facing heat board
-    # Default week = the layout's _default_week(board_season): today's week
-    # while the season is live, else its final week (offseason). Kept in sync
-    # with velo_board/layout.py::_default_week.
-    board_s_b, board_e_b = seasons.season_bounds(board_season)
-    anchor = min(today, board_e_b)
-    if anchor < board_s_b:
-        anchor = board_s_b
-    week = _safe(lambda: velo_board.week_start_for(anchor))
-    if week:
-        _safe(lambda: velo_board.board_rows(board_season, week))  # unified board rows
+    # Default cycle = the layout's own default (`velo_board.velo_cycle_for_date`
+    # of today) -- Velo Board's filter bar moved from Week to Cycle 2026-09-22,
+    # kept in sync with velo_board/layout.py. Fall/Spring only (VELO_CYCLES,
+    # switches Jan 1) -- NOT `splash_report.cycle_for_date`, which still
+    # returns "Winter" for Dec-Feb and would make `cycle_assessment` raise
+    # (`velo_cycle_bounds` only knows Fall/Spring) every winter if used here.
+    velo_cycle = velo_board.velo_cycle_for_date(today)
+    _safe(lambda: velo_board.cycle_assessment(board_season, velo_cycle))
+    _safe(lambda: velo_board.board_rows(board_season, velo_cycle))  # unified board rows
 
     cycle = f"{board_season}-c1"
     _safe(cauldron.read_scoring)
