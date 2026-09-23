@@ -160,3 +160,29 @@ def session_pitch_video_df(pitcher_id: int, date) -> pd.DataFrame:
     found = existing_play_ids([p for p in df["play_id"] if pd.notna(p)])
     df["has_video"] = df["play_id"].isin(found)
     return df
+
+
+def pitch_row_by_play_id(play_id: str) -> dict | None:
+    """One pitch's PitcherId/Date/PitchNo/type/velo/break/location for a
+    known PlayID -- the download route's entry point (2026-09-23, Brad:
+    players want to download their best pitches with a pitch-data overlay
+    to share with recruiters): it only has `play_id` from the URL, so this
+    is how it finds which session (pitcher + date) that play belongs to,
+    to then pull the rest of that session via `session_pitch_video_df` for
+    the overlay's movement chart. None if PlayID isn't in BULLPEN at all."""
+    df = query_df(
+        """
+        SELECT PitcherId AS pitcher_id, `Date` AS date, PitchNo AS pitch_no,
+               TaggedPitchType AS pitch_type, RelSpeed AS velo,
+               PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height,
+               HorzBreak AS horz_break, VertBreak AS vert_break
+          FROM BULLPEN WHERE PlayID = :p
+        """,
+        {"p": play_id})
+    if df.empty:
+        return None
+    row = df.iloc[0].to_dict()
+    row["date"] = str(row["date"])
+    row["pitcher_id"] = int(row["pitcher_id"])
+    row["play_id"] = play_id
+    return row

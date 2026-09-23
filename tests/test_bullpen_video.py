@@ -78,3 +78,23 @@ def test_clip_meta_excludes_data_but_keeps_other_fields():
 
 def test_clip_meta_missing_returns_none():
     assert BV.clip_meta("no-such-play-id-at-all") is None
+
+
+# A real, known BULLPEN row (Moreno, Matthew's 2026-09-17 session, pitch
+# 81 -- see the 2026-09-22/23 Edgertronic video work) -- read-only, never
+# written to, same "known real fixture" idiom as other live-DB tests in
+# this repo (e.g. test_bullpen_data.py's "Geis").
+_KNOWN_REAL_PLAY_ID = "a8fd0bf2-6830-4de0-af64-32a622f50c87"
+
+
+def test_pitch_row_by_play_id_known_real_row():
+    row = BV.pitch_row_by_play_id(_KNOWN_REAL_PLAY_ID)
+    assert row is not None
+    assert row["pitcher_id"] == 1000170776
+    assert row["date"] == "2026-09-17"
+    assert row["pitch_type"] == "Fastball"
+    assert row["play_id"] == _KNOWN_REAL_PLAY_ID
+
+
+def test_pitch_row_by_play_id_missing_returns_none():
+    assert BV.pitch_row_by_play_id("no-such-play-id-at-all") is None

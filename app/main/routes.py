@@ -1,5 +1,6 @@
 """Home / landing page (the app shell that links to the dashboards)."""
 import io
+import re
 
 from flask import Blueprint, abort, render_template, send_file
 from flask_login import current_user, login_required
@@ -71,3 +72,46 @@ def bullpen_video(play_id: str):
     resp.cache_control.private = True
     resp.cache_control.max_age = 86400
     return resp
+
+
+@main_bp.route("/bullpen-video/<path:play_id>/download")
+@login_required
+def bullpen_video_download(play_id: str):
+    """LMU-branded downloadable clip: pitch type/velo/break, a strike-zone
+    box, and a movement chart burned onto the raw Edgertronic video
+    (2026-09-23, Brad: players want to download their best pitches to
+    share with recruiters). Generated on demand, not cached -- a real
+    ffmpeg re-encode (not the streaming route's `-c copy` remux), so this
+    takes noticeably longer than a normal play; fine for an occasional
+    manual download, not something hit in a loop."""
+    from app.data import bullpen as B
+    from app.data import bullpen_video as BV
+    from app.reports.bullpen_video_overlay import build_overlay_png, composite_overlay
+
+    clip = BV.get_clip(play_id)
+    if clip is None or clip.get("data") is None:
+        abort(404)
+    pitch = BV.pitch_row_by_play_id(play_id)
+    if pitch is None:
+        abort(404)
+    session_df = BV.session_pitch_video_df(pitch["pitcher_id"], pitch["date"])
+    player_name = B.pitcher_name(pitch["pitcher_id"]) or "Player"
+    # "Pitch X/Y" is this pitch's position WITHIN the session (1-based), not
+    # BULLPEN's own PitchNo -- that's a running count that does NOT reset
+    # per session, so it can be well past the session's own pitch total
+    # (confirmed live: PitchNo 81 in a 16-pitch session read as "81/16").
+    # session_df is already ordered by PitchNo (session_pitch_video_df), so
+    # its row position is exactly that rank.
+    play_ids = list(session_df["play_id"])
+    pitch_index = play_ids.index(play_id) + 1 if play_id in play_ids else 1
+
+    overlay_png = build_overlay_png(
+        pitch, session_df, player_name=player_name, date=pitch["date"],
+        pitch_index=pitch_index, pitch_count=len(session_df),
+        width=int(clip.get("width") or 1280), height=int(clip.get("height") or 720))
+    composited = composite_overlay(clip["data"], overlay_png)
+
+    safe_name = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9]", "_", player_name)).strip("_")
+    download_name = f"{safe_name}_{pitch.get('pitch_type') or 'pitch'}_{pitch['date']}.mp4"
+    return send_file(io.BytesIO(composited), mimetype="video/mp4",
+                     as_attachment=True, download_name=download_name)
