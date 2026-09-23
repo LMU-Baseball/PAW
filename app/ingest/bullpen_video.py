@@ -45,6 +45,23 @@ class VideoLoadResult:
     clips_errored: int = 0
 
 
+def _ffmpeg_path() -> str:
+    """Portable ffmpeg binary bundled with imageio-ffmpeg -- no system
+    install required. Mirrors scripts/pitch_video_clips.py's own
+    `_ffmpeg_path` (same idiom, kept separate rather than shared since
+    these are two independent CLI entry points).
+
+    Every clip failed with RemuxError in production for a full day
+    (2026-09-22/23, `clips_errored=175` every single cron run, `downloaded=
+    0`) because this used to call the bare "ffmpeg" command, assuming
+    GitHub Actions' `ubuntu-latest` runners ship a system ffmpeg on PATH --
+    they don't. `imageio-ffmpeg` was already a dependency (added for
+    scripts/pitch_video_clips.py) but this function never actually used
+    it."""
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 def remux_to_mp4(data: bytes) -> bytes:
     """Rewrap Edgertronic's clip into a standard MP4 container Chrome will
     actually play. Confirmed live (2026-09-22): Edgertronic clips come back
@@ -57,11 +74,6 @@ def remux_to_mp4(data: bytes) -> bytes:
     transcode. `+faststart` moves the moov atom to the front so the clip is
     playable as soon as the browser has the first chunk of bytes, matching
     how every other MP4 in this app is served.
-
-    Requires the `ffmpeg` binary on PATH -- preinstalled on GitHub Actions'
-    `ubuntu-latest` runners, where this loader's cron job runs (see
-    .github/workflows/pipeline-cron.yml's bullpen-video job); may not be
-    present for a local `flask ingest bullpen-video` run on a dev machine.
     """
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "in.mov")
@@ -70,14 +82,14 @@ def remux_to_mp4(data: bytes) -> bytes:
             f.write(data)
         try:
             subprocess.run(
-                ["ffmpeg", "-y", "-i", src, "-c", "copy", "-movflags", "+faststart",
+                [_ffmpeg_path(), "-y", "-i", src, "-c", "copy", "-movflags", "+faststart",
                  "-f", "mp4", dst],
                 check=True, capture_output=True,
             )
         except FileNotFoundError as e:
             raise RemuxError(
-                "ffmpeg not found on PATH -- required to remux Edgertronic "
-                ".mov clips to browser-playable MP4") from e
+                "ffmpeg not found -- required to remux Edgertronic .mov "
+                "clips to browser-playable MP4") from e
         except subprocess.CalledProcessError as e:
             raise RemuxError(
                 f"ffmpeg remux failed (exit {e.returncode}): "

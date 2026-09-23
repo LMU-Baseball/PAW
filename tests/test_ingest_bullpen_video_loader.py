@@ -222,7 +222,7 @@ def test_remux_to_mp4_writes_input_runs_ffmpeg_and_returns_output_bytes(monkeypa
     proving remux_to_mp4 reads that same file back rather than, say,
     capturing stdout."""
     def _fake_run(args, check, capture_output):
-        assert args[0] == "ffmpeg"
+        assert args[0] == loader._ffmpeg_path()  # the portable imageio-ffmpeg binary
         dst = args[-1]
         with open(dst, "wb") as f:
             f.write(b"remuxed-mp4-bytes")
