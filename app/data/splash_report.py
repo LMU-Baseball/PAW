@@ -35,6 +35,7 @@ count, or a single row per key) and are upserted by that fixed key instead.
 """
 from __future__ import annotations
 
+import calendar
 import math
 from datetime import date, datetime, timezone
 
@@ -66,8 +67,13 @@ VIDEOS_TABLE = "splash_videos"
 # session): Recovery Protocols and Gas Station each get their own shared
 # list, coach-managed, shown to every player rather than curated per plan
 # (matches "Brad to add to database as named links" -- an admin action, not
-# a per-player one).
-VIDEO_CATEGORIES: tuple[str, ...] = ("Recovery", "Gas Station")
+# a per-player one). "Drills" added 2026-09-22 -- titled links for the Feet
+# Set/Feet Moving/Work Day drill catalog (see FEET_DRILL_OPTIONS): a video's
+# `title` is matched against a plan's selected drill names the same way a
+# Gas Station video's title is matched against `exercise` (tables.py's
+# `gas_station_table`), so `layout._drill_section` can render a drill as a
+# clickable link when the coach has added one.
+VIDEO_CATEGORIES: tuple[str, ...] = ("Recovery", "Gas Station", "Drills")
 
 # Drill sub-categories WITHIN the Gas Station bucket only (2026-09-16
 # meeting) -- layered on top of VIDEO_CATEGORIES's "Gas Station" bucket,
@@ -448,6 +454,27 @@ def cycle_for_date(d=None) -> str:
     if d.month in (12, 1, 2):
         return "Winter"
     return "Spring"
+
+
+def cycle_bounds(season_label: str, cycle: str) -> tuple[str, str]:
+    """(start, end) ISO dates for one training `cycle` within a season's
+    Aug 1 -> Jul 31 academic year (`app.data.seasons.season_bounds`) --
+    Fall = Aug-Nov, Winter = Dec-Feb, Spring = Mar-Jul, the exact month
+    buckets `cycle_for_date` uses, so a date that maps to a cycle always
+    falls inside that cycle's own bounds. Used by the velo board's
+    Assessment column (`app.data.velo_board.cycle_assessment`) to scope a
+    pitcher's max bullpen velo to one training cycle instead of the whole
+    season."""
+    a, b = season_label.split("/")
+    a, b = int(a), int(b)
+    if cycle == "Fall":
+        return f"{a}-08-01", f"{a}-11-30"
+    if cycle == "Winter":
+        feb_end = calendar.monthrange(b, 2)[1]
+        return f"{a}-12-01", f"{b}-02-{feb_end:02d}"
+    if cycle == "Spring":
+        return f"{b}-03-01", f"{b}-07-31"
+    raise ValueError(f"unknown cycle: {cycle!r}")
 
 
 def _now() -> str:

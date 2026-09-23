@@ -183,11 +183,28 @@ def _lines(text: str) -> list[str]:
     return [ln.strip() for ln in (text or "").split("\n") if ln.strip()]
 
 
-def _bullet_view(text: str, empty_msg: str = "Nothing entered yet.") -> html.Div:
+def _bullet_view(text: str, empty_msg: str = "Nothing entered yet.",
+                 video_by_title: dict | None = None) -> html.Div:
+    """One `<li>` per line; a line that matches a video's title (exact
+    match, same idiom as `tables.gas_station_table`'s exercise-to-video
+    matching) renders as a clickable link to that video instead of plain
+    text -- used by `_drill_section` for the Feet Set/Feet Moving/Work Day
+    catalog (see `app.data.splash_report.VIDEO_CATEGORIES`'s "Drills"
+    category)."""
     items = _lines(text)
     if not items:
         return html.Div(empty_msg, style={"color": "#888", "fontStyle": "italic"})
-    return html.Ul([html.Li(x) for x in items], style={"margin": "0", "paddingLeft": "18px"})
+    video_by_title = video_by_title or {}
+
+    def _item(x):
+        video = video_by_title.get(x)
+        if video and video.get("link_url"):
+            return html.Li(html.A(x, href=video["link_url"], target="_blank",
+                                  rel="noopener",
+                                  style={"color": CRIMSON, "textDecoration": "underline"}))
+        return html.Li(x)
+
+    return html.Ul([_item(x) for x in items], style={"margin": "0", "paddingLeft": "18px"})
 
 
 def _text_section(title: str, text: str, *, editable: bool, input_id: str) -> html.Div:
@@ -237,7 +254,8 @@ def _drill_catalog_controls(section_key: str, drill_options: list[str]) -> html.
 
 
 def _drill_section(title: str, text: str, *, editable: bool, is_coach: bool, dd_id: str,
-                   section_key: str, drill_options: list[str]) -> html.Div:
+                   section_key: str, drill_options: list[str],
+                   drill_videos: list[dict] | None = None) -> html.Div:
     """Feet Set/Feet Moving/Work Day: a multi-select catalog (the coaches'
     real drill list), not free text. `drill_options` comes from
     `app.data.splash_report.read_drill_options()` (coach-managed via the
@@ -245,7 +263,12 @@ def _drill_section(title: str, text: str, *, editable: bool, is_coach: bool, dd_
     dropdown -- rather than a separate section), loaded once in `load_data`
     rather than queried here so this render stays a pure function of
     `data`. dcc.Dropdown is searchable by typing out of the box, satisfying
-    "type-to-search" with no extra code."""
+    "type-to-search" with no extra code.
+
+    `drill_videos` (2026-09-22, `videos["Drills"]` from `load_data`): a
+    selected drill whose name matches a video's title renders as a
+    clickable Google-Drive link in the read-only view, same idiom as
+    `tables.gas_station_table`'s exercise column -- see `_bullet_view`."""
     if editable:
         dropdown = dcc.Dropdown(
             id=dd_id, multi=True, value=_lines(text),
@@ -254,7 +277,8 @@ def _drill_section(title: str, text: str, *, editable: bool, is_coach: bool, dd_
         child = html.Div([dropdown, _drill_catalog_controls(section_key, drill_options)]) \
             if is_coach else dropdown
     else:
-        child = _bullet_view(text)
+        video_by_title = {v["title"]: v for v in (drill_videos or [])}
+        child = _bullet_view(text, video_by_title=video_by_title)
     return _card(title, child)
 
 
@@ -435,13 +459,13 @@ def checklists_grid(plan: dict, *, editable: bool, is_coach: bool, drill_options
                      editable=editable, input_id="splash-post"),
         _drill_section("Feet Set", plan["feet_set"], editable=editable, is_coach=is_coach,
                        dd_id="splash-feetset", section_key="feetset",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _drill_section("Feet Moving", plan["feet_moving"], editable=editable, is_coach=is_coach,
                        dd_id="splash-feetmoving", section_key="feetmoving",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _drill_section("Work Day", plan["work_day"], editable=editable, is_coach=is_coach,
                        dd_id="splash-workday", section_key="workday",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _recovery_section(videos.get("Recovery", []),
                           videos.get("Recovery", []) + videos.get("Gas Station", []),
                           is_coach=is_coach, manage_videos_open=manage_videos_open),
@@ -478,13 +502,13 @@ def training_boxes_column(plan: dict, *, editable: bool, is_coach: bool,
     sections = [
         _drill_section("Feet Set", plan["feet_set"], editable=editable, is_coach=is_coach,
                        dd_id="splash-feetset", section_key="feetset",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _drill_section("Feet Moving", plan["feet_moving"], editable=editable, is_coach=is_coach,
                        dd_id="splash-feetmoving", section_key="feetmoving",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _drill_section("Work Day", plan["work_day"], editable=editable, is_coach=is_coach,
                        dd_id="splash-workday", section_key="workday",
-                       drill_options=drill_options),
+                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
         _recovery_section(videos.get("Recovery", []),
                           videos.get("Recovery", []) + videos.get("Gas Station", []),
                           is_coach=is_coach, manage_videos_open=manage_videos_open),
@@ -571,6 +595,39 @@ def gas_station_card(gas_records: list, gas_videos: list[dict], *, editable: boo
     return _card("The Gas Station", html.Div(children))
 
 
+_SCRIPT_LINK_BTN_STYLE = {"border": "none", "background": "none", "color": CRIMSON,
+                         "cursor": "pointer", "fontSize": "12px",
+                         "textDecoration": "underline", "padding": "0"}
+
+
+def _script_copy_paste_row(script_number) -> html.Div:
+    """Small red Copy/Paste/Undo links at the bottom of a script card
+    (2026-09-22, Brad's screenshot; narrowed to table-only + Undo added
+    2026-09-23 per follow-up feedback) -- Copy stashes this script's 12
+    pitch rows ONLY (never Type/Goal/Measurable, which stay manual) into a
+    page-lifetime `splash-script-clipboard` Store (`callbacks.
+    _on_script_copy`); Paste overwrites another script's rows from
+    whatever's currently in that Store (`callbacks._on_script_paste`),
+    working across players (the Store outlives a player switch) and also
+    snapshotting the target script's pre-paste rows into
+    `splash-script-undo-buffer` so Undo can restore them
+    (`callbacks._on_script_undo`). Edit-mode only (there's nothing to
+    copy/paste INTO in read-only view)."""
+    return html.Div([
+        html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
+                   title="Copy this script's pitch table (# / Type / Ball / Info)",
+                   style=_SCRIPT_LINK_BTN_STYLE),
+        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+        html.Button("Paste", id=f"splash-script-paste-{script_number}", n_clicks=0,
+                   title="Paste the copied pitch table into this script",
+                   style=_SCRIPT_LINK_BTN_STYLE),
+        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+        html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
+                   title="Undo the last paste into this script",
+                   style=_SCRIPT_LINK_BTN_STYLE),
+    ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
+
+
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
@@ -600,6 +657,7 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   measurable_child], style={"marginTop": "4px"}),
         html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number, editable=editable),
                  style={"marginTop": "6px"}),
+        *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
     # the card shrinks to fit its content, and in a shrink-to-fit box a
     # `width: 100%` child (the Goal/Measurable inputs in edit mode) has
@@ -661,6 +719,25 @@ def _removed_pen_panel(deleted_records: list) -> html.Div:
         html.Div([_removed_pen_row(r) for r in deleted_records],
                  style={"maxHeight": "120px", "overflowY": "auto"}),
     ])
+
+
+def _scripts_with_data(scripts_records: list, script_rows: dict) -> list[int]:
+    """Script numbers whose 12-row pitch TABLE already has something entered
+    (Type/Ball/Info on any row) -- so "Show Scripts" opens on whatever a
+    coach already filled in instead of starting blank on every player
+    (2026-09-22, Brad: once a script's filled in, "every player... has
+    script one automatically open"). Deliberately checks the pitch rows
+    only, not the Type/Goal/Measurable header fields above the table --
+    Brad: "I meant that data in these tables," i.e. the rows themselves
+    (a script's header can be set without any pitch actually logged yet)."""
+    have = []
+    for r in scripts_records:
+        n = int(r["script_number"])
+        rows = script_rows.get(str(n), [])
+        if any((row.get(k) or "").strip() for row in rows
+              for k in ("pitch_type", "ball_info", "info")):
+            have.append(n)
+    return have
 
 
 def scripts_section(pen_records: list, deleted_pen_records: list, scripts_records: list,
@@ -735,7 +812,8 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     # grid.
     select_block = html.Div([
         html.Label("Show Scripts", style={**_LABEL_STYLE, "textAlign": "left"}),
-        dcc.Dropdown(id="splash-script-select", options=compare_options, multi=True, value=[],
+        dcc.Dropdown(id="splash-script-select", options=compare_options, multi=True,
+                    value=_scripts_with_data(scripts_records, script_rows),
                     placeholder="Select a script to view or edit...",
                     style={"fontFamily": "Teko, sans-serif", "marginBottom": "8px"}),
         html.Div(cards, style={"display": "flex", "flexWrap": "wrap",
@@ -977,6 +1055,20 @@ def serve_layout() -> html.Div:
     return html.Div([
         dcc.Store(id="splash-editing", data=False),
         dcc.Store(id="splash-data", data=data),
+        # Page-lifetime clipboard for the per-script Copy/Paste buttons
+        # (`_script_copy_paste_row`) -- never persisted to the DB, just
+        # holds whatever was last copied until a Paste (or a page reload)
+        # replaces/clears it. Outlives a player switch on purpose (Copy on
+        # one player, Paste on another) -- both this and the Store below
+        # sit OUTSIDE `splash-body`, which is what makes that possible:
+        # `splash-body` (and every script-scoped Button inside it) gets
+        # torn down and rebuilt on every player/season/cycle/edit change.
+        dcc.Store(id="splash-script-clipboard"),
+        # {"script_number", "rows"} snapshot of a script's pitch rows from
+        # immediately before the most recent Paste into it -- lets a single
+        # Undo click (`callbacks._on_script_undo`) restore them. Single-
+        # level (one paste's worth), not a full history stack.
+        dcc.Store(id="splash-script-undo-buffer"),
         header(back_href="/pitching", back_label="← Pitching"),
         _page_title_banner(),
         html.Div(controls, style={"borderBottom": f"2px solid {CRIMSON}",
