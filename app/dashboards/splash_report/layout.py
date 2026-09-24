@@ -713,6 +713,22 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     velo_summary_wrap = html.Div(velo_summary_child,
         id=f"splash-script-velosummary-wrap-{script_number}",
         style={"display": "block" if script_type == "Velo" else "none"})
+    # Fixed-height OUTER wrappers (2026-09-24, Brad, screenshot: "some [script
+    # cards] wider and longer than others... is it possible to have all of
+    # the outline boxes be the same size?") -- a Pitch Design card shows
+    # Trackman Avg (pd_result_child) and no other type does; a Velo card
+    # shows the Max/Avg summary (velo_summary_wrap) and no other type does,
+    # so without this a card's height depended on its Type. Reserving each
+    # block's own natural height on EVERY card (not "display: none" on the
+    # unused one, which collapses it to zero) equalizes all six without
+    # adding height beyond what a Pitch Design or Velo card already has on
+    # its own -- Brad: "I did not want the expansion to bring about more
+    # white space." The wrap divs above keep their own ids/style (still the
+    # clientside "Result visibility" callback's Output targets, which
+    # REPLACES their whole style prop on a Type switch) -- these are new
+    # parents around them, not a change to those elements themselves.
+    pd_result_slot = html.Div(pd_result_child, style={"minHeight": "44px"})
+    velo_summary_slot = html.Div(velo_summary_wrap, style={"minHeight": "20px"})
     card = html.Div([
         html.Div(f"Script #{script_number}", style={"fontWeight": "bold", "color": CRIMSON}),
         html.Div([html.Span("Type ", style={"fontSize": "11px", "color": "#666"}),
@@ -721,11 +737,11 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
-        pd_result_child,
+        pd_result_slot,
         html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number,
                                            script_type=script_type, editable=editable),
                  style={"marginTop": "6px"}),
-        velo_summary_wrap,
+        velo_summary_slot,
         *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
     # the card shrinks to fit its content, and in a shrink-to-fit box a
@@ -734,17 +750,17 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     # the inputs a real anchor and the flex-wrap row a predictable per-card
     # size to count columns by. `boxSizing: border-box` makes that width the
     # card's FULL rendered width (padding included) instead of content plus
-    # 20px of padding on top of it. 220px (2026-09-14 round 2, trimmed down
-    # from 280px -- Brad: still white space to the right of the 4-column
-    # #/Type/Ball/Info table, which only needs ~150-160px) -- narrow enough
-    # to fit the table with a little breathing room, wide enough that more
-    # cards fit per row is the actual point of the fix. Widened to 300px
-    # for a Velo/Execution script (2026-09-23) -- the new Result column
-    # needs the extra room; Pitch Design's 4-column table doesn't grow, so
-    # its card stays narrow.
+    # 20px of padding on top of it. ONE fixed width for every Type (2026-09-24,
+    # Brad, screenshot: "some [cards] wider and longer than others... is it
+    # possible to have all of the outline boxes be the same size?") -- a
+    # per-Type width (220px for Pitch Design's narrower 4-column table,
+    # 300px for Velo/Execution's Result column, 2026-09-23) looked fine card
+    # by card but ragged side by side in the grid. 300px for all -- the
+    # width the widest table (Result column) actually needs, matching
+    # `pd_result_slot`/`velo_summary_slot` above equalizing height the same
+    # way.
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px",
-              "width": "300px" if script_type in ("Velo", "Execution") else "220px",
+              "padding": "10px", "marginBottom": "12px", "width": "300px",
               "boxSizing": "border-box"})
     # ALWAYS rendered (never conditionally omitted) so its Save-form Inputs
     # stay valid targets for `callbacks._script_states()` regardless of
