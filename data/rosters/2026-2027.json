@@ -45,6 +45,5 @@
   {"first_name": "Zach", "last_name": "Wadas", "class_year": "SR", "position": "1B"},
   {"first_name": "Branson", "last_name": "Wade", "class_year": "FR", "position": "RHP"},
   {"first_name": "Jacob", "last_name": "Wicker", "class_year": "FR", "position": "OF"},
-  {"first_name": "Luca", "last_name": "Marucci", "class_year": "FR", "position": "C"},
-  {"first_name": "Player", "last_name": "ZZTest - Do Not Use For Demos", "class_year": "N/A", "position": "RHP"}
+  {"first_name": "Luca", "last_name": "Marucci", "class_year": "FR", "position": "C"}
 ]
