@@ -564,45 +564,83 @@ def register_callbacks(dash_app) -> None:
             out[i] = template
         return out
 
-    # Elastic script rows (2026-09-23, Brad: a script's pitch table used to
-    # hard-stop at a fixed row count with no way to add more once full;
-    # should "expand and be elastic" as a coach types, and shrink back when
-    # rows are cleared). Clientside (not a server round trip) so it's
-    # instant on every keystroke's blur. Self-referencing -- Input and
-    # Output are both this table's own `data` -- which is safe here because
-    # the logic converges: after it appends/trims rows, the very next
-    # firing (triggered by that same write) recomputes the identical
-    # desired length and returns no_update instead of writing again.
-    # `layout._elastic_script_rows` applies the same trim server-side for
-    # the initial page render; this is its live-editing JS twin.
-    for _n in range(1, SR.N_SCRIPTS + 1):
-        dash_app.clientside_callback(
-            f"""
-            function(rows) {{
-                if (!rows || !rows.length) {{ return window.dash_clientside.no_update; }}
-                var lastFilled = 0;
-                for (var i = 0; i < rows.length; i++) {{
-                    var r = rows[i];
-                    var filled = (r.pitch_type && String(r.pitch_type).trim()) ||
-                                 (r.ball_info && String(r.ball_info).trim()) ||
-                                 (r.info && String(r.info).trim()) ||
-                                 (r.result && String(r.result).trim());
-                    if (filled) {{ lastFilled = r.row_num; }}
-                }}
-                var visible = Math.max(1, Math.min({SR.N_SCRIPT_ROWS}, lastFilled + 1));
-                if (visible === rows.length) {{ return window.dash_clientside.no_update; }}
-                if (visible < rows.length) {{ return rows.slice(0, visible); }}
-                var out = rows.slice();
-                for (var n = rows.length + 1; n <= visible; n++) {{
-                    out.push({{row_num: n, pitch_type: '', ball_info: '', info: '', result: ''}});
-                }}
-                return out;
-            }}
-            """,
-            Output(f"splash-script-rows-{_n}", "data", allow_duplicate=True),
-            Input(f"splash-script-rows-{_n}", "data"),
-            prevent_initial_call=True,
-        )
+    # Elastic Pen Results / Movement Log rows (2026-09-23, Brad: the
+    # auto-growth belongs on "the script table and movement log that
+    # control the visuals" -- i.e. these two shared tables -- "not the
+    # script itself (that can stay fixed)"; a per-script pitch table
+    # previously had this and has been reverted to a fixed
+    # `SR.N_SCRIPT_ROWS` size). Clientside (not a server round trip) so
+    # it's instant on every keystroke's blur. Self-referencing -- Input and
+    # Output are both the table's own `data` -- safe here because the logic
+    # converges: after it appends/trims rows, the very next firing
+    # (triggered by that same write) recomputes the identical desired
+    # length and returns no_update instead of writing again.
+    # `tables._elastic_pad` applies the same floor/grow math server-side
+    # for the initial page render; this is its live-editing JS twin. Floor
+    # of 6 (not 1, unlike the reverted script-row version) -- unrelated,
+    # pre-existing behavior (both tables always showed at least 6 blank
+    # rows) that this keeps rather than changes.
+    dash_app.clientside_callback(
+        """
+        function(rows) {
+            if (!rows) { return window.dash_clientside.no_update; }
+            var fields = ['script_number', 'pen_date', 'value'];
+            var lastFilled = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i], filled = false;
+                for (var f = 0; f < fields.length; f++) {
+                    var v = r[fields[f]];
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {
+                        filled = true; break;
+                    }
+                }
+                if (filled) { lastFilled = i + 1; }
+            }
+            var visible = Math.max(6, lastFilled + 1);
+            if (visible === rows.length) { return window.dash_clientside.no_update; }
+            if (visible < rows.length) { return rows.slice(0, visible); }
+            var out = rows.slice();
+            for (var n = rows.length; n < visible; n++) {
+                out.push({script_number: null, pen_date: '', value: null});
+            }
+            return out;
+        }
+        """,
+        Output("splash-pen-table", "data", allow_duplicate=True),
+        Input("splash-pen-table", "data"),
+        prevent_initial_call=True,
+    )
+    dash_app.clientside_callback(
+        """
+        function(rows) {
+            if (!rows) { return window.dash_clientside.no_update; }
+            var fields = ['script_number', 'pitch_type', 'pen_date', 'hb', 'ivb'];
+            var lastFilled = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i], filled = false;
+                for (var f = 0; f < fields.length; f++) {
+                    var v = r[fields[f]];
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {
+                        filled = true; break;
+                    }
+                }
+                if (filled) { lastFilled = i + 1; }
+            }
+            var visible = Math.max(6, lastFilled + 1);
+            if (visible === rows.length) { return window.dash_clientside.no_update; }
+            if (visible < rows.length) { return rows.slice(0, visible); }
+            var out = rows.slice();
+            for (var n = rows.length; n < visible; n++) {
+                out.push({script_number: null, pitch_type: '', pen_date: '',
+                          hb: null, ivb: null});
+            }
+            return out;
+        }
+        """,
+        Output("splash-movement-table", "data", allow_duplicate=True),
+        Input("splash-movement-table", "data"),
+        prevent_initial_call=True,
+    )
 
     # Result column visibility + live Velo summary (2026-09-23, Brad --
     # Result is coach-typed live from the phone during a bullpen, not

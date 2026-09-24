@@ -2,6 +2,7 @@
 gate, and role-branched layout (coach gets Edit/Save controls, player doesn't
 -- both see the same view content, team-transparent like every other
 dashboard)."""
+import pandas as pd
 import pytest
 from dash import no_update
 
@@ -304,36 +305,37 @@ def test_script_card_copy_paste_undo_buttons_edit_mode_only():
     assert "splash-script-undo-1" not in view_s
 
 
-def _rows(*filled_row_nums, n=SR.N_SCRIPT_ROWS):
-    """n blank rows, with `info` filled in for the given row_nums."""
-    filled = set(filled_row_nums)
-    return [{"row_num": i, "pitch_type": "", "ball_info": "",
-            "info": "x" if i in filled else ""} for i in range(1, n + 1)]
+def test_script_pitch_table_is_always_the_fixed_n_script_rows_size():
+    """2026-09-23, Brad: the per-script pitch table's elastic auto-growth
+    moved to the Pen Results/Movement Log tables -- "not the script itself
+    (that can stay fixed)." A script with only one filled row must still
+    render all N_SCRIPT_ROWS rows, not trim down to the last-filled + 1."""
+    from app.dashboards.splash_report import tables
+    rows = [{"row_num": i, "pitch_type": "", "ball_info": "",
+            "info": "x" if i == 1 else ""} for i in range(1, SR.N_SCRIPT_ROWS + 1)]
+    table = tables.script_pitch_table(pd.DataFrame(rows), 1, script_type="", editable=True)
+    assert len(table.data) == SR.N_SCRIPT_ROWS
 
 
-def test_elastic_script_rows_empty_script_shows_one_row():
-    from app.dashboards.splash_report import layout
-    out = layout._elastic_script_rows(_rows())
-    assert [r["row_num"] for r in out] == [1]
+def test_elastic_pad_empty_table_shows_the_floor():
+    from app.dashboards.splash_report.tables import _elastic_pad
+    out = _elastic_pad([], fields=("value",), blank={"value": None}, floor=6)
+    assert len(out) == 6
 
 
-def test_elastic_script_rows_shows_up_to_last_filled_plus_one():
-    from app.dashboards.splash_report import layout
-    out = layout._elastic_script_rows(_rows(1, 2, 3))
-    assert [r["row_num"] for r in out] == [1, 2, 3, 4]
+def test_elastic_pad_grows_past_the_floor_when_the_last_row_is_filled():
+    from app.dashboards.splash_report.tables import _elastic_pad
+    rows = [{"value": i} for i in range(1, 7)]   # all 6 floor rows filled
+    out = _elastic_pad(rows, fields=("value",), blank={"value": None}, floor=6)
+    assert len(out) == 7 and out[:6] == rows and out[6] == {"value": None}
 
 
-def test_elastic_script_rows_ignores_a_gap_before_the_last_filled_row():
-    """A blank row in the middle (row 2) must not hide row 3's real data."""
-    from app.dashboards.splash_report import layout
-    out = layout._elastic_script_rows(_rows(1, 3))
-    assert [r["row_num"] for r in out] == [1, 2, 3, 4]
-
-
-def test_elastic_script_rows_caps_at_n_script_rows():
-    from app.dashboards.splash_report import layout
-    out = layout._elastic_script_rows(_rows(SR.N_SCRIPT_ROWS))
-    assert len(out) == SR.N_SCRIPT_ROWS
+def test_elastic_pad_ignores_a_gap_before_the_last_filled_row():
+    """A blank row in the middle must not hide a later real one."""
+    from app.dashboards.splash_report.tables import _elastic_pad
+    rows = [{"value": 1}, {"value": None}, {"value": 3}]
+    out = _elastic_pad(rows, fields=("value",), blank={"value": None}, floor=1)
+    assert len(out) == 4
 
 
 def test_movement_chart_inside_bullpen_scripts_card_above_script_grid():

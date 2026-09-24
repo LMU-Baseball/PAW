@@ -179,10 +179,10 @@ _RESULT_DROPDOWN = {"result": {"options": [{"label": v, "value": v} for v in ("B
 
 def script_pitch_table(df: pd.DataFrame, script_number: int, *, script_type: str,
                        editable: bool) -> dash_table.DataTable:
-    """# (readonly) / Type / Ball / Info / Result -- elastic length (1 row
-    up to `app.data.splash_report.N_SCRIPT_ROWS`), see `layout._elastic_
-    script_rows` and the matching clientside callback for how many rows
-    `df` actually has.
+    """# (readonly) / Type / Ball / Info / Result -- always
+    `app.data.splash_report.N_SCRIPT_ROWS` rows (2026-09-23, Brad: the
+    elastic auto-growth belongs on the Pen Results/Movement Log tables that
+    "control the visuals," not this one -- "that can stay fixed").
 
     Result (2026-09-23, Brad: coach-typed live from the phone during a
     bullpen, not pulled from anywhere) depends on `script_type`:
@@ -213,6 +213,28 @@ def script_pitch_table(df: pd.DataFrame, script_number: int, *, script_type: str
                  df.to_dict("records"), editable=editable, dropdown=dropdown)
 
 
+def _elastic_pad(rows: list[dict], *, fields: tuple[str, ...], blank: dict,
+                 floor: int = 6) -> list[dict]:
+    """Pads `rows` up to the last-filled row + 1 blank row beneath it, floor
+    of `floor` rows minimum -- the initial-render Python twin of a matching
+    clientside callback (`callbacks.register_callbacks`) that keeps growing
+    the table live as a coach types, same idiom `layout.py` used to apply
+    to the per-script pitch table before it moved here (2026-09-23, Brad:
+    "I would like them to be on the script table and movement log that
+    control the visuals, not the script itself")."""
+    def _filled(row: dict) -> bool:
+        return any(str(row.get(k) or "").strip() for k in fields)
+
+    last_filled = 0
+    for i, row in enumerate(rows, start=1):
+        if _filled(row):
+            last_filled = i
+    visible = max(floor, last_filled + 1)
+    if len(rows) >= visible:
+        return rows[:visible]
+    return rows + [dict(blank) for _ in range(visible - len(rows))]
+
+
 def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTable:
     """Script # / Pen Date / Value% -- variable rows, one shared table across
     all 6 scripts (pen_number is derived at read time, not a user-facing
@@ -232,9 +254,9 @@ def pen_results_table(df: pd.DataFrame, *, editable: bool) -> dash_table.DataTab
     ]
     data = df[["id", "script_number", "pen_date", "value"]].to_dict("records") \
         if not df.empty else []
-    if editable and len(data) < 6:
-        data = data + [{"script_number": None, "pen_date": "", "value": None}
-                      for _ in range(6 - len(data))]
+    if editable:
+        data = _elastic_pad(data, fields=("script_number", "pen_date", "value"),
+                            blank={"script_number": None, "pen_date": "", "value": None})
     return _table("splash-pen-table", columns, data, editable=editable,
                  row_deletable=editable)
 
@@ -275,8 +297,10 @@ def movement_log_table(movement_records: dict, *, editable: bool) -> dash_table.
         {"name": "HB", "id": "hb", "editable": editable, "type": "numeric"},
         {"name": "IVB", "id": "ivb", "editable": editable, "type": "numeric"},
     ]
-    if editable and len(rows) < 6:
-        rows = rows + [{"script_number": None, "pitch_type": "", "pen_date": "",
-                       "hb": None, "ivb": None} for _ in range(6 - len(rows))]
+    if editable:
+        rows = _elastic_pad(
+            rows, fields=("script_number", "pitch_type", "pen_date", "hb", "ivb"),
+            blank={"script_number": None, "pitch_type": "", "pen_date": "",
+                  "hb": None, "ivb": None})
     return _table("splash-movement-table", columns, rows, editable=editable,
                  row_deletable=editable)

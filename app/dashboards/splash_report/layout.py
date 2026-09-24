@@ -536,7 +536,7 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
         # shared dict and has room for the full "Scaption ROM" -- no
         # complaint was raised about that one.
         rom = rom.copy()
-        rom.loc[rom["metric_key"] == "ScaptionROM", "label"] = "SCAP ROM"
+        rom.loc[rom["metric_key"] == "ScaptionROM", "label"] = "Scap ROM"
     # flex:1 on each table used to stretch it across half of a very wide
     # container, leaving a big blank gap between two content-sized tables
     # -- size to content instead so they sit close together.
@@ -650,24 +650,6 @@ def _script_copy_paste_row(script_number) -> html.Div:
     ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
 
 
-def _elastic_script_rows(rows: list[dict]) -> list[dict]:
-    """Trim a script's rows (always N_SCRIPT_ROWS long, from `read_all_
-    script_rows`/`read_script_rows`) down to just past the last filled one
-    -- last-filled row_num + 1 blank row underneath it, floor of 1 row so
-    an empty script still shows a single row to type into. Mirrors, in
-    Python for the initial page render, the same trim/extend logic the
-    clientside callback (`callbacks.register_callbacks`'s per-script
-    "elastic rows" callback) applies live as a coach types -- see that
-    callback's docstring for why this needs a JS twin instead of a plain
-    server round trip."""
-    last_filled = 0
-    for row in rows:
-        if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info", "result")):
-            last_filled = int(row["row_num"])
-    visible = max(1, min(SR.N_SCRIPT_ROWS, last_filled + 1))
-    return rows[:visible]
-
-
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
@@ -722,9 +704,8 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
         pd_result_child,
-        html.Div(tables.script_pitch_table(pd.DataFrame(_elastic_script_rows(rows)),
-                                           script_number, script_type=script_type,
-                                           editable=editable),
+        html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number,
+                                           script_type=script_type, editable=editable),
                  style={"marginTop": "6px"}),
         velo_summary_wrap,
         *([_script_copy_paste_row(script_number)] if editable else []),

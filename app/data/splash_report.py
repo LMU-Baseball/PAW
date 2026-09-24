@@ -99,13 +99,11 @@ GAS_STATION_DRILL_CATEGORIES: tuple[str, ...] = (
 MAX_VIDEO_BYTES = 150 * 1024 * 1024  # 150 MB
 
 N_SCRIPTS = 6
-# 12 -> 30 (2026-09-23, Brad): a script's pitch table used to hard-stop at
-# 12 rows with no way to add more once full. 30 is the new SAFETY CAP, not
-# the default display count -- the table only shows rows up to the last
-# filled one (+1 blank), growing/trimming as a coach types (see
-# `layout._elastic_script_rows` and `callbacks`'s matching clientside
-# callback), so a short script still looks like a short table.
-N_SCRIPT_ROWS = 30
+# Fixed size (2026-09-23, Brad: the elastic auto-growth he'd asked for
+# belongs on the Pen Results/Movement Log tables instead -- "not the script
+# itself (that can stay fixed)"; see `tables._elastic_pad` and its matching
+# clientside callbacks in `callbacks.py` for where it actually lives now).
+N_SCRIPT_ROWS = 12
 
 # A script's type (2026-09-16 coaches' meeting) drives what the Pen Results
 # "value" % on that script actually means and whether pitch-design's
@@ -1109,9 +1107,8 @@ def upsert_all_script_rows(player_id, season_label, cycle, script_pitch_rows: di
 def get_script_template(script_type: str) -> list[dict]:
     """[{row_num, pitch_type, ball_info, info, result}, ...] archived for
     this script_type, oldest row_num first -- [] if nothing's been
-    archived for it yet. Non-blank rows only (a template with 30 mostly-
-    blank rows would defeat `layout._elastic_script_rows` immediately
-    re-trimming it back down on the very next render). `result` always
+    archived for it yet. Non-blank rows only -- a template is meant to be
+    the useful starting content for a new script, not padding. `result` always
     comes back "" -- a template is a starting point for a NEW bullpen, so
     a previous bullpen's actual recorded results never carry over (see
     `save_script_template`, which never persists them either)."""
@@ -1149,7 +1146,7 @@ def save_script_template(script_type: str, rows: list[dict], updated_by=None) ->
     # Renumbered 1..len, not the source script's own row_num values -- a
     # blank row in the MIDDLE of the source (row 2 blank, row 3 filled)
     # would otherwise leave a gap (row_num 1, 3) in the template, which
-    # breaks `layout._elastic_script_rows`'s "row_num matches position"
+    # breaks `tables.script_pitch_table`'s "row_num matches position"
     # assumption once it's pulled back into a fresh script.
     resolved = [{"script_type": script_type, "row_num": idx,
                 "pitch_type": row.get("pitch_type"), "ball_info": row.get("ball_info"),
