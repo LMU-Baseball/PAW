@@ -149,6 +149,19 @@ def serve_layout() -> html.Div:
     ], style={"display": "flex", "gap": "16px", "alignItems": "flex-end",
               "flexWrap": "wrap", "padding": "12px 16px", "backgroundColor": BANNER})
 
+    # ALWAYS rendered (never conditionally omitted), visibility toggled via
+    # style instead -- this used to be `if is_coach else html.Div()`, which
+    # dropped prac-plan-assignment-dates/-values and prac-plan-manage-select
+    # from the layout entirely for non-coach accounts. `_on_filters` below
+    # unconditionally targets those ids as Outputs; Dash has no way to write
+    # to an Output that doesn't exist in the CURRENT client's layout, so it
+    # threw a ReferenceError and aborted the whole callback for every
+    # non-coach session -- including its OTHER outputs (prac-filters, which
+    # every player's pitch-data load depends on), which is why the practice
+    # board showed "no data" for every player under a player-role account
+    # while a coach account was unaffected (2026-09-24, Brad: "LMU Team"
+    # account). Same fix idiom already used in splash_report/layout.py for
+    # this exact class of bug.
     coach_editor = html.Details([
         html.Summary("Manage practice plans", style={"cursor": "pointer", "fontWeight": "bold"}),
         html.Div([
@@ -183,7 +196,8 @@ def serve_layout() -> html.Div:
                             style={"width": "auto", "maxWidth": "fit-content", "display": "inline-block"}),
             ], style={"display": "flex", "gap": "6px", "justifyContent": "flex-start"}),
         ], style={"display": "grid", "gap": "8px", "padding": "10px 0"}),
-    ], style={"padding": "8px 16px", "borderBottom": "1px solid #ddd"}) if is_coach else html.Div()
+    ], style={"padding": "8px 16px", "borderBottom": "1px solid #ddd",
+              "display": "block" if is_coach else "none"})
 
 
     tabs = dcc.Tabs(id="prac-tabs", value="zones", children=[
