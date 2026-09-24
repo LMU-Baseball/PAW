@@ -82,6 +82,13 @@ def _teko(weight: str) -> font_manager.FontProperties:
 _TEKO_BOLD = _teko("Bold")
 _TEKO_SEMIBOLD = _teko("SemiBold")
 
+# The strike-zone axes' own data aspect ratio (y-range / x-range, matching
+# the xlim/ylim `build_overlay_png` sets on zone_ax below) -- used to size
+# that axes box so an aspect="equal" plot fills it exactly, instead of
+# letterboxing inside a box shaped differently than the data.
+_ZONE_DATA_ASPECT = ((_SZ["y1"] - _SZ["y0"] + 6 * _EDGE) /
+                     (_SZ["x1"] - _SZ["x0"] + 4 * _EDGE))
+
 
 class OverlayError(RuntimeError):
     """ffmpeg failed, or isn't installed, while compositing an overlay."""
@@ -226,7 +233,18 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     # Plain app.reports.plots._draw_zone (black/gray lines) -- the right
     # bar is solid white now, so the PDF report's own zone-box styling
     # (built for a white page) is exactly right here too.
-    zone_ax = fig.add_axes((right_x_frac + 0.02, 0.50, layout["right_w"] / width - 0.05, 0.32))
+    #
+    # Width comes from the available right-bar space (tight margins are
+    # safe here -- unlike move_ax, this axes hides its ticks/spines, so
+    # there's no tick-label text that could bleed past the boundary); the
+    # height is then derived from the zone's own fixed data aspect ratio
+    # (`_ZONE_DATA_ASPECT`, from `_SZ`/`_EDGE`) rather than a flat fraction,
+    # so `aspect="equal"` below doesn't letterbox the chart smaller than
+    # its box -- Brad, from a downloaded clip: "expand the strike zone
+    # location so it fills in more of the white space."
+    zone_w_frac = layout["right_w"] / width - 0.02
+    zone_h_frac = _ZONE_DATA_ASPECT * zone_w_frac * (width / height)
+    zone_ax = fig.add_axes((right_x_frac + 0.01, 0.50, zone_w_frac, zone_h_frac))
     zone_ax.set_facecolor("none")
     _draw_zone(zone_ax)
     loc_x, loc_y = pitch.get("plate_loc_side"), pitch.get("plate_loc_height")
@@ -268,14 +286,17 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     move_ax.tick_params(labelsize=7)
 
     # -- Bottom margin (below the shrunk video): player / date / pitch count
+    # Always brand red (2026-09-23, Brad: "make the text at the bottom
+    # always red instead of the color of the pitch") -- was `color`
+    # (pitch-type dependent) like the top-bar text used to be.
     if layout["bottom_h"] > 0:
         bottom_y = layout["bottom_h"] / 2 / height
         fig.text(0.03, bottom_y, player_name, fontsize=15, fontproperties=_TEKO_BOLD,
-                 color=color, ha="left", va="center")
+                 color="#9A0021", ha="left", va="center")
         fig.text(right_x_frac / 2, bottom_y, date, fontsize=15, fontproperties=_TEKO_BOLD,
-                 color=color, ha="center", va="center")
+                 color="#9A0021", ha="center", va="center")
         fig.text(right_x_frac - 0.02, bottom_y, f"Pitch {pitch_index}/{pitch_count}",
-                 fontsize=15, fontproperties=_TEKO_BOLD, color=color, ha="right", va="center")
+                 fontsize=15, fontproperties=_TEKO_BOLD, color="#9A0021", ha="right", va="center")
 
     buf = io.BytesIO()
     try:
