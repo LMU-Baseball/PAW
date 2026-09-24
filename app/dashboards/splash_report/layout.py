@@ -171,9 +171,9 @@ def _graffiti_header(text: str, idx: int) -> html.Div:
     })
 
 
-def _card(title: str, child, *, card_id=None, extra_style: dict | None = None) -> html.Div:
+def _card(title: str, child, *, card_id=None) -> html.Div:
     idx = _variant_index(title)
-    kwargs = {"style": {**_CARD, **_CARD_VARIANTS[idx], **(extra_style or {})}}
+    kwargs = {"style": {**_CARD, **_CARD_VARIANTS[idx]}}
     if card_id:
         kwargs["id"] = card_id
     return html.Div([_graffiti_header(title, idx), child], **kwargs)
