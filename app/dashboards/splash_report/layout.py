@@ -915,9 +915,16 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
                     value=_scripts_with_data(scripts_records, script_rows),
                     placeholder="Select a script to view or edit...",
                     style={"fontFamily": "Teko, sans-serif", "marginBottom": "8px"}),
+        # `width: "fit-content"` (2026-09-24 round 3, Brad: "still some"
+        # white space to the right even after flex-start): flex-start only
+        # moved the dead margin off a LONE card, it didn't shrink the row's
+        # own box, which still stretched to its full available width (up
+        # to the `maxWidth` cap below) regardless of how few cards that
+        # left trailing background after. fit-content hugs the row to
+        # whatever width its wrapped lines actually use.
         html.Div(cards, style={"display": "flex", "flexWrap": "wrap",
                               "justifyContent": "flex-start", "alignItems": "flex-start",
-                              "gap": "14px"}),
+                              "gap": "14px", "width": "fit-content", "maxWidth": "100%"}),
     # `maxWidth` (2026-09-24, Brad, first screenshot with the dead area
     # boxed in): this whole card is a CSS Grid item (`gridArea: "center"`,
     # see `serve_layout`'s `center_block`), which stretches to the FULL
@@ -928,8 +935,24 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     # row in the column's real ~580px measured width, see the card-width
     # comment above), which is why capping this alone didn't visibly help
     # last round.
-    ], style={"marginTop": "16px", "maxWidth": "950px"})
-    return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
+    ], style={"marginTop": "16px", "maxWidth": "880px"})
+    # `maxWidth` on the WHOLE card, not just select_block above (2026-09-24
+    # round 3, Brad: "still some" white space even after the cards row
+    # itself started hugging its content) -- the card is still a CSS Grid
+    # item stretching to the full center column, and the gradient
+    # background (`_CARD`) painted that full width regardless of how
+    # tightly the cards row now fits. 880px (not 950 -- live-measured this
+    # round: on a viewport where the center column happened to render only
+    # ~780px wide, a 950 cap wasn't the binding constraint either and
+    # visibly changed nothing) fits 3 cards across (3*280+2*14=868) with a
+    # little room, which is the actual target -- tight enough to matter on
+    # a wide monitor, wide enough not to force an awkward 2-per-row wrap.
+    # graph_block's Plotly charts are responsive (no fixed width in their
+    # own layout), so capping here just shrinks them slightly on a wide
+    # monitor rather than clipping anything.
+    return html.Div(
+        _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block])),
+        style={"maxWidth": "880px"})
 
 
 def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
