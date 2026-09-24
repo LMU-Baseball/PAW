@@ -171,9 +171,9 @@ def _graffiti_header(text: str, idx: int) -> html.Div:
     })
 
 
-def _card(title: str, child, *, card_id=None) -> html.Div:
+def _card(title: str, child, *, card_id=None, extra_style: dict | None = None) -> html.Div:
     idx = _variant_index(title)
-    kwargs = {"style": {**_CARD, **_CARD_VARIANTS[idx]}}
+    kwargs = {"style": {**_CARD, **_CARD_VARIANTS[idx], **(extra_style or {})}}
     if card_id:
         kwargs["id"] = card_id
     return html.Div([_graffiti_header(title, idx), child], **kwargs)
@@ -908,7 +908,17 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
         html.Div(cards, style={"display": "flex", "flexWrap": "wrap",
                               "justifyContent": "center", "alignItems": "flex-start",
                               "gap": "14px"}),
-    ], style={"marginTop": "16px"})
+    # `maxWidth` (2026-09-24, Brad, screenshot with the dead area boxed in):
+    # this whole card is a CSS Grid item (`gridArea: "center"`, see
+    # `serve_layout`'s `center_block`), which stretches to the FULL center
+    # column's width by default regardless of how many (now uniformly
+    # 300px, see `script_card`) cards are actually showing -- 2-3 selected
+    # scripts left a lot of the card's own translucent background exposed
+    # to their right. Capped to fit 3 across (the layout's own original
+    # "3x2 on a wide monitor" target, per the comment above) so the row
+    # only takes the width it needs; flex-wrap still drops to 2 or 1 per
+    # row on a narrower viewport same as before.
+    ], style={"marginTop": "16px", "maxWidth": "950px"})
     return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
 
 
