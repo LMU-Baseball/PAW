@@ -713,6 +713,22 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     velo_summary_wrap = html.Div(velo_summary_child,
         id=f"splash-script-velosummary-wrap-{script_number}",
         style={"display": "block" if script_type == "Velo" else "none"})
+    # Fixed-height OUTER wrappers (2026-09-24, Brad, screenshot: "some [script
+    # cards] wider and longer than others... is it possible to have all of
+    # the outline boxes be the same size?") -- a Pitch Design card shows
+    # Trackman Avg (pd_result_child) and no other type does; a Velo card
+    # shows the Max/Avg summary (velo_summary_wrap) and no other type does,
+    # so without this a card's height depended on its Type. Reserving each
+    # block's own natural height on EVERY card (not "display: none" on the
+    # unused one, which collapses it to zero) equalizes all six without
+    # adding height beyond what a Pitch Design or Velo card already has on
+    # its own -- Brad: "I did not want the expansion to bring about more
+    # white space." The wrap divs above keep their own ids/style (still the
+    # clientside "Result visibility" callback's Output targets, which
+    # REPLACES their whole style prop on a Type switch) -- these are new
+    # parents around them, not a change to those elements themselves.
+    pd_result_slot = html.Div(pd_result_child, style={"minHeight": "44px"})
+    velo_summary_slot = html.Div(velo_summary_wrap, style={"minHeight": "20px"})
     card = html.Div([
         html.Div(f"Script #{script_number}", style={"fontWeight": "bold", "color": CRIMSON}),
         html.Div([html.Span("Type ", style={"fontSize": "11px", "color": "#666"}),
@@ -721,11 +737,11 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
-        pd_result_child,
+        pd_result_slot,
         html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number,
                                            script_type=script_type, editable=editable),
                  style={"marginTop": "6px"}),
-        velo_summary_wrap,
+        velo_summary_slot,
         *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
     # the card shrinks to fit its content, and in a shrink-to-fit box a
@@ -734,17 +750,21 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     # the inputs a real anchor and the flex-wrap row a predictable per-card
     # size to count columns by. `boxSizing: border-box` makes that width the
     # card's FULL rendered width (padding included) instead of content plus
-    # 20px of padding on top of it. 220px (2026-09-14 round 2, trimmed down
-    # from 280px -- Brad: still white space to the right of the 4-column
-    # #/Type/Ball/Info table, which only needs ~150-160px) -- narrow enough
-    # to fit the table with a little breathing room, wide enough that more
-    # cards fit per row is the actual point of the fix. Widened to 300px
-    # for a Velo/Execution script (2026-09-23) -- the new Result column
-    # needs the extra room; Pitch Design's 4-column table doesn't grow, so
-    # its card stays narrow.
+    # 20px of padding on top of it. ONE fixed width for every Type (2026-09-24,
+    # Brad, screenshot: "some [cards] wider and longer than others... is it
+    # possible to have all of the outline boxes be the same size?") -- a
+    # per-Type width (220px for Pitch Design's narrower 4-column table,
+    # 300px for Velo/Execution's Result column, 2026-09-23) looked fine card
+    # by card but ragged side by side in the grid. 280px for all (down from
+    # a first pass at 300px, live-measured in browser same day: the center
+    # grid column is only ~580px wide at a common viewport, so 300px cards
+    # -- needing 614px for just 2 side by side -- never actually shared a
+    # row; each wrapped onto its own line and, centered alone, sat inside a
+    # huge symmetric margin, exactly the "ton of white space" Brad kept
+    # circling in screenshots. 280px fits 2 across in that same 580px
+    # (2*280+14=574).
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px",
-              "width": "300px" if script_type in ("Velo", "Execution") else "220px",
+              "padding": "10px", "marginBottom": "12px", "width": "280px",
               "boxSizing": "border-box"})
     # ALWAYS rendered (never conditionally omitted) so its Save-form Inputs
     # stay valid targets for `callbacks._script_states()` regardless of
@@ -880,20 +900,59 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     # content-sized -- see `script_card` and `tables.script_pitch_table`'s
     # `width: fit-content`). Flex-wrap instead of a fixed column count: each
     # card sizes to its own content, and the row fits as many as actually
-    # fit -- 3x2 on a wide monitor, 2x3 or 1x6 as the column narrows -- with
-    # no media queries, same technique as `body_visual.render`'s compact
-    # grid.
+    # fit -- with no media queries, same technique as `body_visual.render`'s
+    # compact grid.
+    #
+    # `justifyContent: "flex-start"` (2026-09-24, was "center" -- Brad, two
+    # rounds of screenshots circling "a ton of white space"): centering a
+    # LONE wrapped card (see the card-width comment in `script_card` for
+    # why 2 cards didn't fit per row at 300px) put equal dead margin on
+    # BOTH sides of it -- flex-start moves all of that to the right, where
+    # it's just background instead of visually boxing in a single card.
     select_block = html.Div([
         html.Label("Show Scripts", style={**_LABEL_STYLE, "textAlign": "left"}),
         dcc.Dropdown(id="splash-script-select", options=compare_options, multi=True,
                     value=_scripts_with_data(scripts_records, script_rows),
                     placeholder="Select a script to view or edit...",
                     style={"fontFamily": "Teko, sans-serif", "marginBottom": "8px"}),
+        # `width: "fit-content"` (2026-09-24 round 3, Brad: "still some"
+        # white space to the right even after flex-start): flex-start only
+        # moved the dead margin off a LONE card, it didn't shrink the row's
+        # own box, which still stretched to its full available width (up
+        # to the `maxWidth` cap below) regardless of how few cards that
+        # left trailing background after. fit-content hugs the row to
+        # whatever width its wrapped lines actually use.
         html.Div(cards, style={"display": "flex", "flexWrap": "wrap",
-                              "justifyContent": "center", "alignItems": "flex-start",
-                              "gap": "14px"}),
-    ], style={"marginTop": "16px"})
-    return _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block]))
+                              "justifyContent": "flex-start", "alignItems": "flex-start",
+                              "gap": "14px", "width": "fit-content", "maxWidth": "100%"}),
+    # `maxWidth` (2026-09-24, Brad, first screenshot with the dead area
+    # boxed in): this whole card is a CSS Grid item (`gridArea: "center"`,
+    # see `serve_layout`'s `center_block`), which stretches to the FULL
+    # center column's width by default. Harmless safety cap for a very wide
+    # monitor where that column would otherwise be wider than any
+    # reasonable number of cards needs -- NOT the fix for the main "white
+    # space" bug (that was the 300px card width not actually fitting 2 per
+    # row in the column's real ~580px measured width, see the card-width
+    # comment above), which is why capping this alone didn't visibly help
+    # last round.
+    ], style={"marginTop": "16px", "maxWidth": "880px"})
+    # `maxWidth` on the WHOLE card, not just select_block above (2026-09-24
+    # round 3, Brad: "still some" white space even after the cards row
+    # itself started hugging its content) -- the card is still a CSS Grid
+    # item stretching to the full center column, and the gradient
+    # background (`_CARD`) painted that full width regardless of how
+    # tightly the cards row now fits. 880px (not 950 -- live-measured this
+    # round: on a viewport where the center column happened to render only
+    # ~780px wide, a 950 cap wasn't the binding constraint either and
+    # visibly changed nothing) fits 3 cards across (3*280+2*14=868) with a
+    # little room, which is the actual target -- tight enough to matter on
+    # a wide monitor, wide enough not to force an awkward 2-per-row wrap.
+    # graph_block's Plotly charts are responsive (no fixed width in their
+    # own layout), so capping here just shrinks them slightly on a wide
+    # monitor rather than clipping anything.
+    return html.Div(
+        _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block])),
+        style={"maxWidth": "880px"})
 
 
 def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
