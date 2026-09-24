@@ -950,9 +950,24 @@ def scripts_section(pen_records: list, deleted_pen_records: list, scripts_record
     # graph_block's Plotly charts are responsive (no fixed width in their
     # own layout), so capping here just shrinks them slightly on a wide
     # monitor rather than clipping anything.
-    return html.Div(
-        _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", html.Div([graph_block, select_block])),
-        style={"maxWidth": "880px"})
+    # `select_block` sits OUTSIDE the card, not inside it (2026-09-24 round
+    # 4, Brad, very insistently: "please please please just take a chunk
+    # out of the box on the right side... I want just a tiny bit of white
+    # space after the table"). graph_block's Plotly charts are responsive
+    # (no explicit width, fill whatever container they're given) -- sharing
+    # ONE card box with them meant that box always painted its gradient
+    # background across however much width THEY needed, no matter how
+    # tightly `select_block`'s own fit-content row hugged the cards inside
+    # it (three earlier rounds of tightening that inner row never touched
+    # this, which is why they kept not visibly helping). Each of the 6
+    # individual script cards already carries its own white background
+    # (`script_card`), so select_block doesn't need a second, bigger one
+    # wrapping it -- it can just sit on the page's own background like they
+    # do.
+    return html.Div([
+        _card(f"Bullpen Scripts · {SR.N_SCRIPTS} Scripts", graph_block),
+        select_block,
+    ])
 
 
 def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
