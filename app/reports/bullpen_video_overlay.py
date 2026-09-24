@@ -193,12 +193,15 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
         spine.set_visible(False)
 
     # -- Right bar, lower: movement chart, this pitch highlighted ----------
-    # Left margin is bigger than the zone box's (0.045 vs 0.02) -- the
+    # Left margin is still bigger than the zone box's (0.032 vs 0.02) -- the
     # y-axis tick labels here (unlike the zone box, which hides its ticks)
-    # render just left of the axes' own left edge, and without this extra
-    # buffer that text crossed right_x_frac into the video itself (Brad,
-    # from a downloaded clip: "it bleeds into the video a bit").
-    move_ax = fig.add_axes((right_x_frac + 0.045, 0.12, layout["right_w"] / width - 0.075, 0.28))
+    # render just left of the axes' own left edge, and too small a buffer
+    # lets that text cross right_x_frac into the video itself (Brad, from a
+    # downloaded clip: "it bleeds into the video a bit"). Widened close to
+    # that same edge on both sides since (2026-09-23 round 2, Brad, a later
+    # clip): "widen the movement tab just a tiny bit... fill in the white
+    # space without bleeding into the video."
+    move_ax = fig.add_axes((right_x_frac + 0.032, 0.12, layout["right_w"] / width - 0.062, 0.28))
     move_ax.set_facecolor("none")
     move_ax.axhline(0, color="#ccc", lw=0.8)
     move_ax.axvline(0, color="#ccc", lw=0.8)
