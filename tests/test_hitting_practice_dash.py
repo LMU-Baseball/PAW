@@ -121,6 +121,57 @@ def test_resolve_player_defaults_same_for_every_role():
                                     available=avail) == "Alpha"
 
 
+def test_non_coach_layout_has_every_id_on_filters_callback_targets(server):
+    """Regression (2026-09-24, Brad: the practice board showed "no data" for
+    EVERY player under a non-coach account, e.g. a shared team login, while a
+    coach account was fine). Root cause: `layout.serve_layout`'s coach-only
+    plan-management panel used to be omitted entirely (`html.Div()`) for a
+    non-coach account, but `callbacks._on_filters` unconditionally declares
+    Outputs targeting ids inside that panel -- Dash can't write to an Output
+    id missing from the CURRENT layout, so it threw and aborted the whole
+    callback (including its OTHER outputs, like `prac-filters`, which every
+    player's pitch-data load depends on) for every non-coach session. This
+    renders the real layout for a non-coach user and asserts every id
+    `_on_filters` targets actually exists in it -- pulled from the real
+    registered callback (`app.callback_map`), not hardcoded, so a future
+    Output added to that callback is covered automatically."""
+    from dash import Dash
+    from flask_login import login_user
+
+    from app.auth.models import User
+    from app.dashboards.hitting_practice import callbacks, layout
+    from app.extensions import db
+
+    with server.app_context():
+        player = User(email="player-regress@lmu.edu", name="Test Player", role="player")
+        player.set_password("x")
+        db.session.add(player)
+        db.session.commit()
+        player_id = player.id
+
+    dash_app = Dash(__name__, server=server, url_base_pathname="/dash/practiceregress/",
+                    suppress_callback_exceptions=True)
+    dash_app.layout = layout.serve_layout
+    callbacks.register_callbacks(dash_app)
+    on_filters_spec = next(
+        spec for spec in dash_app.callback_map.values()
+        if any((i["id"] if isinstance(i, dict) else i.component_id) == "prac-player"
+              for i in spec["inputs"]))
+    out = on_filters_spec["output"]
+    output_ids = [(o["id"] if isinstance(o, dict) else o.component_id)
+                 for o in (out if isinstance(out, list) else [out])]
+
+    with server.app_context(), server.test_request_context():
+        player = User.query.get(player_id)
+        login_user(player)
+        rendered = str(layout.serve_layout())
+        for output_id in output_ids:
+            assert output_id in rendered, (
+                f"'{output_id}' (an _on_filters Output) is missing from a "
+                f"non-coach account's layout -- this exact gap crashed the "
+                f"callback for every player")
+
+
 def test_practice_layout_has_daterange():
     from app import create_app
     from config import Config
