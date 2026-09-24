@@ -613,9 +613,15 @@ _SCRIPT_LINK_BTN_STYLE = {"border": "none", "background": "none", "color": CRIMS
 
 
 def _script_copy_paste_row(script_number) -> html.Div:
-    """Small red Copy/Paste/Undo/Archive links at the bottom of a script
-    card (2026-09-22, Brad's screenshot; narrowed to table-only + Undo
-    added 2026-09-23, Archive added same day per follow-up feedback) --
+    """Small red Copy/Paste/Undo/Archive/Remove Archive links at the bottom
+    of a script card (2026-09-22, Brad's screenshot; narrowed to table-only
+    + Undo added 2026-09-23, Archive added same day per follow-up feedback,
+    Remove Archive + the two-row split added a round later). Two lines
+    (2026-09-23, Brad: "make it on a line below. so the top row of buttons
+    are copy, paste and undo, the bottom two are archive and remove
+    archive") -- Copy/Paste/Undo (row-level, per-script) read as one group,
+    Archive/Remove Archive (type-level, team-wide) as another.
+
     Copy stashes this script's pitch rows ONLY (never Type/Goal/
     Measurable, which stay manual) into a page-lifetime
     `splash-script-clipboard` Store (`callbacks._on_script_copy`); Paste
@@ -627,27 +633,39 @@ def _script_copy_paste_row(script_number) -> html.Div:
     script's CURRENT rows as the shared team-wide template for its
     script_type (`callbacks._on_script_archive` -> `SR.save_script_
     template`) -- selecting that type on a blank script elsewhere
-    auto-pulls it back (`callbacks._on_script_type_change`). Edit-mode
-    only (there's nothing to copy/paste/archive in read-only view)."""
+    auto-pulls it back (`callbacks._on_script_type_change`). Remove Archive
+    clears that type's template entirely (`callbacks._on_script_remove_
+    archive`), so a stale/wrong archived default stops auto-filling new
+    scripts of that type. Edit-mode only (there's nothing to copy/paste/
+    archive in read-only view)."""
+    row_style = {"display": "flex", "gap": "4px", "alignItems": "center"}
     return html.Div([
-        html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
-                   title="Copy this script's pitch table (# / Type / Ball / Info)",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Paste", id=f"splash-script-paste-{script_number}", n_clicks=0,
-                   title="Paste the copied pitch table into this script",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
-                   title="Undo the last paste into this script",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Archive", id=f"splash-script-archive-{script_number}", n_clicks=0,
-                   title="Save this script's pitch table as the shared default for its Type",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(id=f"splash-script-archive-status-{script_number}",
-                 style={"fontSize": "11px", "color": "#1e5b28", "marginLeft": "4px"}),
-    ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
+        html.Div([
+            html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
+                       title="Copy this script's pitch table (# / Type / Ball / Info)",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Paste", id=f"splash-script-paste-{script_number}", n_clicks=0,
+                       title="Paste the copied pitch table into this script",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
+                       title="Undo the last paste into this script",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+        ], style=row_style),
+        html.Div([
+            html.Button("Archive", id=f"splash-script-archive-{script_number}", n_clicks=0,
+                       title="Save this script's pitch table as the shared default for its Type",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Remove Archive", id=f"splash-script-remove-archive-{script_number}",
+                       n_clicks=0,
+                       title="Clear the shared default archived for this script's Type",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(id=f"splash-script-archive-status-{script_number}",
+                     style={"fontSize": "11px", "color": "#1e5b28", "marginLeft": "4px"}),
+        ], style={**row_style, "marginTop": "4px"}),
+    ], style={"marginTop": "6px"})
 
 
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:

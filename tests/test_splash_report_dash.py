@@ -747,6 +747,65 @@ def test_script_undo_noop_when_buffer_belongs_to_a_different_script(server, monk
     assert result[n] is no_update   # buffer left alone, not consumed
 
 
+def _script_type_change_spec(server):
+    """The registered `_on_script_type_change` spec (N_SCRIPTS Outputs:
+    rows only, no undo buffer) -- same idiom as `_script_copy_paste_specs`."""
+    from dash import Dash
+
+    from app.dashboards.splash_report import callbacks, layout
+    app = Dash(__name__, server=server, url_base_pathname="/dash/splashtc/",
+              suppress_callback_exceptions=True)
+    app.layout = layout.serve_layout
+    callbacks.register_callbacks(app)
+    rows_ids = [f"splash-script-rows-{n}" for n in range(1, SR.N_SCRIPTS + 1)]
+    for spec in app.callback_map.values():
+        out = spec["output"]
+        outs = out if isinstance(out, list) else [out]
+        ids = [o["id"] if isinstance(o, dict) else o.component_id for o in outs]
+        if ids == rows_ids:
+            inputs = [i["id"] if isinstance(i, dict) else i.component_id
+                     for i in spec["inputs"]]
+            if inputs[0].startswith("splash-script-type-"):
+                return spec
+    raise AssertionError("type-change spec not found")
+
+
+def test_script_type_change_pulls_in_a_short_template_padded_to_full_length(server, monkeypatch):
+    """Regression (2026-09-23, Brad, screenshot): archiving a script with
+    only 2 filled rows, then switching another (blank) script to that same
+    Type, left that second script's table only 2 rows tall instead of the
+    fixed N_SCRIPT_ROWS every script table shows -- "can all the scripts
+    be the same length." `SR.get_script_template` only returns its
+    non-blank rows; the callback must pad them back out to the fixed size."""
+    from app.dashboards.splash_report import callbacks
+
+    spec = _script_type_change_spec(server)
+    fn = spec["callback"].__wrapped__
+
+    class FakeCtx:
+        triggered_id = "splash-script-type-2"
+
+    monkeypatch.setattr(callbacks, "ctx", FakeCtx())
+    short_template = [
+        {"row_num": 1, "pitch_type": "FB", "ball_info": "50", "info": "", "result": ""},
+        {"row_num": 2, "pitch_type": "CB", "ball_info": "55", "info": "", "result": ""},
+    ]
+    monkeypatch.setattr(callbacks.SR, "get_script_template", lambda t: short_template)
+
+    n = SR.N_SCRIPTS
+    types = [None] * n
+    types[1] = "Pitch Design"
+    blank_rows = [_rows_with() for _ in range(n)]
+    result = fn(*types, *blank_rows)
+
+    assert len(result[1]) == SR.N_SCRIPT_ROWS
+    assert result[1][0]["pitch_type"] == "FB" and result[1][1]["pitch_type"] == "CB"
+    assert all(r["pitch_type"] == "" for r in result[1][2:])
+    for i in range(n):
+        if i != 1:
+            assert result[i] is no_update
+
+
 def test_on_save_state_bound_to_live_selectors_not_a_stale_store(server):
     """Task 4 (coaches: every pitcher showed the exact same Pre-Throw/
     Post-Throw checklist text on Built on the Bluff) -- the code trace

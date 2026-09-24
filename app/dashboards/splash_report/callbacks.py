@@ -534,6 +534,35 @@ def register_callbacks(dash_app) -> None:
         out[i] = f"Saved as the {script_type} default"
         return out
 
+    # Remove Archive (2026-09-23, Brad, same message as the two-row split
+    # below): clears whatever's archived for this script's Type entirely --
+    # `SR.save_script_template(script_type, [])` deletes that type's
+    # template rows and inserts nothing back (see its docstring), so a
+    # stale/wrong default stops auto-filling new scripts of that type via
+    # `_on_script_type_change`.
+    @dash_app.callback(
+        *[Output(f"splash-script-archive-status-{n}", "children", allow_duplicate=True)
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        *[Input(f"splash-script-remove-archive-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-type-{n}", "value") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_remove_archive(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, types = args[:n], args[n:2 * n]
+        out = [no_update] * n
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-remove-archive-",
+                                       n_clicks)
+        if spurious:
+            return out
+        script_type = types[i]
+        if not script_type:
+            out[i] = "Set a Type first"
+            return out
+        SR.save_script_template(script_type, [], updated_by=getattr(current_user, "id", None))
+        out[i] = f"Removed the {script_type} default"
+        return out
+
     # The "pull" half of Archive: selecting a Type auto-fills this script's
     # rows from that type's shared template -- but ONLY when the script is
     # currently blank, so switching Type on an already-filled-in script
@@ -561,7 +590,16 @@ def register_callbacks(dash_app) -> None:
             return out
         template = SR.get_script_template(script_type)
         if template:
-            out[i] = template
+            # get_script_template only returns its non-blank rows (2..N of
+            # them) -- pad back to the fixed N_SCRIPT_ROWS the table always
+            # shows (2026-09-23, Brad, screenshot: archiving a 2-row script
+            # then pulling it into another left THAT script only 2 rows
+            # tall -- "can all the scripts be the same length").
+            padded = list(template)
+            for row_num in range(len(padded) + 1, SR.N_SCRIPT_ROWS + 1):
+                padded.append({"row_num": row_num, "pitch_type": "", "ball_info": "",
+                              "info": "", "result": ""})
+            out[i] = padded
         return out
 
     # Elastic Pen Results / Movement Log rows (2026-09-23, Brad: the
