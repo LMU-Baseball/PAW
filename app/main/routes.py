@@ -86,7 +86,8 @@ def bullpen_video_download(play_id: str):
     manual download, not something hit in a loop."""
     from app.data import bullpen as B
     from app.data import bullpen_video as BV
-    from app.reports.bullpen_video_overlay import build_overlay_png, composite_overlay
+    from app.reports.bullpen_video_overlay import (build_overlay_png, composite_overlay,
+                                                    compute_layout)
 
     clip = BV.get_clip(play_id)
     if clip is None or clip.get("data") is None:
@@ -105,11 +106,12 @@ def bullpen_video_download(play_id: str):
     play_ids = list(session_df["play_id"])
     pitch_index = play_ids.index(play_id) + 1 if play_id in play_ids else 1
 
+    width, height = int(clip.get("width") or 1280), int(clip.get("height") or 720)
+    layout = compute_layout(width, height)
     overlay_png = build_overlay_png(
         pitch, session_df, player_name=player_name, date=pitch["date"],
-        pitch_index=pitch_index, pitch_count=len(session_df),
-        width=int(clip.get("width") or 1280), height=int(clip.get("height") or 720))
-    composited = composite_overlay(clip["data"], overlay_png)
+        pitch_index=pitch_index, pitch_count=len(session_df), width=width, height=height)
+    composited = composite_overlay(clip["data"], overlay_png, layout)
 
     safe_name = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9]", "_", player_name)).strip("_")
     download_name = f"{safe_name}_{pitch.get('pitch_type') or 'pitch'}_{pitch['date']}.mp4"
