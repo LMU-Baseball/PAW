@@ -49,6 +49,19 @@ def render(pitcher_id, date) -> html.Div:
         children=html.Source(id="bp-video-source", src="", type="video/mp4"),
         style={"width": "100%", "borderRadius": "8px", "background": "#000"})
     reload_sink = html.Div(id="bp-video-reload", style={"display": "none"})
+    # LMU-branded downloadable clip (2026-09-23, Brad: players want to
+    # download their best pitches, with pitch type/velo/break + zone +
+    # movement burned onto the video, to share with recruiters). A plain
+    # <a download> to the Flask route (app.main.routes.bullpen_video_
+    # download) -- the browser's own native download handling, no dcc.
+    # Download/clientside plumbing needed. `href=""` (falsy) until a pitch
+    # with video is selected, matching the player's own empty-src state.
+    download_link = html.A(
+        "Download with pitch data", id="bp-video-download", href="",
+        download="", target="_blank",
+        style={"display": "none", "marginTop": "8px", "padding": "6px 14px",
+              "backgroundColor": shell.CRIMSON, "color": "white", "borderRadius": "6px",
+              "textDecoration": "none", "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
 
     return html.Div([
         html.Div([
@@ -57,6 +70,7 @@ def render(pitcher_id, date) -> html.Div:
                          style={"color": "#555", "marginBottom": "6px"}),
                 player,
                 reload_sink,
+                download_link,
             ], className="paw-video-media", style={"flex": "2", "minWidth": "480px"}),
             html.Div([table], className="paw-video-table", style={"flex": "1", "minWidth": "300px"}),
         ], className="paw-video-row",
@@ -69,20 +83,28 @@ def register_callbacks(dash_app) -> None:
     @dash_app.callback(
         Output("bp-video-source", "src"),
         Output("bp-video-hint", "children"),
+        Output("bp-video-download", "href"),
+        Output("bp-video-download", "download"),
+        Output("bp-video-download", "style"),
         Input("bp-video-table", "active_cell"),
         State("bp-video-table", "derived_viewport_data"),
+        State("bp-video-download", "style"),
         prevent_initial_call=True,
     )
-    def _select(active, rows):
+    def _select(active, rows, download_style):
+        hidden = {**download_style, "display": "none"}
         if not active or not rows:
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
         i = active.get("row")
         if i is None or i >= len(rows):
-            return no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
         row = rows[i]
         if not row.get("has_video"):
-            return "", "No video for this pitch."
-        return f"/bullpen-video/{row['play_id']}", ""
+            return "", "No video for this pitch.", "", "", hidden
+        play_id = row["play_id"]
+        shown = {**download_style, "display": "inline-block"}
+        return (f"/bullpen-video/{play_id}", "", f"/bullpen-video/{play_id}/download",
+               f"{play_id}.mp4", shown)
 
     dash_app.clientside_callback(
         """

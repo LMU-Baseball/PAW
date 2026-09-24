@@ -536,7 +536,7 @@ def engine_tables_block(engine_records: list, *, editable: bool = False) -> html
         # shared dict and has room for the full "Scaption ROM" -- no
         # complaint was raised about that one.
         rom = rom.copy()
-        rom.loc[rom["metric_key"] == "ScaptionROM", "label"] = "SCAP ROM"
+        rom.loc[rom["metric_key"] == "ScaptionROM", "label"] = "Scap ROM"
     # flex:1 on each table used to stretch it across half of a very wide
     # container, leaving a big blank gap between two content-sized tables
     # -- size to content instead so they sit close together.
@@ -613,9 +613,15 @@ _SCRIPT_LINK_BTN_STYLE = {"border": "none", "background": "none", "color": CRIMS
 
 
 def _script_copy_paste_row(script_number) -> html.Div:
-    """Small red Copy/Paste/Undo/Archive links at the bottom of a script
-    card (2026-09-22, Brad's screenshot; narrowed to table-only + Undo
-    added 2026-09-23, Archive added same day per follow-up feedback) --
+    """Small red Copy/Paste/Undo/Archive/Remove Archive links at the bottom
+    of a script card (2026-09-22, Brad's screenshot; narrowed to table-only
+    + Undo added 2026-09-23, Archive added same day per follow-up feedback,
+    Remove Archive + the two-row split added a round later). Two lines
+    (2026-09-23, Brad: "make it on a line below. so the top row of buttons
+    are copy, paste and undo, the bottom two are archive and remove
+    archive") -- Copy/Paste/Undo (row-level, per-script) read as one group,
+    Archive/Remove Archive (type-level, team-wide) as another.
+
     Copy stashes this script's pitch rows ONLY (never Type/Goal/
     Measurable, which stay manual) into a page-lifetime
     `splash-script-clipboard` Store (`callbacks._on_script_copy`); Paste
@@ -627,51 +633,46 @@ def _script_copy_paste_row(script_number) -> html.Div:
     script's CURRENT rows as the shared team-wide template for its
     script_type (`callbacks._on_script_archive` -> `SR.save_script_
     template`) -- selecting that type on a blank script elsewhere
-    auto-pulls it back (`callbacks._on_script_type_change`). Edit-mode
-    only (there's nothing to copy/paste/archive in read-only view)."""
+    auto-pulls it back (`callbacks._on_script_type_change`). Remove Archive
+    clears that type's template entirely (`callbacks._on_script_remove_
+    archive`), so a stale/wrong archived default stops auto-filling new
+    scripts of that type. Edit-mode only (there's nothing to copy/paste/
+    archive in read-only view)."""
+    row_style = {"display": "flex", "gap": "4px", "alignItems": "center"}
     return html.Div([
-        html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
-                   title="Copy this script's pitch table (# / Type / Ball / Info)",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Paste", id=f"splash-script-paste-{script_number}", n_clicks=0,
-                   title="Paste the copied pitch table into this script",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
-                   title="Undo the last paste into this script",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
-        html.Button("Archive", id=f"splash-script-archive-{script_number}", n_clicks=0,
-                   title="Save this script's pitch table as the shared default for its Type",
-                   style=_SCRIPT_LINK_BTN_STYLE),
-        html.Span(id=f"splash-script-archive-status-{script_number}",
-                 style={"fontSize": "11px", "color": "#1e5b28", "marginLeft": "4px"}),
-    ], style={"marginTop": "6px", "display": "flex", "gap": "4px", "alignItems": "center"})
-
-
-def _elastic_script_rows(rows: list[dict]) -> list[dict]:
-    """Trim a script's rows (always N_SCRIPT_ROWS long, from `read_all_
-    script_rows`/`read_script_rows`) down to just past the last filled one
-    -- last-filled row_num + 1 blank row underneath it, floor of 1 row so
-    an empty script still shows a single row to type into. Mirrors, in
-    Python for the initial page render, the same trim/extend logic the
-    clientside callback (`callbacks.register_callbacks`'s per-script
-    "elastic rows" callback) applies live as a coach types -- see that
-    callback's docstring for why this needs a JS twin instead of a plain
-    server round trip."""
-    last_filled = 0
-    for row in rows:
-        if any((row.get(k) or "").strip() for k in ("pitch_type", "ball_info", "info")):
-            last_filled = int(row["row_num"])
-    visible = max(1, min(SR.N_SCRIPT_ROWS, last_filled + 1))
-    return rows[:visible]
+        html.Div([
+            html.Button("Copy", id=f"splash-script-copy-{script_number}", n_clicks=0,
+                       title="Copy this script's pitch table (# / Type / Ball / Info)",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Paste", id=f"splash-script-paste-{script_number}", n_clicks=0,
+                       title="Paste the copied pitch table into this script",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Undo", id=f"splash-script-undo-{script_number}", n_clicks=0,
+                       title="Undo the last paste into this script",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+        ], style=row_style),
+        html.Div([
+            html.Button("Archive", id=f"splash-script-archive-{script_number}", n_clicks=0,
+                       title="Save this script's pitch table as the shared default for its Type",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(" · ", style={"color": "#ccc", "fontSize": "12px"}),
+            html.Button("Remove Archive", id=f"splash-script-remove-archive-{script_number}",
+                       n_clicks=0,
+                       title="Clear the shared default archived for this script's Type",
+                       style=_SCRIPT_LINK_BTN_STYLE),
+            html.Span(id=f"splash-script-archive-status-{script_number}",
+                     style={"fontSize": "11px", "color": "#1e5b28", "marginLeft": "4px"}),
+        ], style={**row_style, "marginTop": "4px"}),
+    ], style={"marginTop": "6px"})
 
 
 def script_card(script_number, script_row: dict, rows: list, *, editable: bool) -> html.Div:
     goal = script_row["goal"]
     measurable = script_row["measurable"]
     script_type = script_row.get("script_type") or ""
+    pd_result = script_row.get("pitch_design_result") or ""
     goal_child = dcc.Input(id=f"splash-script-goal-{script_number}", value=goal,
                            type="text", style={"width": "100%"}) if editable \
         else html.Div(goal or "—")
@@ -680,13 +681,38 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
         if editable else html.Div(measurable or "—")
     # Drives the Pen Results value's meaning (velo/execution = raw result %,
     # pitch design = % in the target movement window) and which scripts feed
-    # the pitch-design movement plot (2026-09-16 coaches' meeting).
+    # the pitch-design movement plot (2026-09-16 coaches' meeting). Also
+    # (2026-09-23) which Result widget `script_pitch_table` shows, and
+    # which of the two blocks below (pitch_design_result input / Velo
+    # summary) is visible -- `callbacks`'s per-script "Result visibility"
+    # clientside callback keeps that in sync live as this dropdown changes,
+    # without a full page re-render.
     type_child = dcc.Dropdown(
         id=f"splash-script-type-{script_number}",
         options=[{"label": t, "value": t} for t in SR.SCRIPT_TYPES],
         value=script_type or None, clearable=True,
         style={"fontFamily": "Teko, sans-serif"}) if editable \
         else html.Div(script_type or "—")
+    # Pitch Design's single end-of-bullpen number (Trackman average) --
+    # entered ONCE, not per pitch (no Result column in that script's
+    # table -- see `tables.script_pitch_table`). Always rendered (never
+    # conditionally omitted), just hidden via style when the current type
+    # isn't Pitch Design -- same reasoning as `script_wrap` below: an
+    # omitted element would be an invalid State target for the Save
+    # callback the moment a coach switches Type without a full re-render.
+    pd_result_child = html.Div([
+        html.Span("Trackman Avg ", style={"fontSize": "11px", "color": "#666"}),
+        dcc.Input(id=f"splash-script-pdresult-{script_number}", value=pd_result,
+                 type="text", style={"width": "100%"}) if editable
+        else html.Div(pd_result or "—"),
+    ], id=f"splash-script-pdresult-wrap-{script_number}", style={
+        "marginTop": "4px", "display": "block" if script_type == "Pitch Design" else "none"})
+    velo_summary_child = html.Div(
+        id=f"splash-script-velosummary-{script_number}",
+        style={"fontSize": "12px", "color": "#555", "marginTop": "4px"})
+    velo_summary_wrap = html.Div(velo_summary_child,
+        id=f"splash-script-velosummary-wrap-{script_number}",
+        style={"display": "block" if script_type == "Velo" else "none"})
     card = html.Div([
         html.Div(f"Script #{script_number}", style={"fontWeight": "bold", "color": CRIMSON}),
         html.Div([html.Span("Type ", style={"fontSize": "11px", "color": "#666"}),
@@ -695,9 +721,11 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
                   goal_child], style={"marginTop": "4px"}),
         html.Div([html.Span("Measurable ", style={"fontSize": "11px", "color": "#666"}),
                   measurable_child], style={"marginTop": "4px"}),
-        html.Div(tables.script_pitch_table(pd.DataFrame(_elastic_script_rows(rows)),
-                                           script_number, editable=editable),
+        pd_result_child,
+        html.Div(tables.script_pitch_table(pd.DataFrame(rows), script_number,
+                                           script_type=script_type, editable=editable),
                  style={"marginTop": "6px"}),
+        velo_summary_wrap,
         *([_script_copy_paste_row(script_number)] if editable else []),
     # Fixed width (2026-09-14, part of the flex-wrap fix above): without it
     # the card shrinks to fit its content, and in a shrink-to-fit box a
@@ -710,9 +738,13 @@ def script_card(script_number, script_row: dict, rows: list, *, editable: bool) 
     # from 280px -- Brad: still white space to the right of the 4-column
     # #/Type/Ball/Info table, which only needs ~150-160px) -- narrow enough
     # to fit the table with a little breathing room, wide enough that more
-    # cards fit per row is the actual point of the fix.
+    # cards fit per row is the actual point of the fix. Widened to 300px
+    # for a Velo/Execution script (2026-09-23) -- the new Result column
+    # needs the extra room; Pitch Design's 4-column table doesn't grow, so
+    # its card stays narrow.
     ], style={"backgroundColor": "rgba(255,255,255,0.85)", "borderRadius": "8px",
-              "padding": "10px", "marginBottom": "12px", "width": "220px",
+              "padding": "10px", "marginBottom": "12px",
+              "width": "300px" if script_type in ("Velo", "Execution") else "220px",
               "boxSizing": "border-box"})
     # ALWAYS rendered (never conditionally omitted) so its Save-form Inputs
     # stay valid targets for `callbacks._script_states()` regardless of

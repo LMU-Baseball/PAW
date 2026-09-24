@@ -41,6 +41,7 @@ def _script_states() -> list:
         states.append(State(f"splash-script-measurable-{n}", "value"))
         states.append(State(f"splash-script-type-{n}", "value"))
         states.append(State(f"splash-script-rows-{n}", "data"))
+        states.append(State(f"splash-script-pdresult-{n}", "value"))
     return states
 
 
@@ -146,8 +147,9 @@ def register_callbacks(dash_app) -> None:
         }
         script_fields, script_pitch_rows = {}, {}
         for i, n in enumerate(range(1, SR.N_SCRIPTS + 1)):
-            goal_v, measurable_v, type_v, rows_v = script_args[i * 4:i * 4 + 4]
-            script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v}
+            goal_v, measurable_v, type_v, rows_v, pd_result_v = script_args[i * 5:i * 5 + 5]
+            script_fields[n] = {"goal": goal_v, "measurable": measurable_v, "script_type": type_v,
+                                "pitch_design_result": pd_result_v}
             script_pitch_rows[n] = rows_v or []
         # The Movement Log is now ONE shared table (`splash-movement-table`,
         # a Script # column instead of six separate per-script grids -- see
@@ -532,6 +534,35 @@ def register_callbacks(dash_app) -> None:
         out[i] = f"Saved as the {script_type} default"
         return out
 
+    # Remove Archive (2026-09-23, Brad, same message as the two-row split
+    # below): clears whatever's archived for this script's Type entirely --
+    # `SR.save_script_template(script_type, [])` deletes that type's
+    # template rows and inserts nothing back (see its docstring), so a
+    # stale/wrong default stops auto-filling new scripts of that type via
+    # `_on_script_type_change`.
+    @dash_app.callback(
+        *[Output(f"splash-script-archive-status-{n}", "children", allow_duplicate=True)
+          for n in range(1, SR.N_SCRIPTS + 1)],
+        *[Input(f"splash-script-remove-archive-{n}", "n_clicks") for n in range(1, SR.N_SCRIPTS + 1)],
+        *[State(f"splash-script-type-{n}", "value") for n in range(1, SR.N_SCRIPTS + 1)],
+        prevent_initial_call=True,
+    )
+    def _on_script_remove_archive(*args):
+        n = SR.N_SCRIPTS
+        n_clicks, types = args[:n], args[n:2 * n]
+        out = [no_update] * n
+        i, spurious = _spurious_refire(ctx.triggered_id or "", "splash-script-remove-archive-",
+                                       n_clicks)
+        if spurious:
+            return out
+        script_type = types[i]
+        if not script_type:
+            out[i] = "Set a Type first"
+            return out
+        SR.save_script_template(script_type, [], updated_by=getattr(current_user, "id", None))
+        out[i] = f"Removed the {script_type} default"
+        return out
+
     # The "pull" half of Archive: selecting a Type auto-fills this script's
     # rows from that type's shared template -- but ONLY when the script is
     # currently blank, so switching Type on an already-filled-in script
@@ -553,52 +584,151 @@ def register_callbacks(dash_app) -> None:
         i = int(trig.rsplit("-", 1)[1]) - 1
         script_type = types[i]
         current_rows = rows[i] or []
-        is_blank = not any((r.get("pitch_type") or r.get("ball_info") or r.get("info"))
-                           for r in current_rows)
+        is_blank = not any((r.get("pitch_type") or r.get("ball_info") or r.get("info")
+                           or r.get("result")) for r in current_rows)
         if not script_type or not is_blank:
             return out
         template = SR.get_script_template(script_type)
         if template:
-            out[i] = template
+            # get_script_template only returns its non-blank rows (2..N of
+            # them) -- pad back to the fixed N_SCRIPT_ROWS the table always
+            # shows (2026-09-23, Brad, screenshot: archiving a 2-row script
+            # then pulling it into another left THAT script only 2 rows
+            # tall -- "can all the scripts be the same length").
+            padded = list(template)
+            for row_num in range(len(padded) + 1, SR.N_SCRIPT_ROWS + 1):
+                padded.append({"row_num": row_num, "pitch_type": "", "ball_info": "",
+                              "info": "", "result": ""})
+            out[i] = padded
         return out
 
-    # Elastic script rows (2026-09-23, Brad: a script's pitch table used to
-    # hard-stop at a fixed row count with no way to add more once full;
-    # should "expand and be elastic" as a coach types, and shrink back when
-    # rows are cleared). Clientside (not a server round trip) so it's
-    # instant on every keystroke's blur. Self-referencing -- Input and
-    # Output are both this table's own `data` -- which is safe here because
-    # the logic converges: after it appends/trims rows, the very next
-    # firing (triggered by that same write) recomputes the identical
-    # desired length and returns no_update instead of writing again.
-    # `layout._elastic_script_rows` applies the same trim server-side for
-    # the initial page render; this is its live-editing JS twin.
+    # Elastic Pen Results / Movement Log rows (2026-09-23, Brad: the
+    # auto-growth belongs on "the script table and movement log that
+    # control the visuals" -- i.e. these two shared tables -- "not the
+    # script itself (that can stay fixed)"; a per-script pitch table
+    # previously had this and has been reverted to a fixed
+    # `SR.N_SCRIPT_ROWS` size). Clientside (not a server round trip) so
+    # it's instant on every keystroke's blur. Self-referencing -- Input and
+    # Output are both the table's own `data` -- safe here because the logic
+    # converges: after it appends/trims rows, the very next firing
+    # (triggered by that same write) recomputes the identical desired
+    # length and returns no_update instead of writing again.
+    # `tables._elastic_pad` applies the same floor/grow math server-side
+    # for the initial page render; this is its live-editing JS twin. Floor
+    # of 6 (not 1, unlike the reverted script-row version) -- unrelated,
+    # pre-existing behavior (both tables always showed at least 6 blank
+    # rows) that this keeps rather than changes.
+    dash_app.clientside_callback(
+        """
+        function(rows) {
+            if (!rows) { return window.dash_clientside.no_update; }
+            var fields = ['script_number', 'pen_date', 'value'];
+            var lastFilled = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i], filled = false;
+                for (var f = 0; f < fields.length; f++) {
+                    var v = r[fields[f]];
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {
+                        filled = true; break;
+                    }
+                }
+                if (filled) { lastFilled = i + 1; }
+            }
+            var visible = Math.max(6, lastFilled + 1);
+            if (visible === rows.length) { return window.dash_clientside.no_update; }
+            if (visible < rows.length) { return rows.slice(0, visible); }
+            var out = rows.slice();
+            for (var n = rows.length; n < visible; n++) {
+                out.push({script_number: null, pen_date: '', value: null});
+            }
+            return out;
+        }
+        """,
+        Output("splash-pen-table", "data", allow_duplicate=True),
+        Input("splash-pen-table", "data"),
+        prevent_initial_call=True,
+    )
+    dash_app.clientside_callback(
+        """
+        function(rows) {
+            if (!rows) { return window.dash_clientside.no_update; }
+            var fields = ['script_number', 'pitch_type', 'pen_date', 'hb', 'ivb'];
+            var lastFilled = 0;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i], filled = false;
+                for (var f = 0; f < fields.length; f++) {
+                    var v = r[fields[f]];
+                    if (v !== null && v !== undefined && String(v).trim() !== '') {
+                        filled = true; break;
+                    }
+                }
+                if (filled) { lastFilled = i + 1; }
+            }
+            var visible = Math.max(6, lastFilled + 1);
+            if (visible === rows.length) { return window.dash_clientside.no_update; }
+            if (visible < rows.length) { return rows.slice(0, visible); }
+            var out = rows.slice();
+            for (var n = rows.length; n < visible; n++) {
+                out.push({script_number: null, pitch_type: '', pen_date: '',
+                          hb: null, ivb: null});
+            }
+            return out;
+        }
+        """,
+        Output("splash-movement-table", "data", allow_duplicate=True),
+        Input("splash-movement-table", "data"),
+        prevent_initial_call=True,
+    )
+
+    # Result column visibility + live Velo summary (2026-09-23, Brad --
+    # Result is coach-typed live from the phone during a bullpen, not
+    # pulled from anywhere). Two purely-visual clientside callbacks per
+    # script, reacting live without a full page re-render:
+    #
+    # 1. Which of the two extra blocks (`splash-script-pdresult-wrap-N`,
+    #    `splash-script-velosummary-wrap-N`) is visible follows the Type
+    #    dropdown directly -- both blocks are ALWAYS in the DOM (never
+    #    conditionally omitted, same reasoning as `script_wrap`'s own
+    #    comment: an omitted element is an invalid State/Output target the
+    #    instant a coach switches Type without a full re-render), just
+    #    hidden via style.
     for _n in range(1, SR.N_SCRIPTS + 1):
         dash_app.clientside_callback(
-            f"""
-            function(rows) {{
-                if (!rows || !rows.length) {{ return window.dash_clientside.no_update; }}
-                var lastFilled = 0;
-                for (var i = 0; i < rows.length; i++) {{
-                    var r = rows[i];
-                    var filled = (r.pitch_type && String(r.pitch_type).trim()) ||
-                                 (r.ball_info && String(r.ball_info).trim()) ||
-                                 (r.info && String(r.info).trim());
-                    if (filled) {{ lastFilled = r.row_num; }}
-                }}
-                var visible = Math.max(1, Math.min({SR.N_SCRIPT_ROWS}, lastFilled + 1));
-                if (visible === rows.length) {{ return window.dash_clientside.no_update; }}
-                if (visible < rows.length) {{ return rows.slice(0, visible); }}
-                var out = rows.slice();
-                for (var n = rows.length + 1; n <= visible; n++) {{
-                    out.push({{row_num: n, pitch_type: '', ball_info: '', info: ''}});
-                }}
-                return out;
-            }}
+            """
+            function(scriptType) {
+                var pd = scriptType === 'Pitch Design' ? 'block' : 'none';
+                var velo = scriptType === 'Velo' ? 'block' : 'none';
+                return [{display: pd, marginTop: '4px'}, {display: velo}];
+            }
             """,
-            Output(f"splash-script-rows-{_n}", "data", allow_duplicate=True),
+            Output(f"splash-script-pdresult-wrap-{_n}", "style"),
+            Output(f"splash-script-velosummary-wrap-{_n}", "style"),
+            Input(f"splash-script-type-{_n}", "value"),
+        )
+
+    # 2. The Velo summary itself: max + average over whatever's currently
+    #    typed into the Result column, recomputed on every edit. Non-numeric
+    #    entries (a coach's stray text, or another script type's Ball/Strike
+    #    values if this ever fires for one) are skipped, not treated as 0.
+    for _n in range(1, SR.N_SCRIPTS + 1):
+        dash_app.clientside_callback(
+            """
+            function(rows) {
+                if (!rows || !rows.length) { return ''; }
+                var vals = [];
+                for (var i = 0; i < rows.length; i++) {
+                    var v = parseFloat(rows[i].result);
+                    if (!isNaN(v)) { vals.push(v); }
+                }
+                if (!vals.length) { return 'No results entered yet.'; }
+                var max = Math.max.apply(null, vals);
+                var avg = vals.reduce(function(a, b) { return a + b; }, 0) / vals.length;
+                return 'Max ' + max.toFixed(1) + ' \\u00b7 Avg ' + avg.toFixed(1) +
+                       ' (n=' + vals.length + ')';
+            }
+            """,
+            Output(f"splash-script-velosummary-{_n}", "children"),
             Input(f"splash-script-rows-{_n}", "data"),
-            prevent_initial_call=True,
         )
 
     # "Compare Scripts" narrows which scripts' lines the pen-results trend
