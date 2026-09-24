@@ -34,6 +34,7 @@ import tempfile
 
 import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
+import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -44,8 +45,32 @@ from app.reports.plots import _add_ellipse, _color_for, _draw_zone
 
 _LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
                           "static", "reports", "lion.png")
+_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "reports")
 TOP_FRAC = 0.12    # top bar height, as a fraction of the frame's own height
-RIGHT_FRAC = 0.25  # right bar width, as a fraction of the frame's own width
+RIGHT_FRAC = 0.19  # right bar width, as a fraction of the frame's own width -- narrower
+                   # than the original 0.25 (Brad: "shrink the movement chart a tiny
+                   # bit" + "the white space isn't needed at the bottom"): the bottom
+                   # margin is leftover from fitting the video's own aspect ratio into
+                   # the width left after the right bar, so a narrower right bar both
+                   # shrinks the chart real estate AND grows the video's fitted height,
+                   # shrinking the bottom leftover -- one knob, both asks.
+
+
+def _teko(weight: str) -> font_manager.FontProperties:
+    """Registers app/static/reports/Teko-*.ttf with matplotlib's font
+    manager on first use and returns a FontProperties for one weight --
+    the same font family the web app uses (`fontFamily: "Teko, sans-serif"`,
+    Brad: "is the font the same font from the web app? if not can it be?").
+    Uses `fname=` (an exact file), not family-name matching, since Teko's
+    weight files aren't guaranteed to register as distinct matplotlib
+    family/weight combinations."""
+    path = os.path.join(_FONT_DIR, f"Teko-{weight}.ttf")
+    font_manager.fontManager.addfont(path)
+    return font_manager.FontProperties(fname=path)
+
+
+_TEKO_BOLD = _teko("Bold")
+_TEKO_SEMIBOLD = _teko("SemiBold")
 
 
 class OverlayError(RuntimeError):
@@ -137,7 +162,7 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     text_y = 1 - top_frac / 2
     logo_edge_frac = (int(width * 0.015) + logo_px + width * 0.02) / width
     fig.text(logo_edge_frac, text_y, pitch_type, fontsize=int(layout["top_h"] * 0.4),
-             fontweight="bold", color=color, ha="left", va="center")
+             fontproperties=_TEKO_BOLD, color=color, ha="left", va="center")
     metrics = []
     if velo is not None and pd.notna(velo):
         metrics.append(f"{velo:.1f} mph")
@@ -146,7 +171,7 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     if hb is not None and pd.notna(hb):
         metrics.append(f"HB: {hb:.1f}")
     fig.text(0.97, text_y, "   ".join(metrics), fontsize=int(layout["top_h"] * 0.22),
-             fontweight="bold", color=color, ha="right", va="center")
+             fontproperties=_TEKO_SEMIBOLD, color=color, ha="right", va="center")
 
     # -- Right bar, upper: strike zone + this pitch's location -------------
     # Plain app.reports.plots._draw_zone (black/gray lines) -- the right
@@ -168,7 +193,12 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
         spine.set_visible(False)
 
     # -- Right bar, lower: movement chart, this pitch highlighted ----------
-    move_ax = fig.add_axes((right_x_frac + 0.01, 0.10, layout["right_w"] / width - 0.04, 0.32))
+    # Left margin is bigger than the zone box's (0.045 vs 0.02) -- the
+    # y-axis tick labels here (unlike the zone box, which hides its ticks)
+    # render just left of the axes' own left edge, and without this extra
+    # buffer that text crossed right_x_frac into the video itself (Brad,
+    # from a downloaded clip: "it bleeds into the video a bit").
+    move_ax = fig.add_axes((right_x_frac + 0.045, 0.12, layout["right_w"] / width - 0.075, 0.28))
     move_ax.set_facecolor("none")
     move_ax.axhline(0, color="#ccc", lw=0.8)
     move_ax.axvline(0, color="#ccc", lw=0.8)
@@ -181,18 +211,19 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     if hb is not None and vb is not None and pd.notna(hb) and pd.notna(vb):
         move_ax.scatter([hb], [vb], s=100, color=color, edgecolor="white",
                         linewidth=1.5, zorder=3)
-    move_ax.set_title("Movement", fontsize=11, color="#9A0021", fontweight="bold", pad=4)
+    move_ax.set_title("Movement", fontsize=11, color="#9A0021",
+                      fontproperties=_TEKO_SEMIBOLD, pad=4)
     move_ax.tick_params(labelsize=7)
 
     # -- Bottom margin (below the shrunk video): player / date / pitch count
     if layout["bottom_h"] > 0:
         bottom_y = layout["bottom_h"] / 2 / height
-        fig.text(0.03, bottom_y, player_name, fontsize=15, fontweight="bold",
+        fig.text(0.03, bottom_y, player_name, fontsize=15, fontproperties=_TEKO_BOLD,
                  color=color, ha="left", va="center")
-        fig.text(right_x_frac / 2, bottom_y, date, fontsize=15, fontweight="bold",
+        fig.text(right_x_frac / 2, bottom_y, date, fontsize=15, fontproperties=_TEKO_BOLD,
                  color=color, ha="center", va="center")
         fig.text(right_x_frac - 0.02, bottom_y, f"Pitch {pitch_index}/{pitch_count}",
-                 fontsize=15, fontweight="bold", color=color, ha="right", va="center")
+                 fontsize=15, fontproperties=_TEKO_BOLD, color=color, ha="right", va="center")
 
     buf = io.BytesIO()
     try:
