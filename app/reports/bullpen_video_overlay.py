@@ -35,6 +35,7 @@ import tempfile
 import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
 import matplotlib.font_manager as font_manager
+import matplotlib.patheffects as patheffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -43,9 +44,18 @@ from PIL import Image
 from app.data.bullpen import _EDGE, _SZ
 from app.reports.plots import _add_ellipse, _color_for, _draw_zone
 
-_LOGO_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                          "static", "reports", "lion.png")
-_FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "reports")
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "reports")
+# The LMU wordmark (2026-09-23, Brad: "replace the sun lion logo with the
+# LMU logo") -- the same crest `layout._page_title_banner` uses on the
+# Built on the Bluff title card. Already transparent-background, unlike
+# lion.png, so it needs no white-stripping.
+_LOGO_PATH = os.path.join(_ASSETS_DIR, "lmu.png")
+# The same red/blue splatter texture `layout._page_title_banner` uses behind
+# the "Built on the Bluff" title card (2026-09-23, Brad, pointing at that
+# banner: "make the top bar have the same background as this image...
+# closely resemble the background for Built on the Bluff title cards").
+_TOPBAR_BG_PATH = os.path.join(_ASSETS_DIR, "velo-backdrop.png")
+_FONT_DIR = _ASSETS_DIR
 TOP_FRAC = 0.12    # top bar height, as a fraction of the frame's own height
 RIGHT_FRAC = 0.19  # right bar width, as a fraction of the frame's own width -- narrower
                    # than the original 0.25 (Brad: "shrink the movement chart a tiny
@@ -113,33 +123,55 @@ def compute_layout(width: int, height: int) -> dict:
     }
 
 
-def _load_logo_rgba(target_px: int) -> np.ndarray:
-    """The LMU sun-lion mark (app/static/reports/lion.png, used elsewhere
-    as the default player photo) has an OPAQUE WHITE background -- fine
-    now that it's sitting on the layout's own white top bar, so unlike an
-    earlier version of this function, the background is NOT stripped to
-    transparent here. Resized to `target_px` square before returning --
-    `Figure.figimage` (unlike `OffsetImage`) has no `zoom` kwarg, so
-    scaling has to happen here, not at placement time."""
-    img = Image.open(_LOGO_PATH).convert("RGBA").resize((target_px, target_px),
-                                                        Image.LANCZOS)
-    return np.array(img)
+def _load_logo_rgba(target_h: int) -> np.ndarray:
+    """`_LOGO_PATH` (the LMU wordmark, already transparent-background),
+    resized to `target_h` tall with its own aspect ratio preserved --
+    unlike the sun-lion mark this replaced, it isn't square, so the width
+    is derived from the source image's own proportions rather than forced
+    to match the height. `Figure.figimage` (unlike `OffsetImage`) has no
+    `zoom` kwarg, so scaling has to happen here, not at placement time."""
+    img = Image.open(_LOGO_PATH).convert("RGBA")
+    target_w = round(img.width * (target_h / img.height))
+    return np.array(img.resize((target_w, target_h), Image.LANCZOS))
+
+
+def _load_topbar_bg_rgba(width: int, top_h: int) -> np.ndarray:
+    """`_TOPBAR_BG_PATH`, center-cropped to the top bar's own aspect ratio
+    then resized to exactly `width`x`top_h` -- the same "cover" behavior as
+    the CSS `background: url(...) center/cover no-repeat` the Built on the
+    Bluff title card itself uses (`layout._page_title_banner`), so a source
+    image far taller than it is wide doesn't look squashed here."""
+    img = Image.open(_TOPBAR_BG_PATH).convert("RGBA")
+    src_w, src_h = img.size
+    target_ratio = width / top_h
+    src_ratio = src_w / src_h
+    if src_ratio > target_ratio:
+        crop_w = int(src_h * target_ratio)
+        x0 = (src_w - crop_w) // 2
+        img = img.crop((x0, 0, x0 + crop_w, src_h))
+    else:
+        crop_h = int(src_w / target_ratio)
+        y0 = (src_h - crop_h) // 2
+        img = img.crop((0, y0, src_w, y0 + crop_h))
+    return np.array(img.resize((width, top_h), Image.LANCZOS))
 
 
 def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str,
                       date: str, pitch_index: int, pitch_count: int,
                       width: int, height: int) -> bytes:
-    """A transparent `width`x`height` PNG holding only the text/charts/
-    logo -- the white bars themselves come from `composite_overlay`'s
-    ffmpeg pad step (see `compute_layout`), so this stays transparent
-    everywhere else and never obscures the video. Pitch type + velo/break
-    in the top bar; strike-zone box (this pitch's location) and a movement
-    scatter (this pitch highlighted among `session_df`'s other same-
-    session pitches) in the right bar; player/date/pitch-count in the
-    bottom margin below the shrunk video. `pitch` is one row of
-    `app.data.bullpen_video.session_pitch_video_df` (pitch_type, velo,
-    horz_break, vert_break, plate_loc_side, plate_loc_height); `session_df`
-    is that same DataFrame."""
+    """A `width`x`height` PNG holding the text/charts/logo -- transparent
+    everywhere except the top bar, which is opaquely painted with the same
+    splatter texture as the Built on the Bluff title card (see
+    `_load_topbar_bg_rgba`); the right bar's own white background still
+    comes from `composite_overlay`'s ffmpeg pad step (see `compute_layout`),
+    so this PNG stays transparent there and never obscures the video.
+    Pitch type + velo/break in the top bar; strike-zone box (this pitch's
+    location) and a movement scatter (this pitch highlighted among
+    `session_df`'s other same-session pitches) in the right bar; player/
+    date/pitch-count in the bottom margin below the shrunk video. `pitch`
+    is one row of `app.data.bullpen_video.session_pitch_video_df`
+    (pitch_type, velo, horz_break, vert_break, plate_loc_side,
+    plate_loc_height); `session_df` is that same DataFrame."""
     layout = compute_layout(width, height)
     dpi = 100
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor="none")
@@ -152,17 +184,33 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     top_frac = layout["top_h"] / height
     right_x_frac = (width - layout["right_w"]) / width
 
-    # -- LMU sun-lion mark, top-left of the top bar -------------------------
-    logo_px = int(layout["top_h"] * 0.8)
-    logo = _load_logo_rgba(logo_px)
+    # -- Top bar background: the same red/blue splatter texture behind the
+    # "Built on the Bluff" title card, not plain white (2026-09-23, Brad).
+    # Opaque, so it fully covers composite_overlay's white ffmpeg pad
+    # underneath -- only this bar changes, the right bar stays plain white
+    # (its charts need the plain contrast, unlike a logo/short text line).
+    topbar_bg = _load_topbar_bg_rgba(width, layout["top_h"])
+    fig.figimage(topbar_bg, xo=0, yo=height - layout["top_h"], zorder=0)
+
+    # A dark text outline (2026-09-23, alongside the background swap above)
+    # -- top-bar text is plain white now (Brad), which needs its own
+    # contrast against a red/blue textured background the way it never
+    # needed against plain white.
+    _outline = [patheffects.withStroke(linewidth=3, foreground="black")]
+
+    # -- LMU wordmark, top-left of the top bar ------------------------------
+    logo_h = int(layout["top_h"] * 0.8)
+    logo = _load_logo_rgba(logo_h)
+    logo_w = logo.shape[1]
     fig.figimage(logo, xo=int(width * 0.015),
                 yo=height - int(layout["top_h"] * 0.9), zorder=2)
 
     # -- Top bar text: pitch type (after the logo) + velo/break (right) ----
     text_y = 1 - top_frac / 2
-    logo_edge_frac = (int(width * 0.015) + logo_px + width * 0.02) / width
+    logo_edge_frac = (int(width * 0.015) + logo_w + width * 0.02) / width
     fig.text(logo_edge_frac, text_y, pitch_type, fontsize=int(layout["top_h"] * 0.4),
-             fontproperties=_TEKO_BOLD, color=color, ha="left", va="center")
+             fontproperties=_TEKO_BOLD, color="white", ha="left", va="center",
+             path_effects=_outline, zorder=3)
     metrics = []
     if velo is not None and pd.notna(velo):
         metrics.append(f"{velo:.1f} mph")
@@ -171,7 +219,8 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     if hb is not None and pd.notna(hb):
         metrics.append(f"HB: {hb:.1f}")
     fig.text(0.97, text_y, "   ".join(metrics), fontsize=int(layout["top_h"] * 0.22),
-             fontproperties=_TEKO_SEMIBOLD, color=color, ha="right", va="center")
+             fontproperties=_TEKO_SEMIBOLD, color="white", ha="right", va="center",
+             path_effects=_outline, zorder=3)
 
     # -- Right bar, upper: strike zone + this pitch's location -------------
     # Plain app.reports.plots._draw_zone (black/gray lines) -- the right
