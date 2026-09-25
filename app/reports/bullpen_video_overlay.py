@@ -177,15 +177,18 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     `session_df`'s other same-session pitches) in the right bar; player/
     date/pitch-count in the bottom margin below the shrunk video. `pitch`
     is one row of `app.data.bullpen_video.session_pitch_video_df`
-    (pitch_type, velo, horz_break, vert_break, plate_loc_side,
-    plate_loc_height); `session_df` is that same DataFrame."""
+    (pitch_type, velo, horz_break, ind_vert_break, plate_loc_side,
+    plate_loc_height); `session_df` is that same DataFrame. Vertical break
+    is INDUCED vert break (IVB), not raw -- pairs with HB the way pitching
+    actually reads movement (2026-09-24, Brad: "IVB needs to be used with
+    HB")."""
     layout = compute_layout(width, height)
     dpi = 100
     fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor="none")
 
     pitch_type = pitch.get("pitch_type") or "—"
     velo = pitch.get("velo")
-    vb, hb = pitch.get("vert_break"), pitch.get("horz_break")
+    ivb, hb = pitch.get("ind_vert_break"), pitch.get("horz_break")
     color = _color_for(pitch_type)
 
     top_frac = layout["top_h"] / height
@@ -221,8 +224,8 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     metrics = []
     if velo is not None and pd.notna(velo):
         metrics.append(f"{velo:.1f} mph")
-    if vb is not None and pd.notna(vb):
-        metrics.append(f"VB: {vb:.1f}")
+    if ivb is not None and pd.notna(ivb):
+        metrics.append(f"IVB: {ivb:.1f}")
     if hb is not None and pd.notna(hb):
         metrics.append(f"HB: {hb:.1f}")
     fig.text(0.97, text_y, "   ".join(metrics), fontsize=int(layout["top_h"] * 0.22),
@@ -274,12 +277,12 @@ def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str
     move_ax.axvline(0, color="#ccc", lw=0.8)
     others = session_df[session_df["play_id"] != pitch.get("play_id")]
     for pt, sub in others.groupby("pitch_type"):
-        xs, ys = sub["horz_break"].to_numpy(), sub["vert_break"].to_numpy()
+        xs, ys = sub["horz_break"].to_numpy(), sub["ind_vert_break"].to_numpy()
         _add_ellipse(move_ax, xs, ys, _color_for(pt))
         move_ax.scatter(xs, ys, s=26, color=_color_for(pt), alpha=0.6,
                         edgecolor="white", linewidth=0.3, zorder=2)
-    if hb is not None and vb is not None and pd.notna(hb) and pd.notna(vb):
-        move_ax.scatter([hb], [vb], s=100, color=color, edgecolor="white",
+    if hb is not None and ivb is not None and pd.notna(hb) and pd.notna(ivb):
+        move_ax.scatter([hb], [ivb], s=100, color=color, edgecolor="white",
                         linewidth=1.5, zorder=3)
     move_ax.set_title("Movement", fontsize=11, color="#9A0021",
                       fontproperties=_TEKO_SEMIBOLD, pad=4)

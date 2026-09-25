@@ -130,16 +130,20 @@ def session_pitch_video_df(pitcher_id: int, date) -> pd.DataFrame:
     """One row per pitch in a bullpen session for the Video tab: pitch #,
     type, velo, ball/strike (same zone + edge-buffer test as
     `app.data.bullpen.strike_pct`, applied per pitch instead of aggregated),
-    9-pocket zone location, horizontal/vertical break, plus `play_id`/
-    `has_video` so the table can flag which rows have a downloaded
+    9-pocket zone location, horizontal break + INDUCED vertical break, plus
+    `play_id`/`has_video` so the table can flag which rows have a downloaded
     Edgertronic clip to play. Queried directly from BULLPEN (not
-    `bullpen.session_pitches`, whose `_COLMAP` doesn't expose PlayID)."""
+    `bullpen.session_pitches`, whose `_COLMAP` doesn't expose PlayID).
+    `InducedVertBreak`, not raw `VertBreak` (2026-09-24, Brad: "IVB needs to
+    be used with HB") -- matches `app.data.bullpen`'s own `ind_vert_break`
+    convention; raw VertBreak includes gravity and isn't the number pitching
+    actually pairs with HB."""
     df = query_df(
         """
         SELECT PitchNo AS pitch_no, PlayID AS play_id,
                TaggedPitchType AS pitch_type, RelSpeed AS velo,
                PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height,
-               HorzBreak AS horz_break, VertBreak AS vert_break
+               HorzBreak AS horz_break, InducedVertBreak AS ind_vert_break
           FROM BULLPEN
          WHERE PitcherId = :pid AND `Date` = :d
          ORDER BY PitchNo
@@ -169,13 +173,15 @@ def pitch_row_by_play_id(play_id: str) -> dict | None:
     to share with recruiters): it only has `play_id` from the URL, so this
     is how it finds which session (pitcher + date) that play belongs to,
     to then pull the rest of that session via `session_pitch_video_df` for
-    the overlay's movement chart. None if PlayID isn't in BULLPEN at all."""
+    the overlay's movement chart. None if PlayID isn't in BULLPEN at all.
+    `InducedVertBreak` (IVB), not raw `VertBreak` -- see
+    `session_pitch_video_df`'s docstring."""
     df = query_df(
         """
         SELECT PitcherId AS pitcher_id, `Date` AS date, PitchNo AS pitch_no,
                TaggedPitchType AS pitch_type, RelSpeed AS velo,
                PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height,
-               HorzBreak AS horz_break, VertBreak AS vert_break
+               HorzBreak AS horz_break, InducedVertBreak AS ind_vert_break
           FROM BULLPEN WHERE PlayID = :p
         """,
         {"p": play_id})

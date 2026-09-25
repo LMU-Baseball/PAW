@@ -17,10 +17,10 @@ def _session_df():
     return pd.DataFrame([
         {"play_id": "p1", "pitch_type": "Fastball", "velo": 91.7,
          "plate_loc_side": 0.2, "plate_loc_height": 2.0,
-         "horz_break": 10.2, "vert_break": -24.1},
+         "horz_break": 10.2, "ind_vert_break": -24.1},
         {"play_id": "p2", "pitch_type": "Slider", "velo": 84.0,
          "plate_loc_side": -0.3, "plate_loc_height": 1.9,
-         "horz_break": -3.0, "vert_break": -30.0},
+         "horz_break": -3.0, "ind_vert_break": -30.0},
     ])
 
 
@@ -63,7 +63,7 @@ def test_build_overlay_png_handles_missing_location_and_break_gracefully():
     tracked) must not crash the zone-box scatter or the metrics text."""
     pitch = {"play_id": "p1", "pitch_type": "Fastball", "velo": None,
             "plate_loc_side": None, "plate_loc_height": None,
-            "horz_break": None, "vert_break": None}
+            "horz_break": None, "ind_vert_break": None}
     png = overlay.build_overlay_png(
         pitch, _session_df(), player_name="Test Player", date="2026-09-17",
         pitch_index=1, pitch_count=2, width=320, height=240)
