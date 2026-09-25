@@ -13,9 +13,10 @@ from app.data import bullpen_video as BV
 
 _MUTED = {"padding": "12px", "color": "#555"}
 
-_DISPLAY_COLS = ["pitch_no", "pitch_type", "velo", "result", "pocket", "horz_break", "vert_break"]
+_DISPLAY_COLS = ["pitch_no", "pitch_type", "velo", "result", "pocket", "horz_break",
+                 "ind_vert_break"]
 _HEADERS = {"pitch_no": "Pitch #", "pitch_type": "Pitch", "velo": "Velo", "result": "Zone",
-           "pocket": "Pocket", "horz_break": "H-Break", "vert_break": "V-Break"}
+           "pocket": "Pocket", "horz_break": "HB", "ind_vert_break": "IVB"}
 
 
 def render(pitcher_id, date) -> html.Div:
@@ -30,7 +31,7 @@ def render(pitcher_id, date) -> html.Div:
     display = df[_DISPLAY_COLS + ["play_id", "has_video"]].copy()
     display["velo"] = display["velo"].round(1)
     display["horz_break"] = display["horz_break"].round(1)
-    display["vert_break"] = display["vert_break"].round(1)
+    display["ind_vert_break"] = display["ind_vert_break"].round(1)
     table = dash_table.DataTable(
         id="bp-video-table",
         columns=[{"name": _HEADERS[c], "id": c} for c in _DISPLAY_COLS],
