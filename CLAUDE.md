@@ -51,6 +51,28 @@ summarizes it for an AI assistant, it doesn't replace it.
 - `memory/` (this assistant's own notes) is gitignored on purpose — never add
   it to a commit even by accident via a broad `git add`.
 
+## Data
+
+**Never insert, edit, or delete rows in the shared database directly as a
+one-off action** (creating or deleting a test player, seeding demo data,
+hand-fixing a coach's numbers, etc.) — even for testing, even if it looks
+reversible. Local dev and the Lightsail production app share the exact same
+database (see `docs/DEPLOY.md`), so a "local" write is live for every coach
+and player immediately, not a sandboxed dry run.
+
+- Coaches make their own data edits through the app's own UI — that's the
+  actual intended workflow. Don't do it for them, even when it would be
+  faster.
+- The one sanctioned exception: `data/rosters/<season>.json` +
+  `scripts/load_lmu_roster.py`, a real, git-tracked, reviewed source of
+  truth for the roster (see that script's own docstring). That's a code
+  change like any other, reviewed the normal way — not an ad hoc insert.
+- If a task needs example data to verify a UI change locally, don't invent
+  it in the shared database — ask the person you're working with, or use
+  the test suite's own isolated fixtures (most test files already build
+  their own throwaway rows against a sandboxed id, e.g. `TEST_PID` in
+  `tests/test_splash_report.py`).
+
 ## Matching the existing look and structure
 
 Coaches compare dashboards against each other, so new work should look like
