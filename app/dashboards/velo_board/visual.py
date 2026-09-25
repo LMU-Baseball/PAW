@@ -62,14 +62,17 @@ def top_gun_header() -> html.Div:
     )
     top_gun = html.Img(
         src=_TOP_GUN_SRC, alt="TOP GUN",
-        # 2026-09-25: swapped the LIONS wordmark for a TOP GUN one (Brad) --
-        # tightly cropped (no loose transparent padding baked in, unlike the
-        # old mark), so the old -48px negative margin (sized for that extra
-        # padding) now overlapped the real artwork onto the LMU arch above
-        # it instead of just closing a gap. Small negative margin instead,
-        # tuned for this image's own much shorter rendered height (its
-        # aspect ratio is far wider/shorter than the old mark's).
-        style={"display": "block", "margin": "-6px auto 0", "width": "100%",
+        # 2026-09-25: swapped the LIONS wordmark for a TOP GUN one (Brad).
+        # No negative margin (round 2 -- Brad, screenshot: "the white
+        # outline gets cut off, and much of the text is overlapping...
+        # keep the space top and bottom as it was before") -- this image
+        # is cropped tight to its own OUTLINE's edge (zero transparent
+        # buffer beyond the outline itself, unlike the old mark, which had
+        # generous transparent padding baked in), so ANY negative margin
+        # cuts straight into the visible outline/artwork instead of just
+        # closing padding. Plain top margin instead for a real, visible
+        # gap under LMU.
+        style={"display": "block", "margin": "10px auto 0", "width": "100%",
                "maxWidth": "500px", "height": "auto"},
     )
     subtitle = html.Div("VELO BOARD", className="paw-banner-title", style={
