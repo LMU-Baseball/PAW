@@ -77,7 +77,13 @@ def top_gun_header() -> html.Div:
     )
     subtitle = html.Div("VELO BOARD", className="paw-banner-title", style={
         "textAlign": "center", "color": "#ffffff", "fontFamily": MARQUEE_FONT,
-        "fontSize": "34px", "letterSpacing": "10px", "marginTop": "-14px",
+        # 2026-09-25 round 3 (Brad, screenshot: "VELO BOARD text is still
+        # covering the logo") -- same root cause as the LMU/TOP GUN gap
+        # fixed the round before: this -14px was tuned for the OLD mark's
+        # own bottom padding, but the new mark is cropped tight to its
+        # outline with none left, so the negative margin cut straight into
+        # the lion emblem's spikes. Plain positive margin instead.
+        "fontSize": "34px", "letterSpacing": "10px", "marginTop": "14px",
         "textTransform": "uppercase", "lineHeight": "1",
     })
     box = html.Div([lmu_logo, top_gun, subtitle], style={
