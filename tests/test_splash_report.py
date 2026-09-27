@@ -604,6 +604,17 @@ def test_pen_results_fig_plots_by_instance_not_date():
     assert fig.layout.xaxis.title.text == "Time Thrown"
 
 
+def test_pen_results_fig_axis_spans_only_times_thrown():
+    """2026-09-26: axis grows with the most-thrown script instead of always
+    reserving room for a 2nd throw."""
+    one = pd.DataFrame([{"script_number": 3, "pen_number": 1, "pen_date": "9/22/26", "value": 60.0}])
+    assert list(SC.pen_results_fig(one).layout.xaxis.range) == [0.7, 1.3]
+    three = pd.DataFrame([
+        {"script_number": 4, "pen_number": n, "pen_date": f"9/2{n}/26", "value": 40.0 + n}
+        for n in (1, 2, 3)])
+    assert list(SC.pen_results_fig(three).layout.xaxis.range) == [0.7, 3.3]
+
+
 def test_pen_results_fig_empty_when_no_values():
     df = pd.DataFrame([{"script_number": 1, "pen_number": 1, "pen_date": "2026-09-01", "value": None}])
     fig = SC.pen_results_fig(df)
