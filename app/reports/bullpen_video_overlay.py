@@ -35,6 +35,7 @@ import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import to_rgba
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageDraw, ImageFont
@@ -69,7 +70,6 @@ _METRIC_MAX_W = 96              # inside the 124px-wide columns, clear of the di
 
 RIGHT_FRAC = 0.22  # sidebar width as a fraction of the output frame's width
 RED = "#D0142C"    # the banner art's own MPH/IN red, rather than CRIMSON
-GRAY = "#9a9a9a"
 
 
 def _teko(weight: str) -> font_manager.FontProperties:
@@ -211,9 +211,9 @@ def _present(*vals) -> bool:
 
 def _render_sidebar(pitch: dict, session_df: pd.DataFrame, *, player_name: str, date: str,
                     pitch_index: int, pitch_count: int, w: int, h: int) -> Image.Image:
-    """LOCATION (zone grid + this pitch), MOVEMENT (the session's pitches:
-    other types gray, this pitch's type white with its red ellipse, this
-    pitch as a red target dot), then player/date/pitch count."""
+    """LOCATION (zone grid + this pitch), MOVEMENT (the session's pitches of
+    this pitch's type in white inside their red ellipse, this pitch as a red
+    target dot), then player/date/pitch count."""
     panel = _cover_top_left(Image.open(_SIDEBAR_PATH).convert("RGBA"), w, h)
 
     dpi = 100
@@ -270,20 +270,26 @@ def _render_sidebar(pitch: dict, session_df: pd.DataFrame, *, player_name: str, 
     move_ax.set_facecolor("none")
     pt_now = pitch.get("pitch_type")
     hb, ivb = pitch.get("horz_break"), pitch.get("ind_vert_break")
+    # 2026-09-27, Brad: only this pitch's own type is plotted (a fastball
+    # clip shows the session's fastballs, not every pitch type).
     d = session_df.dropna(subset=["horz_break", "ind_vert_break"])
-    others = d[d["play_id"] != pitch.get("play_id")]
-    same = others[others["pitch_type"] == pt_now]
-    diff = others[others["pitch_type"] != pt_now]
-    move_ax.scatter(diff["horz_break"], diff["ind_vert_break"], s=40 * k * k, color=GRAY,
-                    alpha=0.55, edgecolor="none", zorder=2)
-    type_rows = d[d["pitch_type"] == pt_now]
-    _add_ellipse(move_ax, type_rows["horz_break"].to_numpy(),
-                 type_rows["ind_vert_break"].to_numpy(), RED)
+    d = d[d["pitch_type"] == pt_now]
+    same = d[d["play_id"] != pitch.get("play_id")]
+    _add_ellipse(move_ax, d["horz_break"].to_numpy(), d["ind_vert_break"].to_numpy(), RED)
     for patch in move_ax.patches:
-        patch.set_alpha(0.6)
+        # Translucent fill with a solid rim, like the reference, instead of
+        # _add_ellipse's faint all-over alpha -- and 2 sigma instead of its
+        # 1, so it wraps most of the pitch type's cluster the way the
+        # reference's does rather than just its core.
+        patch.set_width(patch.get_width() * 2)
+        patch.set_height(patch.get_height() * 2)
+        patch.set_alpha(None)
+        patch.set_facecolor(to_rgba(RED, 0.45))
+        patch.set_edgecolor(to_rgba(RED, 0.95))
+        patch.set_linewidth(1.4 * k)
         patch.set_zorder(1)
-    move_ax.scatter(same["horz_break"], same["ind_vert_break"], s=32 * k * k, color="white",
-                    alpha=0.75, edgecolor="none", zorder=3)
+    move_ax.scatter(same["horz_break"], same["ind_vert_break"], s=40 * k * k, color="white",
+                    alpha=0.7, edgecolor="none", zorder=3)
     xs = list(d["horz_break"]) + ([hb] if _present(hb) else [])
     ys = list(d["ind_vert_break"]) + ([ivb] if _present(ivb) else [])
     # Fixed -20..20 / -5..25 like the reference unless the session's

@@ -133,3 +133,24 @@ def test_composite_overlay_filter_uses_the_layouts_own_scale_and_pad_values(monk
     assert f"scale={layout['video_w']}:{layout['video_h']}" in captured["filter"]
     assert (f"pad={layout['width']}:{layout['height']}:"
            f"{layout['video_x']}:{layout['video_y']}:black") in captured["filter"]
+
+
+def test_movement_chart_plots_only_this_pitchs_type(monkeypatch):
+    """2026-09-27, Brad: a fastball clip's movement chart shows only the
+    session's fastballs -- other pitch types are left off entirely."""
+    plotted = []
+    real_scatter = overlay.plt.Axes.scatter
+
+    def _spy(self, x, y, *a, **k):
+        plotted.extend(zip(list(x), list(y)))
+        return real_scatter(self, x, y, *a, **k)
+
+    monkeypatch.setattr(overlay.plt.Axes, "scatter", _spy)
+    df = pd.concat([_session_df(), pd.DataFrame([
+        {"play_id": "p3", "pitch_type": "Fastball", "velo": 92.0, "plate_loc_side": 0.0,
+         "plate_loc_height": 2.5, "horz_break": 9.0, "ind_vert_break": 16.0}])], ignore_index=True)
+    overlay.build_overlay_png(
+        df.iloc[0].to_dict(), df, player_name="Test Player", date="2026-09-17",
+        pitch_index=1, pitch_count=3, width=640, height=480)
+    assert (9.0, 16.0) in plotted          # the other fastball
+    assert (-3.0, -30.0) not in plotted    # the slider
