@@ -34,7 +34,8 @@ _COLMAP = {
 
 
 def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
-    """LMU pitchers present in BULLPEN, newest-session first.
+    """LMU pitchers present in BULLPEN, newest-session first, ONE row per
+    distinct display name.
 
     No `PitcherTeam` filter: BULLPEN is fed solely by LMU's own practice
     Trackman unit (unlike GAMES, which comes off a conference-shared SFTP),
@@ -47,7 +48,19 @@ def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
     When both `start` and `end` are given, only pitchers with a bullpen
     session in [start, end] are returned (scopes the Pitcher dropdown to the
     selected date range). No args = unscoped, unchanged behavior.
-    """
+
+    2026-09-27 (Brad: "I don't want multiple Matt Morenos to select from, I
+    just want all of his bullpens under one name") -- GROUPs by `Pitcher`
+    (the display name), not `PitcherId`: Trackman has logged roughly two
+    dozen LMU pitchers under more than one PitcherId over time (most likely
+    device re-pairings), and grouping by id gave each one its own dropdown
+    row under the identical name. `pitcher_id` is `MIN(PitcherId)` of
+    whichever ids have a matching row in this window -- just ONE
+    representative id for the dropdown's `value`; every read that follows a
+    selection re-expands it to the FULL set of that name's ids via
+    `pitcher_ids_for`, so which one got picked here doesn't matter.
+    `sessions`/`last_date` are summed/maxed across all of that name's ids,
+    so the dropdown label itself already reflects the combined count."""
     where = "PitcherId IS NOT NULL"
     params: dict = {}
     if start is not None and end is not None:
@@ -55,28 +68,64 @@ def lmu_bullpen_pitchers(start=None, end=None) -> pd.DataFrame:
         params = {"start": str(start), "end": str(end)}
     return query_df(
         f"""
-        SELECT PitcherId AS pitcher_id, MAX(Pitcher) AS pitcher,
+        SELECT MIN(PitcherId) AS pitcher_id, Pitcher AS pitcher,
                COUNT(DISTINCT Date) AS sessions, MAX(Date) AS last_date
           FROM BULLPEN
          WHERE {where}
-         GROUP BY PitcherId
+         GROUP BY Pitcher
          ORDER BY last_date DESC, pitcher
         """,
         params,
     )
 
 
-def sessions_for(pitcher_trackman_id: int) -> pd.DataFrame:
-    """A pitcher's bullpen dates (newest first) with pitch counts."""
+def pitcher_ids_for(pitcher_id: int) -> list[int]:
+    """Every BULLPEN PitcherId sharing `pitcher_id`'s exact display name --
+    the full set of ids a pitcher selection must query across (see
+    `lmu_bullpen_pitchers`'s 2026-09-27 docstring note for why more than one
+    id can share one real player). Every read below that takes a single
+    `pitcher_id` expands it through this first, so a coach never has to know
+    or care which of a player's ids they happened to click. Falls back to
+    `[pitcher_id]` alone when the id has no BULLPEN rows at all (e.g. a
+    roster placeholder id, or a bad/stale id) -- never an empty list, so a
+    caller's `WHERE PitcherId IN (...)` is never left with nothing to match
+    against and silently returns everything-filtered-out instead of an
+    honest empty result for a genuinely unknown id."""
     df = query_df(
         """
+        SELECT DISTINCT PitcherId FROM BULLPEN
+         WHERE Pitcher = (SELECT MAX(Pitcher) FROM BULLPEN WHERE PitcherId = :pid)
+        """,
+        {"pid": int(pitcher_id)},
+    )
+    ids = [int(x) for x in df["PitcherId"]] if not df.empty else []
+    return ids if ids else [int(pitcher_id)]
+
+
+def _in_clause(column: str, values: list[int], prefix: str) -> tuple[str, dict]:
+    """`f"{column} IN (:prefix0, :prefix1, ...)"` + the matching params dict
+    -- `pd.read_sql`/`query_df` has no list-bind support for a plain `text()`
+    query, so a variable-length IN clause needs one named placeholder per
+    value instead of a single `:pids` param."""
+    keys = [f"{prefix}{i}" for i in range(len(values))]
+    clause = f"{column} IN ({', '.join(':' + k for k in keys)})"
+    return clause, dict(zip(keys, values))
+
+
+def sessions_for(pitcher_trackman_id: int) -> pd.DataFrame:
+    """A pitcher's bullpen dates (newest first) with pitch counts, across
+    every BULLPEN PitcherId that shares their display name (see
+    `pitcher_ids_for`)."""
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_trackman_id), "pid")
+    df = query_df(
+        f"""
         SELECT DATE(Date) AS date, COUNT(*) AS pitches
           FROM BULLPEN
-         WHERE PitcherId = :pid
+         WHERE {clause}
          GROUP BY DATE(Date)
          ORDER BY date DESC
         """,
-        {"pid": int(pitcher_trackman_id)},
+        params,
     )
     if not df.empty:
         df["date"] = df["date"].astype(str)
@@ -84,14 +133,19 @@ def sessions_for(pitcher_trackman_id: int) -> pd.DataFrame:
 
 
 def session_pitches(pitcher_trackman_id: int, date) -> pd.DataFrame:
-    """One session's per-pitch rows, normalized to snake_case (ordered by pitch)."""
+    """One session's per-pitch rows, normalized to snake_case (ordered by
+    pitch), across every BULLPEN PitcherId that shares this pitcher's
+    display name (see `pitcher_ids_for`) -- a device re-pairing mid-season
+    could in principle put the same real session date under either id."""
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_trackman_id), "pid")
+    params["d"] = str(date)
     df = query_df(
-        """
+        f"""
         SELECT * FROM BULLPEN
-         WHERE PitcherId = :pid AND `Date` = :d
+         WHERE {clause} AND `Date` = :d
          ORDER BY PitchNo
         """,
-        {"pid": int(pitcher_trackman_id), "d": str(date)},
+        params,
     )
     if df.empty:
         return pd.DataFrame(columns=list(_COLMAP.values()))
@@ -188,16 +242,20 @@ def pitcher_name(pitcher_id) -> str | None:
 
 
 def session_options(pitcher_id, start, end) -> pd.DataFrame:
-    """Session dates (newest first) with pitch counts, within [start, end]."""
+    """Session dates (newest first) with pitch counts, within [start, end],
+    across every BULLPEN PitcherId that shares this pitcher's display name
+    (see `pitcher_ids_for`)."""
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_id), "pid")
+    params["start"], params["end"] = str(start), str(end)
     df = query_df(
-        """
+        f"""
         SELECT DATE(Date) AS date, COUNT(*) AS pitches
           FROM BULLPEN
-         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
+         WHERE {clause} AND `Date` BETWEEN :start AND :end
          GROUP BY DATE(Date)
          ORDER BY date DESC
         """,
-        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+        params,
     )
     if not df.empty:
         df["date"] = df["date"].astype(str)
@@ -205,16 +263,20 @@ def session_options(pitcher_id, start, end) -> pd.DataFrame:
 
 
 def bullpen_session_summary(pitcher_id, start, end) -> dict:
-    """Sidebar tiles: Sessions, Pitches, Strike %, Avg FB Velo, plus last_date."""
+    """Sidebar tiles: Sessions, Pitches, Strike %, Avg FB Velo, plus
+    last_date -- across every BULLPEN PitcherId that shares this pitcher's
+    display name (see `pitcher_ids_for`)."""
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_id), "pid")
+    params["start"], params["end"] = str(start), str(end)
     df = query_df(
-        """
+        f"""
         SELECT DATE(Date) AS date, TaggedPitchType AS tagged_pitch_type,
                RelSpeed AS rel_speed, PlateLocSide AS plate_loc_side,
                PlateLocHeight AS plate_loc_height
           FROM BULLPEN
-         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
+         WHERE {clause} AND `Date` BETWEEN :start AND :end
         """,
-        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+        params,
     )
     if df.empty:
         return {"sessions": 0, "pitches": 0, "strike_pct": None,
@@ -242,18 +304,20 @@ def trend_by_session(pitcher_id, start, end) -> pd.DataFrame:
     """
     cols = ["date", "tagged_pitch_type", "pitches", "velo_avg", "velo_max",
             "spin_avg", "eff_avg", "ivb_avg", "hb_avg", "loc_spread", "strike_pct"]
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_id), "pid")
+    params["start"], params["end"] = str(start), str(end)
     df = query_df(
-        """
+        f"""
         SELECT DATE(Date) AS date, TaggedPitchType AS tagged_pitch_type,
                RelSpeed AS rel_speed, SpinRate AS spin_rate,
                SpinAxis3dSpinEfficiency AS spin_eff,
                InducedVertBreak AS ind_vert_break, HorzBreak AS horz_break,
                PlateLocSide AS plate_loc_side, PlateLocHeight AS plate_loc_height
           FROM BULLPEN
-         WHERE PitcherId = :pid AND `Date` BETWEEN :start AND :end
+         WHERE {clause} AND `Date` BETWEEN :start AND :end
            AND TaggedPitchType IS NOT NULL
         """,
-        {"pid": int(pitcher_id), "start": str(start), "end": str(end)},
+        params,
     )
     if df.empty:
         return pd.DataFrame(columns=cols)

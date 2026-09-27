@@ -12,7 +12,11 @@ from app.data import bullpen as B
 
 def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
     """The PitcherId a request views: the requested id when given (any account),
-    else the viewer's own id as a default, else None (layout picks a default)."""
+    else the viewer's own id as a default, else None (layout picks a default).
+
+    A caller doesn't need to pre-expand this through `B.pitcher_ids_for` --
+    every `app.data.bullpen` read that takes a `pitcher_id` already does that
+    expansion itself (see that module's 2026-09-27 docstring notes)."""
     if requested_id not in (None, ""):
         return int(requested_id)
     return int(own_trackman_id) if own_trackman_id is not None else None
@@ -21,27 +25,15 @@ def resolve_pitcher(requested_id, *, is_coach: bool, own_trackman_id):
 def pitcher_options(*, is_coach: bool, own_trackman_id, start=None, end=None) -> list[dict]:
     """Pitcher dropdown options, scoped to [start, end] when both are given
     (no args = every LMU pitcher who's ever had a bullpen). Every account sees
-    the whole roster (team-transparent view).
-
-    2026-09-26 (Brad: "Matt Moreno is missing some bullpen sessions") -- his
-    sessions weren't missing, they were split across TWO distinct BULLPEN
-    PitcherIds (Trackman itself logged him under two ids over time, most
-    likely a device re-pairing upstream of PAW), both displaying as the exact
-    same "Moreno, Matthew" label -- a coach picking one identically-labeled
-    entry had no way to know a second one existed with the rest of his
-    sessions. Whenever `lmu_bullpen_pitchers` returns more than one PitcherId
-    for the same display name, each of that name's options gets a
-    disambiguating suffix (session count + most recent date) instead of the
-    bare name; every other (non-colliding) pitcher's label is unchanged."""
+    the whole roster (team-transparent view). ONE option per distinct display
+    name -- `B.lmu_bullpen_pitchers` already merges a player logged under more
+    than one BULLPEN PitcherId (Trackman device re-pairings) into a single
+    row; see that function's 2026-09-27 docstring for why (Brad: "I don't
+    want multiple Matt Morenos to select from, I just want all of his
+    bullpens under one name")."""
     df = B.lmu_bullpen_pitchers(start=start, end=end)
-    dupe_names = set(df["pitcher"][df["pitcher"].duplicated(keep=False)])
-    options = []
-    for r in df.itertuples():
-        label = str(r.pitcher)
-        if r.pitcher in dupe_names:
-            label = f"{label} ({r.sessions} sessions, last {r.last_date})"
-        options.append({"label": label, "value": int(r.pitcher_id)})
-    return options
+    return [{"label": str(r.pitcher), "value": int(r.pitcher_id)}
+            for r in df.itertuples()]
 
 
 def session_dropdown_options(sessions_df) -> list[dict]:
