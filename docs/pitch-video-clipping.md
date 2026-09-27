@@ -4,6 +4,54 @@ Tool: `scripts/pitch_video_clips.py`. This doc is the checklist for actually
 running it on a new game; the script's own module docstring has the
 mechanical details (file formats, function contracts).
 
+## Fast path — one anchor per camera angle (try this first)
+
+Tested 2026-09-27 on two more cards: HomeBehind for 5/15 @ USD (GameID 315)
+and Home Left `NORMAL*` files for 5/16 @ USD (GameID 319). Those cameras
+hand off between segment files **seamlessly** (each file's length matches
+the gap between file timestamps to within the 2-second precision FAT32
+timestamps have), so the whole game can be treated as one continuous
+recording. With only the first pitch anchored, spot-checked pitches from
+the 1st inning through the 9th/10th all landed within ~0.5s of prediction —
+no drift over 3-4 hours.
+
+For a new game or scrimmage (about 10 minutes of hands-on time, plus cutting):
+
+1. **Pull the CSV** — same as step 1 below (`fetch-csv`).
+2. **Find the first pitch** in whichever segment file it's in and note the
+   release time (e.g. `NORMAL00002.mp4` at `12:49.1`). Scrub past the
+   anthem/lineups/warmups — the first real pitch is usually 5-15 minutes
+   into the recording, and camera clocks are often off (the Home Left
+   camera's clock was ~26s slow AND a day ahead; the date on the files
+   means nothing).
+3. **Check before cutting** — about a minute:
+   ```bash
+   python scripts/pitch_video_clips.py check \
+       --video-dir "F:\video" --angle-prefix "NORMAL" \
+       --csv <csv> --game-id 319 \
+       --anchor-file NORMAL00002.mp4 --anchor-time 12:49.1 \
+       --out-dir <folder> --crop 1200:675:360:200
+   ```
+   It prints each file handoff as `seamless` or `GAP -- check`, and writes
+   contact sheets for ~6 in-play pitches spread through the game. Frame `0`
+   is the predicted release; the swing should show up around `+50` (0.5s)
+   in every sheet. If early sheets look right but later ones drift, a
+   handoff wasn't seamless — use the per-segment `clip` workflow below for
+   that card instead.
+4. **Cut everything**:
+   ```bash
+   python scripts/pitch_video_clips.py clip-continuous \
+       <same video/csv/game/anchor options> --out-dir "D:\PAW-clips\<game>_<angle>"
+   ```
+   ~290 pitches per angle. Clips run 3s before release to 4s after.
+   Flagged pitches are ones past a non-seamless handoff, or whose window
+   runs off the end of a file (a pitch right at a file boundary gets a
+   shortened clip).
+
+Pitches are matched by `PitchUID`, not `PitchNo` — the database renumbers
+after dropped pitches, so its PitchNo can differ from the CSV's by a few.
+A CSV pitch that isn't in `GAMES` gets no clip.
+
 ## Background — why this isn't a one-command job
 
 Tested end-to-end on the 2026-05-15 @ USD game (HomeRight angle). Two
