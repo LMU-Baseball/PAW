@@ -115,7 +115,8 @@ def register_callbacks(dash_app) -> None:
         State("splash-player", "value"), State("splash-season", "value"),
         State("splash-cycle", "value"),
         State("splash-vision", "value"), State("splash-goals", "value"),
-        State("splash-pre", "value"), State("splash-post", "value"),
+        State("splash-highday", "value"), State("splash-lowday", "value"),
+        State("splash-modday", "value"),
         State("splash-feetset", "value"), State("splash-feetmoving", "value"),
         State("splash-workday", "value"),
         State("splash-engine-strength-table", "data"),
@@ -126,7 +127,8 @@ def register_callbacks(dash_app) -> None:
         *_script_states(),
         prevent_initial_call=True,
     )
-    def _on_save(n_clicks, current_data, player_id, season, cycle, vision, goals, pre, post,
+    def _on_save(n_clicks, current_data, player_id, season, cycle, vision, goals,
+                high_day, low_day, mod_day,
                 feet_set, feet_moving, work_day, engine_strength_rows, engine_rom_rows,
                 gas_rows, pen_rows, movement_table_rows, *script_args):
         if not n_clicks or not _is_coach():
@@ -139,7 +141,8 @@ def register_callbacks(dash_app) -> None:
         recovery_url = (current_data or {}).get("plan", {}).get("recovery_video_url", "")
         plan_fields = {
             "vision_statement": vision, "training_goals": goals,
-            "pre_throw_checklist": pre, "post_throw_checklist": post,
+            "high_day_checklist": high_day, "low_day_checklist": low_day,
+            "mod_day_checklist": mod_day,
             "feet_set": "\n".join(feet_set or []),
             "feet_moving": "\n".join(feet_moving or []),
             "work_day": "\n".join(work_day or []),

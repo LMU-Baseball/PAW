@@ -42,6 +42,33 @@ def test_pitcher_options_scoped_by_date_range():
     assert GEIS in {o["value"] for o in opts_window}
 
 
+def test_pitcher_options_disambiguates_duplicate_display_names():
+    """2026-09-26 (Brad: "Matt Moreno is missing some bullpen sessions") --
+    real root cause: BULLPEN has him under two distinct PitcherIds
+    (1000239433, 1000170776), both labeled "Moreno, Matthew" -- not unique to
+    him, roughly two dozen LMU pitchers carry two BULLPEN PitcherIds each
+    (most likely a Trackman device re-pairing at some point, upstream of
+    PAW). Each of his options must carry a disambiguating suffix so a coach
+    can tell them apart, and an unrelated (non-colliding) pitcher's label
+    must be unaffected."""
+    from app.dashboards.bullpen import selectors
+    MORENO_A, MORENO_B = 1000239433, 1000170776
+    opts = selectors.pitcher_options(is_coach=True, own_trackman_id=None)
+    by_value = {o["value"]: o["label"] for o in opts}
+    assert MORENO_A in by_value and MORENO_B in by_value
+    assert by_value[MORENO_A] != by_value[MORENO_B]
+    assert by_value[MORENO_A].startswith("Moreno, Matthew (")
+    assert by_value[MORENO_B].startswith("Moreno, Matthew (")
+    # a pitcher with no name collision keeps a bare, unsuffixed label -- GEIS
+    # doesn't work as that example here: it turns out to ALSO be a duplicate
+    # (this isn't a one-off Moreno glitch -- roughly two dozen LMU pitchers
+    # carry two BULLPEN PitcherIds each, most likely from a Trackman device
+    # re-pairing at some point upstream of PAW). GEREN has exactly one.
+    GEREN = 1000612959
+    non_dupe = next(o for o in opts if o["value"] == GEREN)
+    assert non_dupe["label"] == "Geren, Lucas"
+
+
 def test_pitcher_options_player_lists_all():
     """Team-transparent: a player's options are the FULL roster -- identical to
     a coach's -- and date-scope the same way (a view filter for every account)."""

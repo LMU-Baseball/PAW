@@ -68,26 +68,41 @@ def test_cycle_bounds_matches_cycle_for_date():
 
 def test_plan_roundtrip_and_defaults():
     empty = SR.read_plan(TEST_PID, SEASON, CYCLE)
-    assert empty == {c: "" for c in (
-        "vision_statement", "training_goals", "pre_throw_checklist",
-        "post_throw_checklist", "feet_set", "feet_moving", "work_day",
-        "recovery_video_url")}
+    assert empty == {
+        "vision_statement": "", "training_goals": "",
+        # unlike every other plan field, a blank High/Low/Mod Day checklist
+        # falls back to the standard team program instead of "" -- see
+        # WORKDAY_CHECKLIST_DEFAULTS.
+        "high_day_checklist": SR.WORKDAY_CHECKLIST_DEFAULTS["high_day_checklist"],
+        "low_day_checklist": SR.WORKDAY_CHECKLIST_DEFAULTS["low_day_checklist"],
+        "mod_day_checklist": SR.WORKDAY_CHECKLIST_DEFAULTS["mod_day_checklist"],
+        "feet_set": "", "feet_moving": "", "work_day": "", "recovery_video_url": "",
+    }
 
     SR.upsert_plan(TEST_PID, SEASON, CYCLE, {
         "vision_statement": "Get after it", "training_goals": "Goal one\nGoal two",
-        "pre_throw_checklist": "Breathe", "post_throw_checklist": "Reset",
+        "high_day_checklist": "Breathe", "low_day_checklist": "Reset",
+        "mod_day_checklist": "Recover",
         "feet_set": "Partner Decels (Green x8)", "feet_moving": "", "work_day": "",
         "recovery_video_url": "",
     }, updated_by=1)
     saved = SR.read_plan(TEST_PID, SEASON, CYCLE)
     assert saved["vision_statement"] == "Get after it"
     assert saved["training_goals"] == "Goal one\nGoal two"
+    assert saved["high_day_checklist"] == "Breathe"
     assert saved["feet_set"] == "Partner Decels (Green x8)"
 
     # a second upsert overwrites in place, not a second row
     SR.upsert_plan(TEST_PID, SEASON, CYCLE, {**saved, "vision_statement": "Revised"},
                    updated_by=1)
     assert SR.read_plan(TEST_PID, SEASON, CYCLE)["vision_statement"] == "Revised"
+
+    # clearing a workday checklist back to blank reverts to the standard
+    # program rather than staying permanently blank (a coach un-customizing
+    # it, not a way to genuinely empty the box).
+    SR.upsert_plan(TEST_PID, SEASON, CYCLE, {**saved, "high_day_checklist": ""}, updated_by=1)
+    assert SR.read_plan(TEST_PID, SEASON, CYCLE)["high_day_checklist"] == \
+        SR.WORKDAY_CHECKLIST_DEFAULTS["high_day_checklist"]
 
 
 def test_plan_recovery_url_untouched_when_omitted_by_a_partial_update():
@@ -445,8 +460,9 @@ def test_read_all_movement_batches_all_six_scripts():
 def test_save_all_persists_every_section_in_one_call():
     SR.save_all(
         TEST_PID, SEASON, CYCLE,
-        plan_fields={"vision_statement": "Focus", "training_goals": "", "pre_throw_checklist": "",
-                    "post_throw_checklist": "", "feet_set": "", "feet_moving": "",
+        plan_fields={"vision_statement": "Focus", "training_goals": "",
+                    "high_day_checklist": "", "low_day_checklist": "", "mod_day_checklist": "",
+                    "feet_set": "", "feet_moving": "",
                     "work_day": "", "recovery_video_url": ""},
         engine_rows=[{"metric_key": "ER", "base_value": 30, "now_value": 35}],
         gas_rows=[{"need": "Mass", "exercise": "Squat", "sets_reps": "3x5", "notes": ""}],
@@ -673,7 +689,7 @@ def test_add_video_link_rejects_blank_url_and_bad_category(_clean_videos):
 
 def test_plan_and_script_rows_isolation_by_player_season_cycle():
     """Task 4: coaches reported every pitcher showing the exact same
-    Pre-Throw/Post-Throw checklist text on Built on the Bluff and asked
+    High/Low/Mod Day checklist text on Built on the Bluff and asked
     whether that's a save-isolation bug (stale caching / a save that isn't
     actually player-specific) or intentional shared content. Proves the
     persistence layer's composite key (player_id, season_label, cycle)
@@ -691,8 +707,9 @@ def test_plan_and_script_rows_isolation_by_player_season_cycle():
     def plan_fields_for(i):
         return {
             "vision_statement": "", "training_goals": "",
-            "pre_throw_checklist": f"pre-throw-{i}",
-            "post_throw_checklist": f"post-throw-{i}",
+            "high_day_checklist": f"high-day-{i}",
+            "low_day_checklist": f"low-day-{i}",
+            "mod_day_checklist": f"mod-day-{i}",
             "feet_set": "", "feet_moving": "", "work_day": "",
             "recovery_video_url": "",
         }
@@ -705,12 +722,14 @@ def test_plan_and_script_rows_isolation_by_player_season_cycle():
 
     for i, (pid, season, cycle) in enumerate(keys):
         plan = SR.read_plan(pid, season, cycle)
-        assert plan["pre_throw_checklist"] == f"pre-throw-{i}"
-        assert plan["post_throw_checklist"] == f"post-throw-{i}"
+        assert plan["high_day_checklist"] == f"high-day-{i}"
+        assert plan["low_day_checklist"] == f"low-day-{i}"
+        assert plan["mod_day_checklist"] == f"mod-day-{i}"
         rows = SR.read_all_script_rows(pid, season, cycle)[1]
         assert rows.iloc[0]["pitch_type"] == f"pitch-{i}"
         # not any OTHER key's values -- the actual isolation assertion
         for j, _ in enumerate(keys):
             if j != i:
-                assert plan["pre_throw_checklist"] != f"pre-throw-{j}"
-                assert plan["post_throw_checklist"] != f"post-throw-{j}"
+                assert plan["high_day_checklist"] != f"high-day-{j}"
+                assert plan["low_day_checklist"] != f"low-day-{j}"
+                assert plan["mod_day_checklist"] != f"mod-day-{j}"

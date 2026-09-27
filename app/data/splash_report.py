@@ -239,6 +239,9 @@ _PLANS_DDL = f"""
         training_goals       TEXT,
         pre_throw_checklist  TEXT,
         post_throw_checklist TEXT,
+        high_day_checklist   TEXT,
+        low_day_checklist    TEXT,
+        mod_day_checklist    TEXT,
         feet_set        TEXT,
         feet_moving      TEXT,
         work_day        TEXT,
@@ -247,9 +250,39 @@ _PLANS_DDL = f"""
         updated_at      DATETIME,
         PRIMARY KEY (player_id, season_label, cycle)
     )"""
-_PLAN_COLS = ("vision_statement", "training_goals", "pre_throw_checklist",
-              "post_throw_checklist", "feet_set", "feet_moving", "work_day",
-              "recovery_video_url")
+# pre_throw_checklist/post_throw_checklist stay in the DDL/table (a dropped
+# column would permanently lose whatever coaches had already typed there)
+# but are no longer in _PLAN_COLS -- 2026-09-26 (Brad, diagram + "Workday
+# List" reference doc): replaced by a High/Low/Mod Day breakdown instead of
+# a Pre/Post-throw one. See WORKDAY_CHECKLIST_DEFAULTS below for the
+# standard content a blank plan now shows instead of an empty box.
+_PLAN_COLS = ("vision_statement", "training_goals", "high_day_checklist",
+              "low_day_checklist", "mod_day_checklist", "feet_set", "feet_moving",
+              "work_day", "recovery_video_url")
+
+# Standard workday program (Brad's "Workday List" reference doc, 2026-09-26),
+# shown for any plan that hasn't had this field customized yet -- same role as
+# PHOTO_PLACEHOLDER elsewhere in this app: a real, reviewed default, not a
+# per-player DB seed (see CLAUDE.md's "Data" section on why a one-off DB
+# insert isn't the right way to roll this out to every existing player row).
+WORKDAY_CHECKLIST_DEFAULTS: dict[str, str] = {
+    "high_day_checklist": "\n".join([
+        "Dynamic Warm Up", "Soft Tissue Prep", "Armored Heat Pre",
+        "Crossover Activation", "Feet Set Plyo's", "Catch Play (Desired Distance)",
+        "Feet Moving Plyo's", "Pen, Game, Live AB's", "Sprint Work/Bike",
+        "Crossover Recovery Eccentric", "Gas Station",
+    ]),
+    "low_day_checklist": "\n".join([
+        "Dynamic Warm Up", "Recovery Protocol (Video)", "Armored Heat Pre",
+        "Crossover Activation", "Optional 15-20 Throws (Football/Baseball)",
+    ]),
+    "mod_day_checklist": "\n".join([
+        "Dynamic Warm Up", "Soft Tissue Prep", "Armored Heat Pre",
+        "Crossover Activation", "Feet Set Plyo's", "Catch Play (90-110 ft)",
+        "Command or Feet Moving Plyo's", "Workday Drill Package",
+        "Armored Heat Scap", "Gas Station",
+    ]),
+}
 
 _ENGINE_DDL = f"""
     CREATE TABLE IF NOT EXISTS {ENGINE_TABLE} (
@@ -467,6 +500,12 @@ def ensure_tables(engine=None) -> None:
         _ensure_column(conn, VIDEOS_TABLE, "drill_category", "drill_category VARCHAR(32)")
         # And for splash_videos.link_url (2026-09-16 round 2 -- see add_video_link).
         _ensure_column(conn, VIDEOS_TABLE, "link_url", "link_url VARCHAR(1024)")
+        # High/Low/Mod Day checklist columns (2026-09-26) -- _PLANS_DDL above
+        # already has them for a brand-new table, this backfills a deployment
+        # (Lightsail) whose splash_plans predates them.
+        _ensure_column(conn, PLANS_TABLE, "high_day_checklist", "high_day_checklist TEXT")
+        _ensure_column(conn, PLANS_TABLE, "low_day_checklist", "low_day_checklist TEXT")
+        _ensure_column(conn, PLANS_TABLE, "mod_day_checklist", "mod_day_checklist TEXT")
         # Result column (2026-09-23, Brad: coach-typed live from the phone
         # during a bullpen -- ball/strike for Execution, a raw velo number
         # for Velo; Pitch Design has no per-row result at all) -- see
@@ -591,16 +630,24 @@ def _multi_row_upsert(table: str, key_cols: tuple, value_cols: tuple, rows: list
 # ============================ PLAN (text sections) ==========================
 
 def read_plan(player_id, season_label, cycle) -> dict:
-    """The eight text fields for (player, season, cycle); "" for any column
-    with no saved row yet (never None -- so a Textarea always gets a str)."""
+    """The nine text fields for (player, season, cycle); "" for any column
+    with no saved row yet (never None -- so a Textarea always gets a str),
+    except the three WORKDAY_CHECKLIST_DEFAULTS fields, which fall back to
+    the standard team program instead of a blank box until a coach types
+    something else in for that player."""
     ensure_tables()
     df = query_df(
         f"SELECT * FROM {PLANS_TABLE} WHERE {_key_where()}",
         {"player_id": int(player_id), "season_label": season_label, "cycle": cycle})
     if df.empty:
-        return {c: "" for c in _PLAN_COLS}
-    r = df.iloc[0]
-    return {c: ("" if pd.isna(r[c]) else str(r[c])) for c in _PLAN_COLS}
+        row = {c: "" for c in _PLAN_COLS}
+    else:
+        r = df.iloc[0]
+        row = {c: ("" if pd.isna(r[c]) else str(r[c])) for c in _PLAN_COLS}
+    for c, default in WORKDAY_CHECKLIST_DEFAULTS.items():
+        if not row[c]:
+            row[c] = default
+    return row
 
 
 def upsert_plan(player_id, season_label, cycle, fields: dict, updated_by=None) -> None:
