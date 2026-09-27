@@ -583,42 +583,29 @@ def test_add_video_rejects_unknown_drill_category(_clean_videos):
                     drill_category="Not A Real Category")
 
 
-def test_pen_results_fig_plots_by_date_not_pen_number():
-    """2026-09-16: chart x-axis switched from the sequential pen_number to
-    the real pen_date -- confirm the trace actually carries dates, and that
-    a row with no pen_date is excluded rather than crashing the chart."""
+def test_pen_results_fig_plots_by_instance_not_date():
+    """2026-09-26: x-axis switched from pen_date to the Nth time that script
+    was thrown, so every script's 1st attempt lines up at x=1. Order follows
+    the (free-typed, mixed-format) date, not the row order; an undated row
+    sorts last instead of being dropped."""
     df = pd.DataFrame([
-        {"script_number": 1, "pen_number": 1, "pen_date": "2026-09-01", "value": 60.0},
-        {"script_number": 1, "pen_number": 2, "pen_date": "2026-09-15", "value": 70.0},
-        {"script_number": 2, "pen_number": 1, "pen_date": None, "value": 40.0},  # dropped
-    ])
-    fig = SC.pen_results_fig(df)
-    assert len(fig.data) == 1  # only script 1 has a usable (dated) point
-    trace = fig.data[0]
-    assert list(trace.x) == [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-15")]
-    assert list(trace.y) == [60.0, 70.0]
-    assert fig.layout.xaxis.title.text == "Date"
-
-
-def test_pen_results_fig_parses_free_typed_us_date_format():
-    """Real bug, reported live 2026-09-16: pen_date is a free-typed text
-    cell, not a date picker -- a coach typing "9/16/26" (M/D/YY) instead of
-    ISO left the chart's x-axis autoscaled to Jan 2000-2001 with the real
-    2026 points invisible off to the right, looking like "no data" even
-    though the table below clearly had rows. Confirms both formats land on
-    the exact same parsed date."""
-    df = pd.DataFrame([
-        {"script_number": 1, "pen_number": 1, "pen_date": "9/16/26", "value": 50.0},
-        {"script_number": 2, "pen_number": 1, "pen_date": "2026-09-16", "value": 55.0},
+        {"script_number": 1, "pen_number": 1, "pen_date": "9/20/26", "value": 70.0},
+        {"script_number": 1, "pen_number": 2, "pen_date": "2026-09-01", "value": 60.0},
+        {"script_number": 1, "pen_number": 3, "pen_date": None, "value": 80.0},
+        {"script_number": 2, "pen_number": 1, "pen_date": "2026-09-26", "value": 40.0},
     ])
     fig = SC.pen_results_fig(df)
     assert len(fig.data) == 2
-    for trace in fig.data:
-        assert list(trace.x) == [pd.Timestamp("2026-09-16")]
+    s1 = next(t for t in fig.data if t.name == "Script 1")
+    assert list(s1.x) == [1, 2, 3]
+    assert list(s1.y) == [60.0, 70.0, 80.0]
+    s2 = next(t for t in fig.data if t.name == "Script 2")
+    assert list(s2.x) == [1] and list(s2.y) == [40.0]
+    assert fig.layout.xaxis.title.text == "Time Thrown"
 
 
-def test_pen_results_fig_empty_when_no_dated_rows():
-    df = pd.DataFrame([{"script_number": 1, "pen_number": 1, "pen_date": None, "value": 60.0}])
+def test_pen_results_fig_empty_when_no_values():
+    df = pd.DataFrame([{"script_number": 1, "pen_number": 1, "pen_date": "2026-09-01", "value": None}])
     fig = SC.pen_results_fig(df)
     assert fig.layout.annotations[0].text == "No pen results for this cycle yet."
 
@@ -656,6 +643,25 @@ def test_scripts_movement_fig_selected_filters_to_those_scripts():
     fig = SC.scripts_movement_fig(movement_by_script, selected=[1])
     assert len(fig.data) == 1
     assert fig.data[0].name == "Fastball"
+
+
+def test_scripts_movement_fig_adds_ellipse_only_with_multiple_scripts():
+    """2026-09-26: faint pitch-type ellipse (built from the per-session
+    rows) appears once more than one script is on the chart; dots stay
+    per-script averages."""
+    movement_by_script = {
+        "1": [{"pitch_type": "Fastball", "hb": 8.0, "ivb": 15.0},
+              {"pitch_type": "Fastball", "hb": 10.0, "ivb": 18.0}],
+        "2": [{"pitch_type": "Fastball", "hb": 11.0, "ivb": 16.0},
+              {"pitch_type": "Fastball", "hb": 9.0, "ivb": 14.0}],
+    }
+    one = SC.scripts_movement_fig(movement_by_script, selected=[1])
+    assert not any(t.fill == "toself" for t in one.data)
+    both = SC.scripts_movement_fig(movement_by_script)
+    ellipses = [t for t in both.data if t.fill == "toself"]
+    assert len(ellipses) == 1 and ellipses[0].showlegend is False
+    fb = next(t for t in both.data if t.name == "Fastball")
+    assert list(fb.x) == [9.0, 10.0] and list(fb.text) == ["S1", "S2"]
 
 
 def test_scripts_movement_fig_empty_when_no_rows():
