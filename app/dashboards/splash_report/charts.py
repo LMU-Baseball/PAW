@@ -74,7 +74,7 @@ def pen_results_fig(df: pd.DataFrame) -> go.Figure:
         # pushed further down gives each its own row instead of stacking.
         title="Script Pen Results", height=380, margin=dict(l=40, r=20, t=50, b=90),
         xaxis=dict(title="Time Thrown", tickmode="linear", tick0=1, dtick=1,
-                   range=[0.7, max(int(d["instance"].max()), 2) + 0.3]),
+                   range=[0.7, int(d["instance"].max()) + 0.3]),
         yaxis=dict(title="Result (%)"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
