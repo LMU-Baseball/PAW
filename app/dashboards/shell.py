@@ -125,6 +125,39 @@ _INDEX_STRING = """<!DOCTYPE html>
     }
     .paw-splash-grid > * { min-width: 0 !important; }
   }
+  /* DataTable dropdown-presentation cells (Competitive Cauldron's Team/
+     Captain columns, Built on the Bluff's script-type/pitch-design
+     dropdowns): react-select's own bundled CSS sets `.Select { overflow:
+     hidden }` unconditionally -- meant to clip the CLOSED control's own
+     display value, but it also clips `.Select-menu-outer`, the open
+     dropdown's popup, since that popup is an absolutely-positioned CHILD of
+     this same `.Select` div. A dropdown cell near the bottom of a table (or
+     the last row) then shows its "x"/caret as open but renders NONE of its
+     option list -- 2026-09-27, Brad screenshot: "I cannot see the entire
+     dropdown at the bottom." Scoped to `.is-open` only, so a CLOSED
+     dropdown's own overflow-clipped display value is untouched. */
+  .Select.is-open { overflow: visible !important; }
+  /* Same clipping bug, a layer further out -- and a real CSS limitation, not
+     just a missing override. dash_table's internal `.dash-spreadsheet-
+     container` sets `overflow-x: auto` (for wide tables' own horizontal
+     scrollbar) and, since 2026-09-27, ALSO tries setting `overflow-y:
+     visible !important` itself the moment a dropdown opens (Dash's own
+     attempted fix for this exact bug) -- but per the CSS Overflow spec, "if
+     one of overflow-x/overflow-y is visible and the other is not, the
+     visible one computes to auto instead" (https://developer.mozilla.org/
+     en-US/docs/Web/CSS/overflow). Any overflow-x:auto element is therefore
+     UNABLE to ever have a real visible overflow-y, no matter how strongly
+     it's forced -- confirmed live: even `element.style.setProperty
+     ('overflow-y','visible','important')` from devtools still computed to
+     "auto" while overflow-x stayed "auto". The only way out is for THIS
+     element to give up its own horizontal scrollbar (both axes visible, so
+     nothing here clips a dropdown popup in either direction); a wide grid
+     just overflows into the page's own horizontal scroll instead of a
+     nested one -- see grid.py's matching style_table (overflowX now
+     "visible" too, not "auto") for the outer `.dash-table-container` layer
+     of the same fix. 2026-09-27, Brad screenshot: "I cannot see the entire
+     dropdown at the bottom." */
+  .dash-spreadsheet-container { overflow: visible !important; }
 </style>
 </head>
 <body>

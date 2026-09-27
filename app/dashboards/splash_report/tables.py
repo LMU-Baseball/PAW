@@ -11,15 +11,26 @@ _HEADER_STYLE = {"backgroundColor": "#9A0021", "color": "white",
 _CELL_STYLE = {"textAlign": "center", "padding": "6px 8px",
               "fontFamily": "Teko, sans-serif", "fontSize": "15px"}
 _TABLE_STYLE = {"overflowX": "auto", "width": "fit-content", "maxWidth": "100%"}
+# For any table with a `presentation: "dropdown"` column (gas_station_table's
+# Need/Exercise, script_pitch_table's Execution-script Result): both axes
+# visible, NOT overflowX:"auto" -- see cauldron/grid.py's `style_table` for
+# the full explanation (a CSS Overflow spec quirk means an element with
+# overflow-x:auto can never have a truly non-clipping overflow-y, so an open
+# dropdown cell near the bottom of the table gets its popup clipped). These
+# tables are narrow (4-5 columns, `width: fit-content`) and were never
+# actually relying on horizontal scrolling in practice, so dropping it here
+# costs nothing.
+_DROPDOWN_TABLE_STYLE = {"overflowX": "visible", "overflowY": "visible",
+                         "width": "fit-content", "maxWidth": "100%"}
 
 
 def _table(id_, columns, data, *, editable: bool, row_deletable: bool = False,
           dropdown=None, extra_style=None, cell_style=None, header_style=None,
-          cell_conditional=None) -> dash_table.DataTable:
+          cell_conditional=None, table_style=None) -> dash_table.DataTable:
     return dash_table.DataTable(
         id=id_, columns=columns, data=data, editable=editable,
         row_deletable=row_deletable, dropdown=dropdown or {},
-        style_table=_TABLE_STYLE, style_as_list_view=True,
+        style_table=table_style or _TABLE_STYLE, style_as_list_view=True,
         style_header=header_style or _HEADER_STYLE, style_cell=cell_style or _CELL_STYLE,
         style_cell_conditional=cell_conditional or [],
         style_data={"backgroundColor": "rgba(255,255,255,0.85)"},
@@ -171,7 +182,7 @@ def gas_station_table(df: pd.DataFrame, gas_videos: list[dict], *,
     ]
     return _table("splash-gas-table", columns, data, editable=editable,
                  row_deletable=editable, dropdown=dropdown,
-                 cell_conditional=cell_conditional)
+                 cell_conditional=cell_conditional, table_style=_DROPDOWN_TABLE_STYLE)
 
 
 _RESULT_DROPDOWN = {"result": {"options": [{"label": v, "value": v} for v in ("Ball", "Strike")]}}
@@ -210,7 +221,8 @@ def script_pitch_table(df: pd.DataFrame, script_number: int, *, script_type: str
         columns.append({"name": "Result", "id": "result", "editable": editable,
                         "type": "numeric"})
     return _table(f"splash-script-rows-{script_number}", columns,
-                 df.to_dict("records"), editable=editable, dropdown=dropdown)
+                 df.to_dict("records"), editable=editable, dropdown=dropdown,
+                 table_style=_DROPDOWN_TABLE_STYLE if dropdown else None)
 
 
 def _elastic_pad(rows: list[dict], *, fields: tuple[str, ...], blank: dict,
