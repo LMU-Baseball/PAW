@@ -77,9 +77,11 @@ def serve_layout() -> html.Div:
     controls = []
     scoring = read_scoring()
     if is_coach:
+        # KPI label/add/delete editor lives INSIDE coach_grid's grid_wrap now
+        # (2026-09-27, Brad) -- shown/hidden by the same Edit/Save buttons as
+        # the daily grid, not a separate always-visible toggle of its own.
         controls.append(html.Div(grid.coach_grid(play_date, week, season, scoring=scoring),
                                  id="cauldron-coach-section"))
-        controls.append(grid.kpi_label_editor(scoring))
     controls.append(grid.season_week_filters(season, week))
     children.append(html.Div(controls,
                              style={"borderBottom": f"2px solid {shell.CRIMSON}",

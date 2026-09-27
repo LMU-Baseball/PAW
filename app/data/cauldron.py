@@ -18,6 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import math
+import re
 
 import pandas as pd
 from sqlalchemy import text
@@ -188,6 +189,56 @@ def update_scoring_label(metric: str, label: str) -> None:
         conn.execute(text(
             f"UPDATE {SCORING_TABLE} SET label = :label WHERE metric = :metric"),
             {"label": _clean((label or "").strip() or None), "metric": metric})
+
+
+def _slugify_metric(label: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug or "metric"
+
+
+def add_scoring_metric(label: str) -> str:
+    """Add a new coach-defined KPI column. 2026-09-27 (Brad: "is it possible
+    to have the edit KPI section also have an ability to add or delete
+    columns if they want more or less"). Always `is_manual` -- there's no
+    Trackman-derived formula for an arbitrary new column, so a coach types
+    its points directly (same as Mod Command/Recovery Command/AH-Rehab
+    already do); `points_met`/`points_missed` default to the same 20/-10
+    every other manual metric seeds with. Appended to the end
+    (sort_order = current max + 1). The metric key is a slug of `label`,
+    de-duplicated with a numeric suffix on collision -- returned so a
+    caller can use it immediately (e.g. to build the new grid column)."""
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("Enter a name for the new KPI first.")
+    ensure_tables()
+    existing = read_scoring()
+    existing_keys = set(existing["metric"]) if not existing.empty else set()
+    base = _slugify_metric(label)
+    metric = base
+    n = 2
+    while metric in existing_keys:
+        metric = f"{base}_{n}"
+        n += 1
+    next_order = int(existing["sort_order"].max()) + 1 if not existing.empty else 1
+    with get_engine().begin() as conn:
+        conn.execute(text(f"""
+            INSERT INTO {SCORING_TABLE}
+                (metric, label, threshold, direction, points_met, points_missed,
+                 is_manual, min_sample, sort_order)
+            VALUES (:metric, :label, NULL, NULL, 20, -10, 1, NULL, :sort_order)
+        """), {"metric": metric, "label": label, "sort_order": next_order})
+    return metric
+
+
+def delete_scoring_metric(metric: str) -> None:
+    """Remove a coach-defined KPI column. Historical cauldron_daily points
+    already recorded under this metric key are left in place, untouched --
+    they simply stop being shown anywhere, same as `save_grid`'s existing
+    handling of a metric id the current scoring config no longer recognizes."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"DELETE FROM {SCORING_TABLE} WHERE metric = :metric"),
+                     {"metric": metric})
 
 
 # ================================== DAILY ====================================
