@@ -103,10 +103,10 @@ def test_render_from_data_edit_mode_has_editable_inputs():
     assert "splash-pen-table" in s
 
 
-def _minimal_render_data(pre_throw: str, post_throw: str) -> dict:
+def _minimal_render_data(high_day: str, low_day: str) -> dict:
     """A hand-built dict matching the shape `layout.load_data` returns (see
     that function's own `return {...}`), with EVERY collection field left
-    empty/blank except distinct Pre-Throw/Post-Throw checklist text --
+    empty/blank except distinct High Day/Low Day checklist text --
     deliberately built WITHOUT calling `layout.load_data` itself (which
     hits the DB) so `render_from_data` can be exercised fully DB-free.
     `engine` still needs one blank row per `SR.ENGINE_METRIC_KEYS` (matching
@@ -126,7 +126,8 @@ def _minimal_render_data(pre_throw: str, post_throw: str) -> dict:
         "kpis": {},
         "plan": {
             "vision_statement": "", "training_goals": "",
-            "pre_throw_checklist": pre_throw, "post_throw_checklist": post_throw,
+            "high_day_checklist": high_day, "low_day_checklist": low_day,
+            "mod_day_checklist": "",
             "feet_set": "", "feet_moving": "", "work_day": "", "recovery_video_url": "",
         },
         "cycle": "Fall",
@@ -139,24 +140,24 @@ def test_render_from_data_shows_only_selected_keys_own_checklist_text():
     """Task 4, brief Step 4: distinguishes intentional identical DB content
     (a coach genuinely typing the same generic routine for every pitcher)
     from the render layer showing stale/wrong content for whichever key is
-    actually selected. Two synthetic `data` dicts with distinct Pre-Throw/
-    Post-Throw text (never touching the DB, see `_minimal_render_data`)
+    actually selected. Two synthetic `data` dicts with distinct High Day/
+    Low Day text (never touching the DB, see `_minimal_render_data`)
     must each render ONLY their own text -- never the other key's, which
     is what a caching/staleness bug in `render_from_data` would look like."""
     from app.dashboards.splash_report import layout
 
-    data_a = _minimal_render_data("KEY-A-PRE-THROW", "KEY-A-POST-THROW")
-    data_b = _minimal_render_data("KEY-B-PRE-THROW", "KEY-B-POST-THROW")
+    data_a = _minimal_render_data("KEY-A-HIGH-DAY", "KEY-A-LOW-DAY")
+    data_b = _minimal_render_data("KEY-B-HIGH-DAY", "KEY-B-LOW-DAY")
 
     out_a = str(layout.render_from_data(data_a, editable=False, is_coach=False))
     out_b = str(layout.render_from_data(data_b, editable=False, is_coach=False))
 
-    assert "KEY-A-PRE-THROW" in out_a and "KEY-A-POST-THROW" in out_a
-    assert "KEY-B-PRE-THROW" in out_b and "KEY-B-POST-THROW" in out_b
+    assert "KEY-A-HIGH-DAY" in out_a and "KEY-A-LOW-DAY" in out_a
+    assert "KEY-B-HIGH-DAY" in out_b and "KEY-B-LOW-DAY" in out_b
     # the actual isolation assertion: neither key's render tree contains
     # the OTHER key's text
-    assert "KEY-B-PRE-THROW" not in out_a and "KEY-B-POST-THROW" not in out_a
-    assert "KEY-A-PRE-THROW" not in out_b and "KEY-A-POST-THROW" not in out_b
+    assert "KEY-B-HIGH-DAY" not in out_a and "KEY-B-LOW-DAY" not in out_a
+    assert "KEY-A-HIGH-DAY" not in out_b and "KEY-A-LOW-DAY" not in out_b
 
 
 def test_drill_catalog_controls_are_inline_and_coach_only():
@@ -882,10 +883,10 @@ def test_on_save_calls_save_all_with_that_calls_own_player_season_cycle(server, 
         callbacks.register_callbacks(dash_app)
         on_save = _raw_callback(dash_app, input_id="splash-save")
 
-        # the rest of _on_save's States (vision/goals/pre/post/feet*/engine
-        # tables/gas/pen/movement + 30 per-script states) -- their content
-        # doesn't matter for this test, only player_id/season/cycle do.
-        other_states = ["V", "G", "Pre", "Post", [], [], [], [], [], [], [], []]
+        # the rest of _on_save's States (vision/goals/high/low/mod day/feet*/
+        # engine tables/gas/pen/movement + 30 per-script states) -- their
+        # content doesn't matter for this test, only player_id/season/cycle do.
+        other_states = ["V", "G", "High", "Low", "Mod", [], [], [], [], [], [], [], []]
         script_states = []
         for _ in range(SR.N_SCRIPTS):
             script_states += [None, None, None, [], None]
@@ -1043,27 +1044,27 @@ def test_splash_video_route_requires_login_and_streams_bytes(server):
 
 
 def test_graffiti_header_has_solid_color_fallback_behind_backdrop_image():
-    """2026-09-20 (coaches: Pre-Throw/Post-Throw headers sometimes render as
-    just floating white text, no visible box) -- `_graffiti_header`'s whole
-    background used to be `url(...)` with no color fallback, so a slow/
-    failed image load left the always-white label with nothing behind it.
-    Pins the fix: the `background` shorthand must also carry a solid color
-    matching each backdrop image's dominant tone, so the box is never blank."""
+    """2026-09-20 (coaches: card headers sometimes render as just floating
+    white text, no visible box) -- `_graffiti_header`'s whole background
+    used to be `url(...)` with no color fallback, so a slow/failed image
+    load left the always-white label with nothing behind it. Pins the fix:
+    the `background` shorthand must also carry a solid color matching each
+    backdrop image's dominant tone, so the box is never blank."""
     from app.dashboards.splash_report import layout
 
-    pre = layout._graffiti_header("Pre-Throw Checklist", 0)
-    post = layout._graffiti_header("Post-Throw Checklist", 1)
+    high = layout._graffiti_header("High Day", 0)
+    low = layout._graffiti_header("Low Day", 1)
 
-    pre_bg = pre.style["background"]
-    assert layout.BLUE in pre_bg
-    assert layout._HEADER_IMAGES[0] in pre_bg
+    high_bg = high.style["background"]
+    assert layout.BLUE in high_bg
+    assert layout._HEADER_IMAGES[0] in high_bg
 
-    post_bg = post.style["background"]
-    assert layout.CRIMSON in post_bg
-    assert layout._HEADER_IMAGES[1] in post_bg
+    low_bg = low.style["background"]
+    assert layout.CRIMSON in low_bg
+    assert layout._HEADER_IMAGES[1] in low_bg
 
-    assert pre.children.style["color"] == "#fff"
-    assert post.children.style["color"] == "#fff"
+    assert high.children.style["color"] == "#fff"
+    assert low.children.style["color"] == "#fff"
 
 
 def test_pitching_hub_has_splash_report_card(server):

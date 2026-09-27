@@ -69,16 +69,18 @@ _CARD_VARIANTS = [
 
 # Explicit per-card assignment (not a hash) so adjacent cards in the actual
 # page layout never land on the same variant by coincidence -- checked by
-# hand against checklists_grid's 3-row x 2-col arrangement and the sidebar's
-# stacked cards. Matched by prefix since a couple of titles carry an
-# interpolated suffix (e.g. "Bullpen Scripts · 6 Scripts"). Anything not
+# hand against the sidebar's High Day/Low Day/Mod Day + Feet Set/Feet
+# Moving/Work Day/Recovery Protocols stack and the center column's 2-col
+# Vision Statement/Player Training Goals row. Matched by prefix since a
+# couple of titles carry an interpolated suffix (e.g. "Bullpen Scripts ·
+# 6 Scripts"). Anything not
 # listed falls back to a stable hash of its title, so a future/unlisted
 # card still gets *a* variant rather than crashing or defaulting to plain.
 _CARD_VARIANT_BY_PREFIX = [
-    ("Pre-Throw Checklist", 0), ("Post-Throw Checklist", 1),
-    ("Feet Set", 2), ("Feet Moving", 3),
-    ("Work Day", 4), ("Recovery Protocols", 0),
-    ("Player Training Goals", 1), ("Vision Statement", 3),
+    ("High Day", 0), ("Low Day", 1), ("Mod Day", 2),
+    ("Feet Set", 3), ("Feet Moving", 4),
+    ("Work Day", 0), ("Recovery Protocols", 1),
+    ("Vision Statement", 3), ("Player Training Goals", 0),
     ("Building the Engine", 2), ("Bullpen Scripts", 4),
     ("The Gas Station", 0),
 ]
@@ -208,7 +210,7 @@ def _bullet_view(text: str, empty_msg: str = "Nothing entered yet.",
 
 
 def _text_section(title: str, text: str, *, editable: bool, input_id: str) -> html.Div:
-    """Pre-Throw/Post-Throw checklist + Vision Statement + Player Training
+    """High/Low/Mod Day checklist + Vision Statement + Player Training
     Goals: free-text bulleted notes (one bullet per line)."""
     child = dcc.Textarea(id=input_id, value=text, style=_TEXTAREA_STYLE) \
         if editable else _bullet_view(text)
@@ -450,46 +452,41 @@ def _recovery_section(recovery_videos: list[dict], all_videos: list[dict], *,
     return _card("Recovery Protocols", html.Div(children))
 
 
-def checklists_grid(plan: dict, *, editable: bool, is_coach: bool, drill_options: list[str],
-                    videos: dict, manage_videos_open: bool = False) -> html.Div:
-    sections = [
-        _text_section("Pre-Throw Checklist", plan["pre_throw_checklist"],
-                     editable=editable, input_id="splash-pre"),
-        _text_section("Post-Throw Checklist", plan["post_throw_checklist"],
-                     editable=editable, input_id="splash-post"),
-        _drill_section("Feet Set", plan["feet_set"], editable=editable, is_coach=is_coach,
-                       dd_id="splash-feetset", section_key="feetset",
-                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
-        _drill_section("Feet Moving", plan["feet_moving"], editable=editable, is_coach=is_coach,
-                       dd_id="splash-feetmoving", section_key="feetmoving",
-                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
-        _drill_section("Work Day", plan["work_day"], editable=editable, is_coach=is_coach,
-                       dd_id="splash-workday", section_key="workday",
-                       drill_options=drill_options, drill_videos=videos.get("Drills", [])),
-        _recovery_section(videos.get("Recovery", []),
-                          videos.get("Recovery", []) + videos.get("Gas Station", []),
-                          is_coach=is_coach, manage_videos_open=manage_videos_open),
-    ]
-    return html.Div(sections, className="paw-chart-grid",
-                    style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"})
-
-
 # 2026-09-14 layout test (Brad: "test this out and I will report back if we
-# want to keep it or revert") -- splits `checklists_grid`'s 6 boxes into the
-# 2 "throwing" checklists (stay in the center column, above Bullpen Scripts)
-# and the other 4 (Feet Set/Feet Moving/Work Day/Recovery Protocols, moved
-# to the left column where the skeleton visuals used to sit). See
-# `[[splash-report-right-wall-layout-test]]` memory for the before-state
-# screenshot if this gets reverted.
-def throwing_checklists_row(plan: dict, *, editable: bool) -> html.Div:
+# want to keep it or revert") -- Feet Set/Feet Moving/Work Day/Recovery
+# Protocols moved to the left sidebar (see `training_boxes_column`), where the
+# skeleton visuals used to sit. See `[[splash-report-right-wall-layout-test]]`
+# memory for the before-state screenshot if this gets reverted.
+#
+# 2026-09-26 (Brad, diagram + screenshot): swapped what lives in the center
+# column vs. the sidebar. Center used to hold the Pre-Throw/Post-Throw
+# checklists (now High/Low/Mod Day, moved to the sidebar -- see
+# `workday_checklists_column`); it now holds Vision Statement + Player
+# Training Goals instead (moved up from the sidebar).
+def profile_text_row(plan: dict, *, editable: bool) -> html.Div:
     sections = [
-        _text_section("Pre-Throw Checklist", plan["pre_throw_checklist"],
-                     editable=editable, input_id="splash-pre"),
-        _text_section("Post-Throw Checklist", plan["post_throw_checklist"],
-                     editable=editable, input_id="splash-post"),
+        _text_section("Vision Statement", plan["vision_statement"],
+                     editable=editable, input_id="splash-vision"),
+        _text_section("Player Training Goals", plan["training_goals"],
+                     editable=editable, input_id="splash-goals"),
     ]
     return html.Div(sections, className="paw-chart-grid",
                     style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"})
+
+
+def workday_checklists_column(plan: dict, *, editable: bool) -> html.Div:
+    """High Day / Low Day / Mod Day, stacked single-column -- lands in the
+    narrow (290px) left sidebar, same spot Vision Statement/Player Training
+    Goals used to occupy (see `sidebar`)."""
+    sections = [
+        _text_section("High Day", plan["high_day_checklist"],
+                     editable=editable, input_id="splash-highday"),
+        _text_section("Low Day", plan["low_day_checklist"],
+                     editable=editable, input_id="splash-lowday"),
+        _text_section("Mod Day", plan["mod_day_checklist"],
+                     editable=editable, input_id="splash-modday"),
+    ]
+    return html.Div(sections)
 
 
 def training_boxes_column(plan: dict, *, editable: bool, is_coach: bool,
@@ -497,8 +494,8 @@ def training_boxes_column(plan: dict, *, editable: bool, is_coach: bool,
                           manage_videos_open: bool = False) -> html.Div:
     """Feet Set / Feet Moving / Work Day / Recovery Protocols, stacked
     single-column -- this lands in the narrow (290px) left sidebar, too
-    tight for the 2-column grid `checklists_grid` used in the wider center
-    column."""
+    tight for a 2-column grid like `profile_text_row` uses in the wider
+    center column."""
     sections = [
         _drill_section("Feet Set", plan["feet_set"], editable=editable, is_coach=is_coach,
                        dd_id="splash-feetset", section_key="feetset",
@@ -997,23 +994,15 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
     ], style=_CARD)
-    goals = _text_section("Player Training Goals", plan["training_goals"],
-                          editable=editable, input_id="splash-goals")
-    # Vision Statement moved down here from the center column (2026-09-10
-    # planning session: "moving things more to the left sidebar") -- it's a
-    # short reflective text block like Training Goals, and the sidebar was
-    # otherwise running much shorter than center/right, leaving the left
-    # rail looking empty next to two much taller columns.
-    # "Season Focus" dropped from the title (2026-09-10 planning session:
-    # remove that field entirely -- it changes every cycle) -- 2026-09-13:
-    # Brad flagged the leftover text in the heading itself.
-    vision = _text_section("Vision Statement", plan["vision_statement"],
-                           editable=editable, input_id="splash-vision")
+    # High Day/Low Day/Mod Day moved here from the center column (2026-09-26,
+    # Brad diagram + screenshot) -- swapped places with Vision Statement/
+    # Player Training Goals, which moved up to the center column instead
+    # (see `profile_text_row`, used in `render_from_data`'s center_block).
+    workdays = workday_checklists_column(plan, editable=editable)
     # `extra` (2026-09-14 layout test): Feet Set/Feet Moving/Work Day/
     # Recovery Protocols, moved here from the center column -- see
     # `render_from_data` and `[[splash-report-right-wall-layout-test]]`.
-    # Vision Statement above Player Training Goals (2026-09-14, Brad).
-    return html.Div([profile_card, vision, goals, *(extra or [])])
+    return html.Div([profile_card, workdays, *(extra or [])])
 
 
 def filters(player_id, season_label, cycle) -> html.Div:
@@ -1094,13 +1083,17 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
     # screenshot and a plain description of this arrangement. Design-only:
     # every block below is the same component as before, just regrouped
     # into 3 columns instead of 4 grid areas.
-    #   left ("profile"):  photo/stats + goals + vision (unchanged), PLUS
+    #   left ("profile"):  photo/stats, PLUS High Day/Low Day/Mod Day (moved
+    #                       here from the center column 2026-09-26, swapping
+    #                       places with Vision Statement/Player Training
+    #                       Goals -- see `workday_checklists_column`), PLUS
     #                       Feet Set/Feet Moving/Work Day/Recovery Protocols
     #                       (moved here from the center column, where the
     #                       skeleton visuals used to sit).
-    #   center ("center"): Pre-Throw/Post-Throw Checklist, then Bullpen
-    #                       Scripts underneath (moved here from the right
-    #                       column).
+    #   center ("center"): Vision Statement + Player Training Goals (moved
+    #                       here from the sidebar 2026-09-26 -- see
+    #                       `profile_text_row`), then Bullpen Scripts
+    #                       underneath (moved here from the right column).
     #   right ("right"):   skeleton visuals on top as a compact 3-col grid
     #                       (`body_visual.render(..., compact=True)`), then
     #                       Building the Engine (unchanged internally) and
@@ -1113,7 +1106,7 @@ def render_from_data(data: dict, *, editable: bool, is_coach: bool = False) -> h
                    manage_videos_open=data.get("manage_videos_open", False))]),
         style={"gridArea": "profile"})
     center_block = html.Div([
-        throwing_checklists_row(plan, editable=editable),
+        profile_text_row(plan, editable=editable),
         scripts_section(data["pen"], data.get("deleted_pen", []), data["scripts"],
                        data["script_rows"], data.get("movement", {}),
                        editable=editable, is_coach=is_coach),
