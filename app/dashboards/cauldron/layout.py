@@ -75,9 +75,11 @@ def serve_layout() -> html.Div:
     # coach-only. The Week filter below them is for EVERYONE -- it only chooses
     # which week the shared scoreboard totals.
     controls = []
+    scoring = read_scoring()
     if is_coach:
-        controls.append(html.Div(grid.coach_grid(play_date, week, season),
+        controls.append(html.Div(grid.coach_grid(play_date, week, season, scoring=scoring),
                                  id="cauldron-coach-section"))
+        controls.append(grid.kpi_label_editor(scoring))
     controls.append(grid.season_week_filters(season, week))
     children.append(html.Div(controls,
                              style={"borderBottom": f"2px solid {shell.CRIMSON}",
@@ -87,6 +89,6 @@ def serve_layout() -> html.Div:
         id="cauldron-scoreboard",
         children=visual.scoreboard_view(
             read_daily(start=w_start, end=w_end), read_teams(cycle),
-            read_scoring(), roster_names),
+            scoring, roster_names),
     ))
     return html.Div(children)

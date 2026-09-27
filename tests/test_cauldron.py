@@ -77,6 +77,34 @@ def test_read_scoring_seeded_content_after_fresh_ensure_tables():
     assert orders == list(range(1, len(sc) + 1))
 
 
+def test_update_scoring_label_renames_only_the_label():
+    """2026-09-26 (Brad: "keep them as is for now, but give them the ability
+    to change what each column is measuring") -- update_scoring_label must
+    touch ONLY label, leaving threshold/direction/points_met/points_missed/
+    is_manual untouched. Restores the real seeded label afterward --
+    SCORING_TABLE is shared global config, not sandboxed by a fake id like
+    the player-keyed tables other tests in this file clean up."""
+    C.ensure_tables()
+    C.seed_default_scoring()
+    original = C.read_scoring().set_index("metric").loc["strike_pct"].to_dict()
+    try:
+        C.update_scoring_label("strike_pct", "Strike Rate")
+        after = C.read_scoring().set_index("metric").loc["strike_pct"]
+        assert after["label"] == "Strike Rate"
+        assert after["direction"] == original["direction"]
+        assert float(after["threshold"]) == float(original["threshold"])
+        assert int(after["points_met"]) == int(original["points_met"])
+        assert int(after["points_missed"]) == int(original["points_missed"])
+        assert bool(after["is_manual"]) == bool(original["is_manual"])
+
+        # a blank label clears to the metric key fallback (_metric_columns'
+        # own "row['label'] or row['metric']"), not a permanently blank cell
+        C.update_scoring_label("strike_pct", "")
+        assert pd.isna(C.read_scoring().set_index("metric").loc["strike_pct", "label"])
+    finally:
+        C.update_scoring_label("strike_pct", original["label"])
+
+
 def test_read_daily_and_read_teams_lazily_ensure_tables(monkeypatch):
     """read_daily/read_teams must never bare-SELECT against a table that
     might not exist yet on a fresh DB -- each calls ensure_tables() first."""

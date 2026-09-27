@@ -27,7 +27,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from dash import Input, Output, State, no_update
+from dash import ALL, Input, Output, State, no_update
 from flask_login import current_user
 
 from app.data import cauldron, pitching_caps, seasons, velo_board
@@ -158,3 +158,40 @@ def register_callbacks(dash_app) -> None:
         # time the date/week changes.
         scoreboard = _scoreboard(week_start, season)
         return no_update, scoreboard, "Saved.", False, _HIDDEN  # re-lock + hide
+
+    @dash_app.callback(
+        Output("cauldron-kpi-panel", "style"),
+        Input("cauldron-kpi-toggle", "n_clicks"),
+        State("cauldron-kpi-panel", "style"),
+        prevent_initial_call=True,
+    )
+    def _on_kpi_toggle(n_clicks, style):
+        if not n_clicks or not _is_coach():
+            return no_update
+        hidden = (style or {}).get("display") == "none"
+        return {"display": "block", "padding": "0 16px 12px"} if hidden \
+            else {"display": "none", "padding": "0 16px 12px"}
+
+    @dash_app.callback(
+        Output("cauldron-kpi-label-status", "children"),
+        Output("cauldron-grid", "columns"),
+        Output("cauldron-scoreboard", "children", allow_duplicate=True),
+        Input("cauldron-kpi-save", "n_clicks"),
+        State({"type": "cauldron-kpi-label-input", "index": ALL}, "value"),
+        State({"type": "cauldron-kpi-label-input", "index": ALL}, "id"),
+        State("cauldron-week", "date"),
+        State("cauldron-season", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_kpi_save(n_clicks, values, ids, week_start, season):
+        """Renames column headers only (`cauldron.update_scoring_label`) --
+        threshold/direction/points/is_manual/min_sample are untouched (see
+        that function's docstring). Refreshes the grid's own column headers
+        AND the scoreboard, since both render a label straight from
+        `cauldron.read_scoring()`."""
+        if not n_clicks or not _is_coach():
+            return no_update, no_update, no_update
+        for id_, value in zip(ids, values):
+            cauldron.update_scoring_label(id_["index"], value or "")
+        scoring = cauldron.read_scoring()
+        return "Labels saved.", grid.grid_columns(scoring), _scoreboard(week_start, season)

@@ -173,6 +173,23 @@ def read_scoring() -> pd.DataFrame:
     return query_df(f"SELECT * FROM {SCORING_TABLE} ORDER BY sort_order")
 
 
+def update_scoring_label(metric: str, label: str) -> None:
+    """Rename one KPI column's display label -- the ONLY scoring field this
+    touches. 2026-09-26 (Brad): "keep them as is for now, but give them the
+    ability to change what each column is measuring" -- threshold/direction/
+    points_met/points_missed/is_manual/min_sample stay exactly as configured;
+    only what the column header says changes. A blank label clears to NULL,
+    so `_metric_columns`'s `row["label"] or row["metric"]` falls back to the
+    metric key, same as an unlabeled seed row already does. No `updated_by`/
+    `updated_at` param -- SCORING_TABLE has neither column (it's tuned config,
+    not per-day entered data like TEAMS_TABLE/DAILY_TABLE)."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        conn.execute(text(
+            f"UPDATE {SCORING_TABLE} SET label = :label WHERE metric = :metric"),
+            {"label": _clean((label or "").strip() or None), "metric": metric})
+
+
 # ================================== DAILY ====================================
 
 def upsert_daily(rows: list[dict], updated_by=None) -> None:

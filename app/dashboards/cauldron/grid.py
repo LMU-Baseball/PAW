@@ -8,9 +8,13 @@ pitcher (`pitching_caps.lmu_pitchers(season)`), mirroring
     along in the row dict, hidden from the rendered columns -- same trick as
     velo_board's `pitcher_id`).
   - `team` is editable via a per-cell dropdown (`presentation: "dropdown"`,
-    Team 1..4 options) rather than a plain text cell, so a coach can't
+    Team 1..5 options) rather than a plain text cell, so a coach can't
     typo a team name that then silently fails to group in the scoreboard.
-    Pre-filled from `cauldron.read_teams(cycle_id)`.
+    Pre-filled from `cauldron.read_teams(cycle_id)`. `_TEAM_OPTIONS` is 5
+    teams as of 2026-09-26 (Brad); it's a plain list a coach reads off, not
+    a fixed enum enforced anywhere else -- `visual.scoreboard_view` groups
+    by whatever `team` values actually show up in `cauldron_teams`, so
+    lengthening/shortening this list is the only place team count lives.
   - One column per `cauldron.read_scoring()` metric, ordered by `sort_order`,
     labeled with the metric's `label`. AUTO metrics are pre-filled with
     today's stored `cauldron_daily` points when one exists, else scored live
@@ -66,7 +70,7 @@ from app.data import pitching_caps
 from app.data.seasons import available_seasons, season_bounds
 from app.dashboards import shell
 
-_TEAM_OPTIONS = ["Team 1", "Team 2", "Team 3", "Team 4"]
+_TEAM_OPTIONS = ["Team 1", "Team 2", "Team 3", "Team 4", "Team 5"]
 
 _LABEL_STYLE = {"color": shell.CRIMSON, "fontWeight": "bold", "fontSize": "13px",
                 "textTransform": "uppercase", "letterSpacing": "1px",
@@ -87,6 +91,59 @@ def _metric_columns(scoring: pd.DataFrame) -> list[dict]:
          "editable": True, "type": "numeric"}
         for _, row in scoring.iterrows()
     ]
+
+
+def _base_columns() -> list[dict]:
+    return [
+        {"name": "Player", "id": "player", "editable": False},
+        {"name": "Team", "id": "team", "editable": True, "presentation": "dropdown"},
+        {"name": "Captain", "id": "captain", "editable": True, "presentation": "dropdown"},
+    ]
+
+
+def grid_columns(scoring: pd.DataFrame) -> list[dict]:
+    """Full `cauldron-grid` column spec: the 3 fixed columns + one per
+    scoring metric, labeled from `scoring['label']`. Shared by `coach_grid`
+    (initial render) and `callbacks._on_kpi_save` (which re-reads this after
+    a coach renames a column, to refresh the grid's headers)."""
+    return _base_columns() + _metric_columns(scoring)
+
+
+def kpi_label_editor(scoring: pd.DataFrame) -> html.Div:
+    """Coach-only panel to rename what each KPI column's header says it's
+    measuring -- text label only. 2026-09-26 (Brad: "keep them as is for
+    now, but give them the ability to change what each column is
+    measuring") -- threshold/direction/points/is_manual/min_sample are left
+    alone; `cauldron.update_scoring_label` only ever touches `label`. Starts
+    collapsed (`cauldron-kpi-panel`, hidden) behind an `cauldron-kpi-toggle`
+    button, same idiom as Built on the Bluff's "Manage Video Library" panel."""
+    rows = [
+        html.Div([
+            html.Span(row["metric"], style={"fontSize": "11px", "color": "#888",
+                                            "width": "140px", "display": "inline-block"}),
+            dcc.Input(id={"type": "cauldron-kpi-label-input", "index": row["metric"]},
+                     type="text", value=row["label"] or row["metric"],
+                     style={"width": "180px", "padding": "4px 6px", "borderRadius": "6px",
+                            "border": "1px solid #ccc", "fontFamily": "Teko, sans-serif"}),
+        ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "6px"})
+        for _, row in scoring.iterrows()
+    ]
+    return html.Div([
+        html.Button("Edit KPI Labels", id="cauldron-kpi-toggle", n_clicks=0,
+                   style={"border": f"2px solid {shell.CRIMSON}", "background": "#fff",
+                          "color": shell.CRIMSON, "borderRadius": "14px", "padding": "4px 14px",
+                          "cursor": "pointer", "fontFamily": "Teko, sans-serif",
+                          "fontSize": "13px", "margin": "8px 16px"}),
+        html.Div([
+            *rows,
+            html.Button("Save Labels", id="cauldron-kpi-save", n_clicks=0,
+                       style={"border": "none", "background": shell.CRIMSON, "color": "#fff",
+                              "borderRadius": "14px", "padding": "5px 16px", "cursor": "pointer",
+                              "fontFamily": "Teko, sans-serif", "marginTop": "4px"}),
+            html.Div(id="cauldron-kpi-label-status",
+                    style={"fontSize": "12px", "color": shell.CRIMSON, "marginTop": "4px"}),
+        ], id="cauldron-kpi-panel", style={"display": "none", "padding": "0 16px 12px"}),
+    ])
 
 
 def _auto_points(metrics: dict, metric, scoring_row) -> int | None:
@@ -168,7 +225,7 @@ def season_week_filters(season_label, week_start) -> html.Div:
               "alignItems": "flex-end", "flexWrap": "wrap", "padding": "8px 16px"})
 
 
-def coach_grid(play_date, week_start, season) -> html.Div:
+def coach_grid(play_date, week_start, season, *, scoring: pd.DataFrame | None = None) -> html.Div:
     """The coach-facing editable grid section. Layout order:
 
       1. Edit / Save buttons + status line, at the TOP (`cauldron-edit` /
@@ -182,20 +239,20 @@ def coach_grid(play_date, week_start, season) -> html.Div:
     since choosing a week is a view action rather than a write.
 
     The competition cycle is derived internally (`{season}-c1`) for team reads/
-    writes -- teams persist across weeks, so it is no longer a visible control."""
+    writes -- teams persist across weeks, so it is no longer a visible control.
+
+    `scoring=` lets a caller that already read it (e.g. `layout.serve_layout`,
+    which also needs it for `kpi_label_editor`) pass it straight through
+    instead of paying a second RDS round trip; omitted, this reads it itself."""
     cycle_id = f"{season}-c1"
-    scoring = cauldron.read_scoring()
+    scoring = cauldron.read_scoring() if scoring is None else scoring
     roster = pitching_caps.lmu_pitchers(season)
     teams = cauldron.read_teams(cycle_id)
     daily = cauldron.read_daily(play_date)
 
     data = _grid_rows(roster, scoring, teams, daily, play_date)
 
-    columns = [
-        {"name": "Player", "id": "player", "editable": False},
-        {"name": "Team", "id": "team", "editable": True, "presentation": "dropdown"},
-        {"name": "Captain", "id": "captain", "editable": True, "presentation": "dropdown"},
-    ] + _metric_columns(scoring)
+    columns = grid_columns(scoring)
 
     dropdown = {
         "team": {"options": [{"label": t, "value": t} for t in _TEAM_OPTIONS]},

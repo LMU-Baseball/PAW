@@ -44,6 +44,7 @@ def test_serve_layout_renders_grid_for_coach(server):
     assert "Please log in" not in s
     assert "cauldron-grid" in s
     assert "cauldron-save" in s
+    assert "cauldron-kpi-toggle" in s
     assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
@@ -64,6 +65,7 @@ def test_serve_layout_hides_grid_for_player(server):
     assert "Please log in" not in s
     assert "cauldron-grid" not in s
     assert "cauldron-save" not in s
+    assert "cauldron-kpi-toggle" not in s
     assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
@@ -144,6 +146,93 @@ def test_save_is_noop_for_non_coach(server, monkeypatch):
 
     assert all(v is no_update for v in save_out)   # all 5 outputs no_update
     assert save_calls == []
+
+
+def test_kpi_save_is_noop_for_non_coach(server, monkeypatch):
+    """Same double-gate as Save: the layout omits the KPI panel for a player
+    (belt), but the callback re-checks `is_coach` (suspenders)."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    label_calls = []
+    monkeypatch.setattr(cauldron, "update_scoring_label",
+                        lambda *a, **k: label_calls.append((a, k)))
+
+    with server.app_context():
+        player = User(email="cldkpc@lmu.edu", name="Player", role="player", trackman_id=-997)
+        player.set_password("x")
+        db.session.add(player)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpi/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_kpi_save = _raw_callback(dash_app, input_id="cauldron-kpi-save")
+
+        with server.test_request_context("/dash/cauldron/"):
+            login_user(player)
+            out = on_kpi_save(1, ["New Label"], [{"type": "cauldron-kpi-label-input",
+                                                   "index": "strike_pct"}],
+                              "2026-03-02", "2025/2026")
+
+    from dash import no_update
+    assert all(v is no_update for v in out)
+    assert label_calls == []
+
+
+def test_on_kpi_save_updates_label_and_refreshes_grid_columns(server):
+    """A coach renaming a KPI column persists ONLY the label
+    (`cauldron.update_scoring_label` -- see its own docstring for why
+    threshold/direction/points/is_manual/min_sample are untouched) and the
+    callback's own returned `cauldron-grid` columns must reflect it
+    immediately, without a page reload. Restores the real seeded label
+    afterward -- SCORING_TABLE is shared global config, not sandboxed by a
+    fake id like the player-keyed tables other tests clean up."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    cauldron.ensure_tables()
+    cauldron.seed_default_scoring()
+    original_label = cauldron.read_scoring().set_index("metric").loc["strike_pct", "label"]
+
+    with server.app_context():
+        coach = User(email="cldkpsv@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpisave/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_kpi_save = _raw_callback(dash_app, input_id="cauldron-kpi-save")
+
+        try:
+            with server.test_request_context("/dash/cauldron/"):
+                login_user(coach)
+                status, columns, _scoreboard_out = on_kpi_save(
+                    1, ["Strike Rate"],
+                    [{"type": "cauldron-kpi-label-input", "index": "strike_pct"}],
+                    "2026-03-02", "2025/2026")
+        finally:
+            cauldron.update_scoring_label("strike_pct", original_label)
+
+    assert status == "Labels saved."
+    by_id = {c["id"]: c["name"] for c in columns}
+    assert by_id["strike_pct"] == "Strike Rate"
+    saved = cauldron.read_scoring().set_index("metric").loc["strike_pct"]
+    assert saved["direction"] == "gte" and float(saved["threshold"]) == 55.0
 
 
 def test_pitching_hub_has_cauldron_card(server):
