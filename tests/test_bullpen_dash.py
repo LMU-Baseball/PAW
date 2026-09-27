@@ -42,31 +42,19 @@ def test_pitcher_options_scoped_by_date_range():
     assert GEIS in {o["value"] for o in opts_window}
 
 
-def test_pitcher_options_disambiguates_duplicate_display_names():
-    """2026-09-26 (Brad: "Matt Moreno is missing some bullpen sessions") --
-    real root cause: BULLPEN has him under two distinct PitcherIds
-    (1000239433, 1000170776), both labeled "Moreno, Matthew" -- not unique to
-    him, roughly two dozen LMU pitchers carry two BULLPEN PitcherIds each
-    (most likely a Trackman device re-pairing at some point, upstream of
-    PAW). Each of his options must carry a disambiguating suffix so a coach
-    can tell them apart, and an unrelated (non-colliding) pitcher's label
-    must be unaffected."""
+def test_pitcher_options_merges_same_name_into_one_row():
+    """2026-09-27 (Brad: "I don't want multiple Matt Morenos to select from,
+    I just want all of his bullpens under one name... fix it for him and
+    all the other pitchers, theres a couple that are split up too") -- real
+    root cause: BULLPEN has him under two distinct PitcherIds (device
+    re-pairing at some point, upstream of PAW), not unique to him either
+    (roughly two dozen LMU pitchers carry two BULLPEN PitcherIds each). See
+    `app.data.bullpen.lmu_bullpen_pitchers`/`pitcher_ids_for` for the actual
+    merge; this just confirms the dropdown itself shows one row."""
     from app.dashboards.bullpen import selectors
-    MORENO_A, MORENO_B = 1000239433, 1000170776
     opts = selectors.pitcher_options(is_coach=True, own_trackman_id=None)
-    by_value = {o["value"]: o["label"] for o in opts}
-    assert MORENO_A in by_value and MORENO_B in by_value
-    assert by_value[MORENO_A] != by_value[MORENO_B]
-    assert by_value[MORENO_A].startswith("Moreno, Matthew (")
-    assert by_value[MORENO_B].startswith("Moreno, Matthew (")
-    # a pitcher with no name collision keeps a bare, unsuffixed label -- GEIS
-    # doesn't work as that example here: it turns out to ALSO be a duplicate
-    # (this isn't a one-off Moreno glitch -- roughly two dozen LMU pitchers
-    # carry two BULLPEN PitcherIds each, most likely from a Trackman device
-    # re-pairing at some point upstream of PAW). GEREN has exactly one.
-    GEREN = 1000612959
-    non_dupe = next(o for o in opts if o["value"] == GEREN)
-    assert non_dupe["label"] == "Geren, Lucas"
+    moreno_rows = [o for o in opts if o["label"] == "Moreno, Matthew"]
+    assert len(moreno_rows) == 1
 
 
 def test_pitcher_options_player_lists_all():
@@ -350,14 +338,25 @@ def test_layout_scopes_first_paint_pitchers_to_season_default_range(server):
     start_d, end_d = store.data["start"], store.data["end"]
     pitcher_dd = out.children[2].children[1].children[0].children[0].children[1]
     assert pitcher_dd.id == "bp-pitcher-dd"
+    scoped_opts = selectors.pitcher_options(
+        is_coach=True, own_trackman_id=None, start=start_d, end=end_d)
     rendered_values = {o["value"] for o in pitcher_dd.options}
-    expected = {o["value"] for o in selectors.pitcher_options(
-        is_coach=True, own_trackman_id=None, start=start_d, end=end_d)}
+    expected = {o["value"] for o in scoped_opts}
     assert rendered_values == expected
     # sanity: prove this is actually scoped, not coincidentally equal to the
-    # unscoped list (otherwise this test wouldn't distinguish the two).
-    unscoped = {o["value"] for o in selectors.pitcher_options(is_coach=True, own_trackman_id=None)}
-    assert expected <= unscoped
+    # unscoped list (otherwise this test wouldn't distinguish the two). By
+    # NAME, not by raw PitcherId: a merged-name player (see
+    # `lmu_bullpen_pitchers`'s 2026-09-27 docstring) can have a DIFFERENT
+    # representative PitcherId in a date-scoped query than in the unscoped
+    # one -- MIN(PitcherId) is taken only over whichever of that name's ids
+    # actually has rows in-window, which need not be the same id as the
+    # unscoped MIN over ALL of that name's rows. The player-identity
+    # invariant that's actually supposed to hold is by name, not by which of
+    # their several ids got picked as the representative this time.
+    unscoped_names = {o["label"] for o in
+                      selectors.pitcher_options(is_coach=True, own_trackman_id=None)}
+    scoped_names = {o["label"] for o in scoped_opts}
+    assert scoped_names <= unscoped_names
 
 
 def test_layout_initial_paint_player_role_gets_full_roster(server):

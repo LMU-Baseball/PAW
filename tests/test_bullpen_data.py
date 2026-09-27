@@ -25,6 +25,45 @@ def test_lmu_bullpen_pitchers_scoped_within_window_matches_geis():
     assert GEIS in scoped
 
 
+# Real BULLPEN PitcherIds Trackman has logged the same player under (device
+# re-pairing at some point, upstream of PAW) -- Jake Geis and Matt Moreno are
+# two of roughly two dozen LMU pitchers with this split.
+GEIS_OTHER_ID = 1000174934
+MORENO_A, MORENO_B = 1000239433, 1000170776
+
+
+def test_lmu_bullpen_pitchers_groups_duplicate_ids_into_one_row_per_name():
+    """2026-09-27 (Brad: "I don't want multiple Matt Morenos to select from,
+    I just want all of his bullpens under one name")."""
+    p = B.lmu_bullpen_pitchers()
+    morenos = p[p["pitcher"] == "Moreno, Matthew"]
+    assert len(morenos) == 1
+    geises = p[p["pitcher"] == "Geis, Jake"]
+    assert len(geises) == 1
+    # the combined session count for the merged row is the two ids' sum
+    # (32 under GEIS + 13 under GEIS_OTHER_ID).
+    assert int(geises.iloc[0]["sessions"]) == 45
+
+
+def test_pitcher_ids_for_expands_to_every_id_sharing_a_name():
+    for start_id in (MORENO_A, MORENO_B):
+        assert set(B.pitcher_ids_for(start_id)) == {MORENO_A, MORENO_B}
+    for start_id in (GEIS, GEIS_OTHER_ID):
+        assert set(B.pitcher_ids_for(start_id)) == {GEIS, GEIS_OTHER_ID}
+    # an id with no BULLPEN rows at all (e.g. a roster placeholder) falls
+    # back to just itself, never an empty list.
+    assert B.pitcher_ids_for(-999999) == [-999999]
+
+
+def test_sessions_for_combines_every_id_sharing_a_name():
+    """The actual bug Brad reported: selecting a pitcher must load ALL of
+    their sessions, not just whichever one PitcherId got clicked."""
+    dates_a = set(B.sessions_for(MORENO_A)["date"])
+    dates_b = set(B.sessions_for(MORENO_B)["date"])
+    assert dates_a == dates_b  # both ids resolve to the identical combined set
+    assert len(dates_a) == 12  # 5 sessions under MORENO_A + 7 under MORENO_B
+
+
 def test_sessions_and_pitches_for_geis():
     s = B.sessions_for(GEIS)
     assert not s.empty and {"date", "pitches"} <= set(s.columns)

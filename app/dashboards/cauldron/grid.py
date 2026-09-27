@@ -270,7 +270,22 @@ def coach_grid(play_date, week_start, season, *, scoring: pd.DataFrame | None = 
         data=data,
         editable=False,
         dropdown=dropdown,
-        style_table={"overflowX": "auto"},
+        # Both axes visible (2026-09-27, Brad screenshot: a Team/Captain
+        # dropdown opened on the LAST row got clipped, cutting off most of
+        # the option list) -- NOT overflowX:"auto" + overflowY:"visible".
+        # That looks like the fix but isn't: per the CSS Overflow spec, "if
+        # one of overflow-x/overflow-y is visible and the other is not, the
+        # visible one computes to auto instead" (a real quirk, confirmed
+        # live -- even forcing overflow-y via `!important` still computed to
+        # "auto" while overflow-x stayed "auto"). An overflow-x:auto table
+        # can therefore never have a truly non-clipping overflow-y. Giving up
+        # this table's own horizontal scrollbar (both visible) is what
+        # actually stops the popup from ever being clipped -- a wide grid
+        # now overflows into the page's own horizontal scroll instead of a
+        # nested one. See shell.py's matching `.dash-spreadsheet-container`
+        # override for dash_table's own internal wrapper, one layer deeper,
+        # which has the identical problem and needs the identical fix.
+        style_table={"overflowX": "visible", "overflowY": "visible"},
         style_cell={"fontFamily": "Teko, sans-serif", "fontSize": "15px",
                     "padding": "4px 8px", "textAlign": "center"},
         style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold"},
