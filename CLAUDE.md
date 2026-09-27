@@ -73,6 +73,31 @@ and player immediately, not a sandboxed dry run.
   their own throwaway rows against a sandboxed id, e.g. `TEST_PID` in
   `tests/test_splash_report.py`).
 
+**Schema changes must be additive and never destroy data already sitting on
+Lightsail.** A table that exists locally already exists there too, usually
+with real coach/player-entered rows in it — a migration that runs cleanly
+against a fresh local table can still destroy production data the moment it
+deploys.
+
+- Never `DROP COLUMN`, `DROP TABLE`, or rename an existing column that might
+  already hold real data. If a field is being replaced/renamed at the
+  product level (e.g. splitting one checklist into three), add the new
+  column(s) alongside the old one(s) and leave the old one(s) in the table,
+  unread — don't reclaim it. Losing what a coach already typed in is not an
+  acceptable side effect of a UI relabel.
+- Add columns the same guarded way `app/data/splash_report.py` and
+  `app/data/cauldron.py` already do: `CREATE TABLE IF NOT EXISTS` for a
+  brand-new table, plus an idempotent `_ensure_column` (`ALTER TABLE ADD
+  COLUMN`, gated on `information_schema` so it's skipped when the column is
+  already there) inside `ensure_tables()` for a column being added to a
+  table that may already exist on Lightsail. Never assume local dev's schema
+  matches Lightsail's — the guard is what makes the same code correct
+  against both a fresh table and years of a real deployed one.
+- A migration must be safe to run twice (idempotent) and safe against a
+  table that already has rows in it, not just an empty one — test it that
+  way locally before it ships, the same way `test_ensure_tables_idempotent`
+  tests already do in this repo.
+
 ## Matching the existing look and structure
 
 Coaches compare dashboards against each other, so new work should look like
