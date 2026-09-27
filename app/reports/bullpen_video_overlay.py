@@ -209,6 +209,36 @@ def _present(*vals) -> bool:
     return all(v is not None and pd.notna(v) for v in vals)
 
 
+def _ellipse_extents(ax) -> tuple[list[float], list[float]]:
+    """(x-bounds, y-bounds) of the ellipse patches already on `ax`, in data
+    units -- the ellipse can reach past the outermost dots, so the zoom has
+    to include it too."""
+    xb, yb = [], []
+    for patch in ax.patches:
+        verts = patch.get_patch_transform().transform(patch.get_path().vertices)
+        xb += [verts[:, 0].min(), verts[:, 0].max()]
+        yb += [verts[:, 1].min(), verts[:, 1].max()]
+    return xb, yb
+
+
+def _fit_range(vals: list, extra: list, *, min_span: float = 8.0,
+               pad_frac: float = 0.15) -> tuple[float, float]:
+    """Axis limits hugging `vals` + `extra` (2026-09-27, Brad: zoom the
+    movement chart to fit that pitch type rather than a fixed -20..20
+    window). Padded so edge dots aren't cut off, and never narrower than
+    `min_span` inches so one tight cluster isn't blown up into noise."""
+    pts = [float(v) for v in list(vals) + list(extra)]
+    if not pts:
+        return -10.0, 10.0
+    lo, hi = min(pts), max(pts)
+    pad = max((hi - lo) * pad_frac, 1.5)
+    lo, hi = lo - pad, hi + pad
+    if hi - lo < min_span:
+        mid = (lo + hi) / 2
+        lo, hi = mid - min_span / 2, mid + min_span / 2
+    return lo, hi
+
+
 def _render_sidebar(pitch: dict, session_df: pd.DataFrame, *, player_name: str, date: str,
                     pitch_index: int, pitch_count: int, w: int, h: int) -> Image.Image:
     """LOCATION (zone grid + this pitch), MOVEMENT (the session's pitches of
@@ -292,11 +322,8 @@ def _render_sidebar(pitch: dict, session_df: pd.DataFrame, *, player_name: str, 
                     alpha=0.7, edgecolor="none", zorder=3)
     xs = list(d["horz_break"]) + ([hb] if _present(hb) else [])
     ys = list(d["ind_vert_break"]) + ([ivb] if _present(ivb) else [])
-    # Fixed -20..20 / -5..25 like the reference unless the session's
-    # pitches actually fall outside it.
-    xlim = max(20.0, max((abs(v) for v in xs), default=0) + 4)
-    move_ax.set_xlim(-xlim, xlim)
-    move_ax.set_ylim(min(-5.0, min(ys, default=0) - 4), max(25.0, max(ys, default=0) + 4))
+    move_ax.set_xlim(*_fit_range(xs, _ellipse_extents(move_ax)[0]))
+    move_ax.set_ylim(*_fit_range(ys, _ellipse_extents(move_ax)[1]))
     if _present(hb, ivb):
         target(move_ax, hb, ivb)
     move_ax.grid(True, color="white", alpha=0.14, lw=0.8 * k)

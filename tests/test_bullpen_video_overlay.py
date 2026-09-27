@@ -154,3 +154,13 @@ def test_movement_chart_plots_only_this_pitchs_type(monkeypatch):
         pitch_index=1, pitch_count=3, width=640, height=480)
     assert (9.0, 16.0) in plotted          # the other fastball
     assert (-3.0, -30.0) not in plotted    # the slider
+
+
+def test_fit_range_hugs_the_data_with_padding_and_a_minimum_span():
+    """2026-09-27, Brad: movement chart auto-zooms to that pitch type's own
+    spread instead of a fixed -20..20 window."""
+    lo, hi = overlay._fit_range([10.0, 20.0], [])
+    assert lo < 10.0 and hi > 20.0 and hi - lo < 20.0
+    lo, hi = overlay._fit_range([15.0, 15.5], [])  # tight cluster: not blown up
+    assert hi - lo >= 8.0 and lo < 15.0 < hi
+    assert overlay._fit_range([], []) == (-10.0, 10.0)
