@@ -29,33 +29,43 @@ def _pitch():
     return df.iloc[0].to_dict()
 
 
-def test_compute_layout_video_fits_inside_the_reserved_bars_and_is_even():
-    layout = overlay.compute_layout(640, 480)
-    assert layout["video_w"] % 2 == 0 and layout["video_h"] % 2 == 0
-    assert layout["top_h"] % 2 == 0 and layout["right_w"] % 2 == 0
-    # The shrunk video must not cross into the top bar or the right bar --
-    # that's the whole point (Brad: "make sure its not covering the video").
-    assert layout["video_y"] >= layout["top_h"]
-    assert layout["video_x"] + layout["video_w"] <= 640 - layout["right_w"]
-    assert layout["bottom_h"] >= 0
-    # Aspect ratio preserved (within integer rounding).
-    assert abs((layout["video_w"] / layout["video_h"]) - (640 / 480)) < 0.02
+def test_compute_layout_keeps_video_native_and_adds_banner_and_sidebar_around_it():
+    """2026-09-27 redesign: the clip is never shrunk -- the banner and
+    sidebar are added around it, so the output frame is larger."""
+    layout = overlay.compute_layout(1280, 1008)
+    assert (layout["video_w"], layout["video_h"]) == (1280, 1008)
+    for key in ("width", "height", "top_h", "right_w"):
+        assert layout[key] % 2 == 0
+    assert layout["video_y"] == layout["top_h"]
+    assert layout["video_x"] + layout["video_w"] == layout["width"] - layout["right_w"]
+    assert layout["height"] == layout["top_h"] + layout["video_h"]
+    assert abs(layout["right_w"] / layout["width"] - overlay.RIGHT_FRAC) < 0.01
+    # Banner keeps the banner art's own aspect ratio (1456x176).
+    assert abs(layout["width"] / layout["top_h"] - 1456 / 176) < 0.1
 
 
-def test_build_overlay_png_is_transparent_rgba_at_requested_size():
+def test_build_overlay_png_is_opaque_on_bars_and_transparent_over_video():
     png = overlay.build_overlay_png(
         _pitch(), _session_df(), player_name="Test Player", date="2026-09-17",
         pitch_index=1, pitch_count=2, width=640, height=480)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     img = Image.open(__import__("io").BytesIO(png))
+    layout = overlay.compute_layout(640, 480)
     assert img.mode == "RGBA"
-    assert img.size == (640, 480)
-    # Inside the video area (below the top bar, left of the right bar,
-    # above the bottom margin -- see compute_layout) must be fully
-    # transparent so the overlay never draws over the actual footage; the
-    # white bars themselves come from composite_overlay's ffmpeg pad step,
-    # not from this PNG.
-    assert img.getpixel((50, 240))[3] == 0
+    assert img.size == (layout["width"], layout["height"])
+    # Over the footage: fully transparent, never covering the video.
+    assert img.getpixel((50, layout["top_h"] + 240))[3] == 0
+    # Banner and sidebar: opaque art.
+    assert img.getpixel((5, 5))[3] == 255
+    assert img.getpixel((layout["width"] - 5, layout["height"] - 5))[3] == 255
+
+
+def test_build_overlay_png_fits_long_pitch_names():
+    pitch = dict(_pitch(), pitch_type="Four-Seam Fastball Extra Long Name")
+    png = overlay.build_overlay_png(
+        pitch, _session_df(), player_name="Test Player", date="2026-09-17",
+        pitch_index=1, pitch_count=2, width=1280, height=1008)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_build_overlay_png_handles_missing_location_and_break_gracefully():
@@ -122,4 +132,35 @@ def test_composite_overlay_filter_uses_the_layouts_own_scale_and_pad_values(monk
     overlay.composite_overlay(b"fake-video", b"fake-png", layout)
     assert f"scale={layout['video_w']}:{layout['video_h']}" in captured["filter"]
     assert (f"pad={layout['width']}:{layout['height']}:"
-           f"{layout['video_x']}:{layout['video_y']}:white") in captured["filter"]
+           f"{layout['video_x']}:{layout['video_y']}:black") in captured["filter"]
+
+
+def test_movement_chart_plots_only_this_pitchs_type(monkeypatch):
+    """2026-09-27, Brad: a fastball clip's movement chart shows only the
+    session's fastballs -- other pitch types are left off entirely."""
+    plotted = []
+    real_scatter = overlay.plt.Axes.scatter
+
+    def _spy(self, x, y, *a, **k):
+        plotted.extend(zip(list(x), list(y)))
+        return real_scatter(self, x, y, *a, **k)
+
+    monkeypatch.setattr(overlay.plt.Axes, "scatter", _spy)
+    df = pd.concat([_session_df(), pd.DataFrame([
+        {"play_id": "p3", "pitch_type": "Fastball", "velo": 92.0, "plate_loc_side": 0.0,
+         "plate_loc_height": 2.5, "horz_break": 9.0, "ind_vert_break": 16.0}])], ignore_index=True)
+    overlay.build_overlay_png(
+        df.iloc[0].to_dict(), df, player_name="Test Player", date="2026-09-17",
+        pitch_index=1, pitch_count=3, width=640, height=480)
+    assert (9.0, 16.0) in plotted          # the other fastball
+    assert (-3.0, -30.0) not in plotted    # the slider
+
+
+def test_fit_range_hugs_the_data_with_padding_and_a_minimum_span():
+    """2026-09-27, Brad: movement chart auto-zooms to that pitch type's own
+    spread instead of a fixed -20..20 window."""
+    lo, hi = overlay._fit_range([10.0, 20.0], [])
+    assert lo < 10.0 and hi > 20.0 and hi - lo < 20.0
+    lo, hi = overlay._fit_range([15.0, 15.5], [])  # tight cluster: not blown up
+    assert hi - lo >= 8.0 and lo < 15.0 < hi
+    assert overlay._fit_range([], []) == (-10.0, 10.0)

@@ -3,27 +3,24 @@
 with recruiters, reference video from the Red Sox showing pitch type/velo/
 break up top, a strike-zone box and movement chart on the side).
 
-The layout is a real letterbox, not a transparent overlay floating on top
-of the footage: `compute_layout` shrinks the video and reserves solid
-white top/right bars (Brad, after seeing dark bullpen footage swallow a
-semi-transparent dark band: "make sure its not covering the video, you
-can shrink the video so that it all fits on one frame" + "I would like
-the white top bar and right side bar so that the text and pitch locations
-can be seen easier"). Three steps:
-  1. `compute_layout` -- one geometry calculation (video's shrunk size/
-     position, bar sizes) shared by the other two, so the drawn overlay
-     and the actual video placement can never drift apart.
-  2. `build_overlay_png` -- a transparent PNG (matplotlib, Agg, headless,
-     same idiom as app.reports.plots/bullpen_plots' static report charts)
-     holding just the text/charts/logo, positioned within the layout's bar
-     regions. White bars/backgrounds come from ffmpeg's `pad` in the next
-     step, not drawn here -- this stays transparent everywhere else so it
-     never obscures the video.
-  3. `composite_overlay` -- ffmpeg scales the clip down to the layout's
-     video size, pads it onto a white canvas at the video's position, then
-     overlays this PNG on top (imageio-ffmpeg's portable binary, same as
-     app.ingest.bullpen_video.remux_to_mp4 -- no system ffmpeg install
-     required).
+2026-09-27 redesign (Brad, from a broadcast-style reference mockup): a
+pre-made banner across the top -- LMU crest, adidas mark, LA skyline, the
+VELO/IVB/HB labels and MPH/IN units all baked into the art -- with only the
+pitch type and the three numbers drawn onto it, plus a dark textured
+sidebar holding location + movement. Mostly white and red.
+
+The overlay never covers the footage: the clip keeps its native size and
+the banner/sidebar are added AROUND it, so the output frame is larger than
+the clip. Three steps:
+  1. `compute_layout` -- one geometry calculation (output frame size, video
+     position, banner/sidebar sizes) shared by the other two, so the drawn
+     overlay and the actual video placement can never drift apart.
+  2. `build_overlay_png` -- a full-frame PNG: opaque banner + sidebar,
+     fully transparent over the video region.
+  3. `composite_overlay` -- ffmpeg pads the clip onto the larger frame at
+     the video's position, then overlays this PNG on top (imageio-ffmpeg's
+     portable binary, same as app.ingest.bullpen_video.remux_to_mp4 -- no
+     system ffmpeg install required).
 """
 from __future__ import annotations
 
@@ -35,59 +32,59 @@ import tempfile
 import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
 import matplotlib.font_manager as font_manager
-import matplotlib.patheffects as patheffects
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from PIL import Image
+from matplotlib.colors import to_rgba
+from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
+from PIL import Image, ImageDraw, ImageFont
 
 from app.data.bullpen import _EDGE, _SZ
-from app.reports.plots import _add_ellipse, _color_for, _draw_zone
+from app.reports.plots import _add_ellipse
 
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "reports")
-# The LMU wordmark (2026-09-23, Brad: "replace the sun lion logo with the
-# LMU logo") -- the same crest `layout._page_title_banner` uses on the
-# Built on the Bluff title card. Already transparent-background, unlike
-# lion.png, so it needs no white-stripping.
-_LOGO_PATH = os.path.join(_ASSETS_DIR, "lmu.png")
-# The same red/blue splatter texture `layout._page_title_banner` uses behind
-# the "Built on the Bluff" title card (2026-09-23, Brad, pointing at that
-# banner: "make the top bar have the same background as this image...
-# closely resemble the background for Built on the Bluff title cards").
-_TOPBAR_BG_PATH = os.path.join(_ASSETS_DIR, "velo-backdrop.png")
 _FONT_DIR = _ASSETS_DIR
-TOP_FRAC = 0.12    # top bar height, as a fraction of the frame's own height
-RIGHT_FRAC = 0.19  # right bar width, as a fraction of the frame's own width -- narrower
-                   # than the original 0.25 (Brad: "shrink the movement chart a tiny
-                   # bit" + "the white space isn't needed at the bottom"): the bottom
-                   # margin is leftover from fitting the video's own aspect ratio into
-                   # the width left after the right bar, so a narrower right bar both
-                   # shrinks the chart real estate AND grows the video's fitted height,
-                   # shrinking the bottom leftover -- one knob, both asks.
+_BANNER_PATH = os.path.join(_ASSETS_DIR, "bullpen-video-banner.png")
+# Brad's sidebar art was generated as another landscape strip; this asset is
+# its dark, red-splattered right half rotated upright, so the red lands at
+# the top-right corner where the reference mockup has it.
+_SIDEBAR_PATH = os.path.join(_ASSETS_DIR, "bullpen-video-sidebar.png")
+# Hey August (khurasan) -- free for commercial use, see
+# HeyAugust-LICENSE.txt. The closest match found, Brush King, is
+# personal-use only and can't ship in this public repo without a paid
+# license; swapping it in later only means changing this path.
+_PITCH_FONT_PATH = os.path.join(_ASSETS_DIR, "HeyAugust.ttf")
+_NUMBER_FONT_PATH = os.path.join(_ASSETS_DIR, "Teko-SemiBold.ttf")
+
+# Slot positions measured in the banner PNG's own pixels (1456x176), scaled
+# to the rendered banner size at draw time.
+_BANNER_SRC_W, _BANNER_SRC_H = 1456, 176
+_PITCH_TEXT_X = (408, 935)        # between the adidas mark and the VELO column
+_PITCH_TEXT_CY = 88
+_PITCH_TEXT_CAP_H = 74
+_METRIC_CENTERS_X = (1011, 1137, 1252)   # VELO / IVB / HB
+_METRIC_CY = 127                  # between the labels (y<=100) and the units (y>=152)
+_METRIC_CAP_H = 34
+_METRIC_MAX_W = 96              # inside the 124px-wide columns, clear of the dividers
+
+RIGHT_FRAC = 0.22  # sidebar width as a fraction of the output frame's width
+RED = "#D0142C"    # the banner art's own MPH/IN red, rather than CRIMSON
 
 
 def _teko(weight: str) -> font_manager.FontProperties:
     """Registers app/static/reports/Teko-*.ttf with matplotlib's font
     manager on first use and returns a FontProperties for one weight --
-    the same font family the web app uses (`fontFamily: "Teko, sans-serif"`,
-    Brad: "is the font the same font from the web app? if not can it be?").
-    Uses `fname=` (an exact file), not family-name matching, since Teko's
-    weight files aren't guaranteed to register as distinct matplotlib
-    family/weight combinations."""
+    the same font family the web app uses. Uses `fname=` (an exact file),
+    not family-name matching, since Teko's weight files aren't guaranteed
+    to register as distinct matplotlib family/weight combinations."""
     path = os.path.join(_FONT_DIR, f"Teko-{weight}.ttf")
     font_manager.fontManager.addfont(path)
     return font_manager.FontProperties(fname=path)
 
 
 _TEKO_BOLD = _teko("Bold")
-_TEKO_SEMIBOLD = _teko("SemiBold")
-
-# The strike-zone axes' own data aspect ratio (y-range / x-range, matching
-# the xlim/ylim `build_overlay_png` sets on zone_ax below) -- used to size
-# that axes box so an aspect="equal" plot fills it exactly, instead of
-# letterboxing inside a box shaped differently than the data.
-_ZONE_DATA_ASPECT = ((_SZ["y1"] - _SZ["y0"] + 6 * _EDGE) /
-                     (_SZ["x1"] - _SZ["x0"] + 4 * _EDGE))
+_TEKO_MEDIUM = _teko("Medium")
 
 
 class OverlayError(RuntimeError):
@@ -103,221 +100,294 @@ def _ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def compute_layout(width: int, height: int) -> dict:
-    """Reserves a solid white top bar (TOP_FRAC of height) and right bar
-    (RIGHT_FRAC of width), then fits the video -- shrunk, aspect ratio
-    preserved -- into the remaining rectangle, flush against the top bar's
-    bottom edge and the frame's left edge. Whatever's left below the video
-    becomes a bottom margin (used for the player/date/pitch-count text --
-    not a fixed band of its own, just whatever room the aspect-correct fit
-    leaves over). Dimensions are rounded to even numbers throughout -- h264
-    requires it, and ffmpeg's scale/pad filters reject odd target sizes."""
-    def _even(n: int) -> int:
-        return n - (n % 2)
+def _even(n: float) -> int:
+    n = int(round(n))
+    return n - (n % 2)
 
-    top_h = _even(int(height * TOP_FRAC))
-    right_w = _even(int(width * RIGHT_FRAC))
-    content_w = width - right_w
-    content_h = height - top_h
-    scale = min(content_w / width, content_h / height)
-    video_w = _even(int(width * scale))
-    video_h = _even(int(height * scale))
-    video_x, video_y = 0, top_h
+
+def compute_layout(width: int, height: int) -> dict:
+    """Output frame for a `width`x`height` clip: the clip at its native size
+    (never shrunk or cropped), a sidebar to its right taking RIGHT_FRAC of
+    the final width, and the banner across the full top at the banner art's
+    own aspect ratio. Dimensions are even throughout -- h264 requires it,
+    and ffmpeg's pad filter rejects odd sizes."""
+    video_w, video_h = _even(width), _even(height)
+    right_w = _even(video_w * RIGHT_FRAC / (1 - RIGHT_FRAC))
+    canvas_w = video_w + right_w
+    top_h = _even(canvas_w * _BANNER_SRC_H / _BANNER_SRC_W)
+    canvas_h = top_h + video_h
     return {
-        "width": width, "height": height, "top_h": top_h, "right_w": right_w,
-        "video_w": video_w, "video_h": video_h, "video_x": video_x, "video_y": video_y,
-        "bottom_y0": video_y + video_h, "bottom_h": height - (video_y + video_h),
+        "width": canvas_w, "height": canvas_h, "top_h": top_h, "right_w": right_w,
+        "video_w": video_w, "video_h": video_h, "video_x": 0, "video_y": top_h,
     }
 
 
-def _load_logo_rgba(target_h: int) -> np.ndarray:
-    """`_LOGO_PATH` (the LMU wordmark, already transparent-background),
-    resized to `target_h` tall with its own aspect ratio preserved --
-    unlike the sun-lion mark this replaced, it isn't square, so the width
-    is derived from the source image's own proportions rather than forced
-    to match the height. `Figure.figimage` (unlike `OffsetImage`) has no
-    `zoom` kwarg, so scaling has to happen here, not at placement time."""
-    img = Image.open(_LOGO_PATH).convert("RGBA")
-    target_w = round(img.width * (target_h / img.height))
-    return np.array(img.resize((target_w, target_h), Image.LANCZOS))
+def _fit_font(path: str, text: str, cap_h: float, max_w: float) -> ImageFont.FreeTypeFont:
+    """Largest size whose ink is at most `cap_h` tall and `max_w` wide, so a
+    long pitch name shrinks to fit its slot instead of running into VELO."""
+    probe = ImageFont.truetype(path, 200)
+    x0, y0, x1, y1 = probe.getbbox(text)
+    scale = min(cap_h / max(y1 - y0, 1), max_w / max(x1 - x0, 1))
+    return ImageFont.truetype(path, max(int(200 * scale), 8))
 
 
-def _load_topbar_bg_rgba(width: int, top_h: int) -> np.ndarray:
-    """`_TOPBAR_BG_PATH`, center-cropped to the top bar's own aspect ratio
-    then resized to exactly `width`x`top_h` -- the same "cover" behavior as
-    the CSS `background: url(...) center/cover no-repeat` the Built on the
-    Bluff title card itself uses (`layout._page_title_banner`), so a source
-    image far taller than it is wide doesn't look squashed here."""
-    img = Image.open(_TOPBAR_BG_PATH).convert("RGBA")
-    src_w, src_h = img.size
-    target_ratio = width / top_h
-    src_ratio = src_w / src_h
-    if src_ratio > target_ratio:
-        crop_w = int(src_h * target_ratio)
-        x0 = (src_w - crop_w) // 2
-        img = img.crop((x0, 0, x0 + crop_w, src_h))
-    else:
-        crop_h = int(src_w / target_ratio)
-        y0 = (src_h - crop_h) // 2
-        img = img.crop((0, y0, src_w, y0 + crop_h))
-    return np.array(img.resize((width, top_h), Image.LANCZOS))
+def _draw_centered(img: Image.Image, text: str, font, cx: float, cy: float) -> None:
+    """Centers the text's actual ink box (not the font's line box) on
+    (cx, cy) -- line boxes include ascender/descender space, which would
+    sit the numbers visibly off-center between the labels and units."""
+    d = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = d.textbbox((0, 0), text, font=font)
+    d.text((cx - (x0 + x1) / 2, cy - (y0 + y1) / 2), text, font=font, fill="white")
 
 
-def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str,
-                      date: str, pitch_index: int, pitch_count: int,
-                      width: int, height: int) -> bytes:
-    """A `width`x`height` PNG holding the text/charts/logo -- transparent
-    everywhere except the top bar, which is opaquely painted with the same
-    splatter texture as the Built on the Bluff title card (see
-    `_load_topbar_bg_rgba`); the right bar's own white background still
-    comes from `composite_overlay`'s ffmpeg pad step (see `compute_layout`),
-    so this PNG stays transparent there and never obscures the video.
-    Pitch type + velo/break in the top bar; strike-zone box (this pitch's
-    location) and a movement scatter (this pitch highlighted among
-    `session_df`'s other same-session pitches) in the right bar; player/
-    date/pitch-count in the bottom margin below the shrunk video. `pitch`
-    is one row of `app.data.bullpen_video.session_pitch_video_df`
-    (pitch_type, velo, horz_break, ind_vert_break, plate_loc_side,
-    plate_loc_height); `session_df` is that same DataFrame. Vertical break
-    is INDUCED vert break (IVB), not raw -- pairs with HB the way pitching
-    actually reads movement (2026-09-24, Brad: "IVB needs to be used with
-    HB")."""
-    layout = compute_layout(width, height)
+def _brush_swoosh(w: int, h: int, seed: int = 7) -> Image.Image:
+    """The red dry-brush underline under the pitch name in the reference:
+    a thick ragged left end tapering to a point on the right, rising
+    slightly. Drawn at 4x then downsampled for smooth edges, with random
+    horizontal streaks for the dry-brush texture (fixed seed, so every
+    clip gets the same stroke)."""
+    ss = 4
+    W, H = w * ss, h * ss
+    t = np.linspace(0, 1, 80)
+    center = H * (0.62 - 0.30 * t)
+    ramp = np.where(t < 0.08, t / 0.08, 1 - (t - 0.08) / 0.92)
+    thick = H * 0.5 * np.clip(ramp, 0.02, 1) ** 0.8
+    xs = t * W
+    poly = list(zip(xs, center - thick / 2)) + list(zip(xs[::-1], (center + thick / 2)[::-1]))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).polygon(poly, fill=255)
+    rng = np.random.default_rng(seed)
+    rows = rng.uniform(0.55, 1.0, size=(H, 1))
+    rows[rng.random((H, 1)) < 0.12] = 0.15
+    streaks = np.clip(rows + rng.normal(0, 0.08, size=(H, W)), 0, 1)
+    out = Image.new("RGBA", (W, H), RED)
+    out.putalpha(Image.fromarray((np.asarray(mask, float) * streaks).astype(np.uint8)))
+    return out.resize((w, h), Image.LANCZOS)
+
+
+def _fmt(v) -> str:
+    return f"{v:.1f}" if v is not None and pd.notna(v) else "—"
+
+
+def _render_banner(pitch: dict, w: int, h: int) -> Image.Image:
+    banner = Image.open(_BANNER_PATH).convert("RGBA").resize((w, h), Image.LANCZOS)
+    sx, sy = w / _BANNER_SRC_W, h / _BANNER_SRC_H
+
+    name = str(pitch.get("pitch_type") or "Pitch").upper()
+    x0, x1 = _PITCH_TEXT_X[0] * sx, _PITCH_TEXT_X[1] * sx
+    cap_h = _PITCH_TEXT_CAP_H * sy
+    font = _fit_font(_PITCH_FONT_PATH, name, cap_h, x1 - x0)
+    bx0, _, bx1, _ = ImageDraw.Draw(banner).textbbox((0, 0), name, font=font)
+    text_w = bx1 - bx0
+    cy = _PITCH_TEXT_CY * sy
+    # Swoosh first so the lettering sits on top of it, as in the reference.
+    swoosh = _brush_swoosh(max(int(text_w * 0.95), 8), max(int(cap_h * 0.36), 4))
+    banner.alpha_composite(swoosh, (int(x0 + text_w * 0.10), int(cy + cap_h * 0.40)))
+    _draw_centered(banner, name, font, x0 + text_w / 2, cy)
+
+    for cx, key in zip(_METRIC_CENTERS_X, ("velo", "ind_vert_break", "horz_break")):
+        text = _fmt(pitch.get(key))
+        # Same height for every value unless it would crowd the column's
+        # dividers (a wide negative like "-14.9"); then it shrinks to fit.
+        font = _fit_font(_NUMBER_FONT_PATH, text, _METRIC_CAP_H * sy, _METRIC_MAX_W * sx)
+        _draw_centered(banner, text, font, cx * sx, _METRIC_CY * sy)
+
+    ImageDraw.Draw(banner).rectangle((0, h - max(int(2 * sy), 1), w, h), fill="#e8e8e8")
+    return banner
+
+
+def _cover_top_left(img: Image.Image, w: int, h: int) -> Image.Image:
+    """Scale to fill `w`x`h` keeping aspect, cropping only the bottom/right
+    overflow so the sidebar art's red top-right corner always survives."""
+    scale = max(w / img.width, h / img.height)
+    img = img.resize((max(w, round(img.width * scale)), max(h, round(img.height * scale))),
+                     Image.LANCZOS)
+    return img.crop((0, 0, w, h))
+
+
+def _present(*vals) -> bool:
+    return all(v is not None and pd.notna(v) for v in vals)
+
+
+def _ellipse_extents(ax) -> tuple[list[float], list[float]]:
+    """(x-bounds, y-bounds) of the ellipse patches already on `ax`, in data
+    units -- the ellipse can reach past the outermost dots, so the zoom has
+    to include it too."""
+    xb, yb = [], []
+    for patch in ax.patches:
+        verts = patch.get_patch_transform().transform(patch.get_path().vertices)
+        xb += [verts[:, 0].min(), verts[:, 0].max()]
+        yb += [verts[:, 1].min(), verts[:, 1].max()]
+    return xb, yb
+
+
+def _fit_range(vals: list, extra: list, *, min_span: float = 8.0,
+               pad_frac: float = 0.15) -> tuple[float, float]:
+    """Axis limits hugging `vals` + `extra` (2026-09-27, Brad: zoom the
+    movement chart to fit that pitch type rather than a fixed -20..20
+    window). Padded so edge dots aren't cut off, and never narrower than
+    `min_span` inches so one tight cluster isn't blown up into noise."""
+    pts = [float(v) for v in list(vals) + list(extra)]
+    if not pts:
+        return -10.0, 10.0
+    lo, hi = min(pts), max(pts)
+    pad = max((hi - lo) * pad_frac, 1.5)
+    lo, hi = lo - pad, hi + pad
+    if hi - lo < min_span:
+        mid = (lo + hi) / 2
+        lo, hi = mid - min_span / 2, mid + min_span / 2
+    return lo, hi
+
+
+def _render_sidebar(pitch: dict, session_df: pd.DataFrame, *, player_name: str, date: str,
+                    pitch_index: int, pitch_count: int, w: int, h: int) -> Image.Image:
+    """LOCATION (zone grid + this pitch), MOVEMENT (the session's pitches of
+    this pitch's type in white inside their red ellipse, this pitch as a red
+    target dot), then player/date/pitch count."""
+    panel = _cover_top_left(Image.open(_SIDEBAR_PATH).convert("RGBA"), w, h)
+
     dpi = 100
-    fig = plt.figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor="none")
+    k = w / 362  # sizes below were tuned on a 1280-wide clip's 362px sidebar
+    fig = plt.figure(figsize=(w / dpi, h / dpi), dpi=dpi, facecolor="none")
 
-    pitch_type = pitch.get("pitch_type") or "—"
-    velo = pitch.get("velo")
-    ivb, hb = pitch.get("ind_vert_break"), pitch.get("horz_break")
-    color = _color_for(pitch_type)
+    def fy(px: float) -> float:
+        return 1 - px / h
 
-    top_frac = layout["top_h"] / height
-    right_x_frac = (width - layout["right_w"]) / width
+    fig.add_artist(Line2D([0.07, 0.07], [fy(h * 0.03), fy(h * 0.97)],
+                          color="white", lw=1.4 * k, alpha=0.9))
+    left = 0.20
 
-    # -- Top bar background: the same red/blue splatter texture behind the
-    # "Built on the Bluff" title card, not plain white (2026-09-23, Brad).
-    # Opaque, so it fully covers composite_overlay's white ffmpeg pad
-    # underneath -- only this bar changes, the right bar stays plain white
-    # (its charts need the plain contrast, unlike a logo/short text line).
-    topbar_bg = _load_topbar_bg_rgba(width, layout["top_h"])
-    fig.figimage(topbar_bg, xo=0, yo=height - layout["top_h"], zorder=0)
+    def heading(label: str, top_px: float) -> None:
+        # Spaced-out capitals stand in for the reference's wide letter
+        # tracking, which matplotlib text has no setting for.
+        fig.text(left, fy(top_px), " ".join(label), fontproperties=_TEKO_MEDIUM,
+                 fontsize=17 * k, color="white", ha="left", va="top")
+        uy = fy(top_px + 30 * k)
+        fig.add_artist(Line2D([left, left + 0.23], [uy, uy], color=RED, lw=1.6 * k))
 
-    # A dark text outline (2026-09-23, alongside the background swap above)
-    # -- top-bar text is plain white now (Brad), which needs its own
-    # contrast against a red/blue textured background the way it never
-    # needed against plain white.
-    _outline = [patheffects.withStroke(linewidth=3, foreground="black")]
+    def target(ax, x, y) -> None:
+        ax.scatter([x], [y], s=260 * k * k, color=RED, edgecolor="none", zorder=4, clip_on=False)
+        ax.scatter([x], [y], s=34 * k * k, color="white", edgecolor="none", zorder=5, clip_on=False)
 
-    # -- LMU wordmark, top-left of the top bar ------------------------------
-    logo_h = int(layout["top_h"] * 0.8)
-    logo = _load_logo_rgba(logo_h)
-    logo_w = logo.shape[1]
-    fig.figimage(logo, xo=int(width * 0.015),
-                yo=height - int(layout["top_h"] * 0.9), zorder=2)
-
-    # -- Top bar text: pitch type (after the logo) + velo/break (right) ----
-    text_y = 1 - top_frac / 2
-    logo_edge_frac = (int(width * 0.015) + logo_w + width * 0.02) / width
-    fig.text(logo_edge_frac, text_y, pitch_type, fontsize=int(layout["top_h"] * 0.4),
-             fontproperties=_TEKO_BOLD, color="white", ha="left", va="center",
-             path_effects=_outline, zorder=3)
-    metrics = []
-    if velo is not None and pd.notna(velo):
-        metrics.append(f"{velo:.1f} mph")
-    if ivb is not None and pd.notna(ivb):
-        metrics.append(f"IVB: {ivb:.1f}")
-    if hb is not None and pd.notna(hb):
-        metrics.append(f"HB: {hb:.1f}")
-    fig.text(0.97, text_y, "   ".join(metrics), fontsize=int(layout["top_h"] * 0.22),
-             fontproperties=_TEKO_SEMIBOLD, color="white", ha="right", va="center",
-             path_effects=_outline, zorder=3)
-
-    # -- Right bar, upper: strike zone + this pitch's location -------------
-    # Plain app.reports.plots._draw_zone (black/gray lines) -- the right
-    # bar is solid white now, so the PDF report's own zone-box styling
-    # (built for a white page) is exactly right here too.
-    #
-    # Width comes from the available right-bar space (tight margins are
-    # safe here -- unlike move_ax, this axes hides its ticks/spines, so
-    # there's no tick-label text that could bleed past the boundary); the
-    # height is then derived from the zone's own fixed data aspect ratio
-    # (`_ZONE_DATA_ASPECT`, from `_SZ`/`_EDGE`) rather than a flat fraction,
-    # so `aspect="equal"` below doesn't letterbox the chart smaller than
-    # its box -- Brad, from a downloaded clip: "expand the strike zone
-    # location so it fills in more of the white space."
-    zone_w_frac = layout["right_w"] / width - 0.02
-    zone_h_frac = _ZONE_DATA_ASPECT * zone_w_frac * (width / height)
-    zone_ax = fig.add_axes((right_x_frac + 0.01, 0.50, zone_w_frac, zone_h_frac))
+    heading("LOCATION", h * 0.035)
+    zone_top = h * 0.035 + 48 * k
+    zone_w = 0.72
+    zx0, zx1 = _SZ["x0"] - _EDGE * 1.2, _SZ["x1"] + _EDGE * 1.2
+    zy0, zy1 = _SZ["y0"] - _EDGE * 1.2, _SZ["y1"] + _EDGE * 1.2
+    zone_h_px = zone_w * w * (zy1 - zy0) / (zx1 - zx0)
+    zone_ax = fig.add_axes((left, fy(zone_top + zone_h_px), zone_w, zone_h_px / h))
     zone_ax.set_facecolor("none")
-    _draw_zone(zone_ax)
+    zone_ax.set_xlim(zx0, zx1)
+    zone_ax.set_ylim(zy0, zy1)
+    zone_ax.set_axis_off()
+    zone_ax.add_patch(Rectangle((_SZ["x0"], _SZ["y0"]), _SZ["x1"] - _SZ["x0"],
+                                _SZ["y1"] - _SZ["y0"], fill=False, ec="white", lw=1.8 * k))
+    for i in (1, 2):
+        xi = _SZ["x0"] + (_SZ["x1"] - _SZ["x0"]) * i / 3
+        yi = _SZ["y0"] + (_SZ["y1"] - _SZ["y0"]) * i / 3
+        zone_ax.plot([xi, xi], [_SZ["y0"], _SZ["y1"]], color="white", lw=0.9 * k, alpha=0.8)
+        zone_ax.plot([_SZ["x0"], _SZ["x1"]], [yi, yi], color="white", lw=0.9 * k, alpha=0.8)
     loc_x, loc_y = pitch.get("plate_loc_side"), pitch.get("plate_loc_height")
-    if loc_x is not None and loc_y is not None and pd.notna(loc_x) and pd.notna(loc_y):
-        zone_ax.scatter([loc_x], [loc_y], s=100, color=color, edgecolor="white",
-                        linewidth=1.5, zorder=3)
-    zone_ax.set_xlim(_SZ["x0"] - _EDGE * 2, _SZ["x1"] + _EDGE * 2)
-    zone_ax.set_ylim(_SZ["y0"] - _EDGE * 3, _SZ["y1"] + _EDGE * 3)
-    zone_ax.set_aspect("equal")
-    zone_ax.set_xticks([])
-    zone_ax.set_yticks([])
-    for spine in zone_ax.spines.values():
-        spine.set_visible(False)
+    if _present(loc_x, loc_y):
+        # Clamped into the panel so a wild pitch still shows at the edge.
+        target(zone_ax, float(np.clip(loc_x, zx0 + 0.05, zx1 - 0.05)),
+               float(np.clip(loc_y, zy0 + 0.05, zy1 - 0.05)))
 
-    # -- Right bar, lower: movement chart, this pitch highlighted ----------
-    # Left margin is still bigger than the zone box's (0.032 vs 0.02) -- the
-    # y-axis tick labels here (unlike the zone box, which hides its ticks)
-    # render just left of the axes' own left edge, and too small a buffer
-    # lets that text cross right_x_frac into the video itself (Brad, from a
-    # downloaded clip: "it bleeds into the video a bit"). Widened close to
-    # that same edge on both sides since (2026-09-23 round 2, Brad, a later
-    # clip): "widen the movement tab just a tiny bit... fill in the white
-    # space without bleeding into the video."
-    move_ax = fig.add_axes((right_x_frac + 0.032, 0.12, layout["right_w"] / width - 0.062, 0.28))
+    move_head = zone_top + zone_h_px + 20 * k
+    heading("MOVEMENT", move_head)
+    mv_top, mv_bottom = move_head + 50 * k, h * 0.81
+    move_ax = fig.add_axes((left + 0.08, fy(mv_bottom), 0.85 - left, (mv_bottom - mv_top) / h))
     move_ax.set_facecolor("none")
-    move_ax.axhline(0, color="#ccc", lw=0.8)
-    move_ax.axvline(0, color="#ccc", lw=0.8)
-    others = session_df[session_df["play_id"] != pitch.get("play_id")]
-    for pt, sub in others.groupby("pitch_type"):
-        xs, ys = sub["horz_break"].to_numpy(), sub["ind_vert_break"].to_numpy()
-        _add_ellipse(move_ax, xs, ys, _color_for(pt))
-        move_ax.scatter(xs, ys, s=26, color=_color_for(pt), alpha=0.6,
-                        edgecolor="white", linewidth=0.3, zorder=2)
-    if hb is not None and ivb is not None and pd.notna(hb) and pd.notna(ivb):
-        move_ax.scatter([hb], [ivb], s=100, color=color, edgecolor="white",
-                        linewidth=1.5, zorder=3)
-    move_ax.set_title("Movement", fontsize=11, color="#9A0021",
-                      fontproperties=_TEKO_SEMIBOLD, pad=4)
-    move_ax.tick_params(labelsize=7)
+    pt_now = pitch.get("pitch_type")
+    hb, ivb = pitch.get("horz_break"), pitch.get("ind_vert_break")
+    # 2026-09-27, Brad: only this pitch's own type is plotted (a fastball
+    # clip shows the session's fastballs, not every pitch type).
+    d = session_df.dropna(subset=["horz_break", "ind_vert_break"])
+    d = d[d["pitch_type"] == pt_now]
+    same = d[d["play_id"] != pitch.get("play_id")]
+    _add_ellipse(move_ax, d["horz_break"].to_numpy(), d["ind_vert_break"].to_numpy(), RED)
+    for patch in move_ax.patches:
+        # Translucent fill with a solid rim, like the reference, instead of
+        # _add_ellipse's faint all-over alpha -- and 2 sigma instead of its
+        # 1, so it wraps most of the pitch type's cluster the way the
+        # reference's does rather than just its core.
+        patch.set_width(patch.get_width() * 2)
+        patch.set_height(patch.get_height() * 2)
+        patch.set_alpha(None)
+        patch.set_facecolor(to_rgba(RED, 0.45))
+        patch.set_edgecolor(to_rgba(RED, 0.95))
+        patch.set_linewidth(1.4 * k)
+        patch.set_zorder(1)
+    move_ax.scatter(same["horz_break"], same["ind_vert_break"], s=40 * k * k, color="white",
+                    alpha=0.7, edgecolor="none", zorder=3)
+    xs = list(d["horz_break"]) + ([hb] if _present(hb) else [])
+    ys = list(d["ind_vert_break"]) + ([ivb] if _present(ivb) else [])
+    move_ax.set_xlim(*_fit_range(xs, _ellipse_extents(move_ax)[0]))
+    move_ax.set_ylim(*_fit_range(ys, _ellipse_extents(move_ax)[1]))
+    if _present(hb, ivb):
+        target(move_ax, hb, ivb)
+    move_ax.grid(True, color="white", alpha=0.14, lw=0.8 * k)
+    for side in ("top", "right"):
+        move_ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        move_ax.spines[side].set_color("white")
+        move_ax.spines[side].set_alpha(0.8)
+        move_ax.spines[side].set_linewidth(1.0 * k)
+    move_ax.tick_params(colors="white", length=0, pad=6 * k)
+    for lbl in move_ax.get_xticklabels() + move_ax.get_yticklabels():
+        lbl.set_fontproperties(_TEKO_MEDIUM)
+        lbl.set_fontsize(12 * k)
+    move_ax.set_xlabel("HORIZONTAL BREAK (IN)", fontproperties=_TEKO_MEDIUM,
+                       fontsize=12 * k, color="white", labelpad=2 * k)
+    move_ax.set_ylabel("VERTICAL BREAK (IN)", fontproperties=_TEKO_MEDIUM,
+                       fontsize=12 * k, color="white", labelpad=2 * k)
 
-    # -- Bottom margin (below the shrunk video): player / date / pitch count
-    # Always brand red (2026-09-23, Brad: "make the text at the bottom
-    # always red instead of the color of the pitch") -- was `color`
-    # (pitch-type dependent) like the top-bar text used to be.
-    if layout["bottom_h"] > 0:
-        bottom_y = layout["bottom_h"] / 2 / height
-        fig.text(0.03, bottom_y, player_name, fontsize=15, fontproperties=_TEKO_BOLD,
-                 color="#9A0021", ha="left", va="center")
-        fig.text(right_x_frac / 2, bottom_y, date, fontsize=15, fontproperties=_TEKO_BOLD,
-                 color="#9A0021", ha="center", va="center")
-        fig.text(right_x_frac - 0.02, bottom_y, f"Pitch {pitch_index}/{pitch_count}",
-                 fontsize=15, fontproperties=_TEKO_BOLD, color="#9A0021", ha="right", va="center")
+    fig.text(left, fy(h * 0.9), player_name.upper(), fontproperties=_TEKO_BOLD,
+             fontsize=20 * k, color="white", ha="left", va="top")
+    fig.text(left, fy(h * 0.9 + 30 * k), f"{date}   ·   PITCH {pitch_index}/{pitch_count}",
+             fontproperties=_TEKO_MEDIUM, fontsize=14 * k, color=RED, ha="left", va="top")
 
     buf = io.BytesIO()
     try:
         fig.savefig(buf, format="png", dpi=dpi, transparent=True)
     finally:
         plt.close(fig)
+    panel.alpha_composite(Image.open(buf).convert("RGBA").resize((w, h)))
+    return panel
+
+
+def build_overlay_png(pitch: dict, session_df: pd.DataFrame, *, player_name: str,
+                      date: str, pitch_index: int, pitch_count: int,
+                      width: int, height: int) -> bytes:
+    """The full-frame overlay for a `width`x`height` clip, sized to
+    `compute_layout(width, height)`'s output frame (larger than the clip):
+    opaque banner and sidebar, fully transparent over the video region.
+    `pitch` is one row of `app.data.bullpen_video.session_pitch_video_df`
+    (pitch_type, velo, horz_break, ind_vert_break, plate_loc_side,
+    plate_loc_height); `session_df` is that same DataFrame. Vertical break
+    is INDUCED vert break (IVB), not raw -- pairs with HB the way pitching
+    actually reads movement (2026-09-24, Brad: "IVB needs to be used with
+    HB")."""
+    layout = compute_layout(width, height)
+    canvas = Image.new("RGBA", (layout["width"], layout["height"]), (0, 0, 0, 0))
+    canvas.alpha_composite(_render_banner(pitch, layout["width"], layout["top_h"]), (0, 0))
+    sidebar = _render_sidebar(
+        pitch, session_df, player_name=player_name, date=str(date),
+        pitch_index=pitch_index, pitch_count=pitch_count,
+        w=layout["right_w"], h=layout["height"] - layout["top_h"])
+    canvas.alpha_composite(sidebar, (layout["width"] - layout["right_w"], layout["top_h"]))
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
     return buf.getvalue()
 
 
 def composite_overlay(video_bytes: bytes, overlay_png: bytes, layout: dict) -> bytes:
-    """Scales the clip down to `layout`'s video size, pads it onto a white
-    canvas at `layout`'s video position (the actual letterbox -- solid
-    white top/right bars that never sit on top of the footage), then burns
-    `overlay_png` on top for the text/charts. `layout` must be the exact
-    dict `compute_layout` returned for this same width/height, so the
-    video placement and the overlay's own element positions agree. A real
-    re-encode, not a remux (`app.ingest.bullpen_video.remux_to_mp4`'s
-    `-c copy` doesn't apply here -- scaling and padding touch every
+    """Pads the clip onto `layout`'s larger output frame at the video's
+    position, then burns `overlay_png` on top for the banner/sidebar.
+    `layout` must be the exact dict `compute_layout` returned for this same
+    clip, so the video placement and the overlay's own element positions
+    agree. A real re-encode, not a remux (`app.ingest.bullpen_video.
+    remux_to_mp4`'s `-c copy` doesn't apply here -- padding touches every
     frame), so this takes noticeably longer than streaming the raw clip;
     acceptable for an occasional manual download, not something run in
     bulk."""
@@ -332,7 +402,7 @@ def composite_overlay(video_bytes: bytes, overlay_png: bytes, layout: dict) -> b
         filter_complex = (
             f"[0:v]scale={layout['video_w']}:{layout['video_h']},"
             f"pad={layout['width']}:{layout['height']}:"
-            f"{layout['video_x']}:{layout['video_y']}:white[bg];"
+            f"{layout['video_x']}:{layout['video_y']}:black[bg];"
             f"[bg][1:v]overlay=0:0"
         )
         try:
