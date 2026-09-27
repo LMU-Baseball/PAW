@@ -109,15 +109,13 @@ def grid_columns(scoring: pd.DataFrame) -> list[dict]:
     return _base_columns() + _metric_columns(scoring)
 
 
-def kpi_label_editor(scoring: pd.DataFrame) -> html.Div:
-    """Coach-only panel to rename what each KPI column's header says it's
-    measuring -- text label only. 2026-09-26 (Brad: "keep them as is for
-    now, but give them the ability to change what each column is
-    measuring") -- threshold/direction/points/is_manual/min_sample are left
-    alone; `cauldron.update_scoring_label` only ever touches `label`. Starts
-    collapsed (`cauldron-kpi-panel`, hidden) behind an `cauldron-kpi-toggle`
-    button, same idiom as Built on the Bluff's "Manage Video Library" panel."""
-    rows = [
+def kpi_rows(scoring: pd.DataFrame) -> list:
+    """One label-input + delete-button row per current KPI column. A
+    separately addressable piece (own container id `cauldron-kpi-rows` in
+    `kpi_label_editor`) so `callbacks._on_kpi_add`/`_on_kpi_delete` can
+    replace just this list after adding/removing a column, without
+    re-rendering the whole KPI section."""
+    return [
         html.Div([
             html.Span(row["metric"], style={"fontSize": "11px", "color": "#888",
                                             "width": "140px", "display": "inline-block"}),
@@ -125,25 +123,54 @@ def kpi_label_editor(scoring: pd.DataFrame) -> html.Div:
                      type="text", value=row["label"] or row["metric"],
                      style={"width": "180px", "padding": "4px 6px", "borderRadius": "6px",
                             "border": "1px solid #ccc", "fontFamily": "Teko, sans-serif"}),
+            html.Button("×", id={"type": "cauldron-kpi-delete", "index": row["metric"]},
+                       n_clicks=0, title=f"Delete {row['label'] or row['metric']}",
+                       style={"border": "none", "background": "none", "color": shell.CRIMSON,
+                              "fontSize": "18px", "fontWeight": "bold", "cursor": "pointer",
+                              "lineHeight": "1", "padding": "0 6px"}),
         ], style={"display": "flex", "alignItems": "center", "gap": "8px", "marginBottom": "6px"})
         for _, row in scoring.iterrows()
     ]
+
+
+def kpi_label_editor(scoring: pd.DataFrame) -> html.Div:
+    """Coach-only KPI config section: rename what a column's header says
+    it's measuring (text label only -- 2026-09-26, Brad: "keep them as is
+    for now, but give them the ability to change what each column is
+    measuring" -- threshold/direction/points/is_manual/min_sample are left
+    alone; `cauldron.update_scoring_label` only ever touches `label`), plus
+    add or delete a whole column (2026-09-27, Brad: "is it possible to have
+    the edit KPI section also have an ability to add or delete columns").
+    A new column is always MANUAL -- there's no Trackman-derived formula for
+    an arbitrary coach-named KPI, so a coach types its points directly, same
+    as Mod Command/Recovery Command/AH-Rehab already do.
+
+    2026-09-27 (Brad screenshot: the standalone "Edit KPI Labels" button sat
+    above the Season/Week filters even outside an edit session) -- no longer
+    its own toggle; this whole section now lives INSIDE `coach_grid`'s
+    `grid_wrap`, so it shows/hides with the SAME Edit/Save buttons that
+    show/hide the daily grid, instead of a second, separately-toggled
+    control."""
     return html.Div([
-        html.Button("Edit KPI Labels", id="cauldron-kpi-toggle", n_clicks=0,
-                   style={"border": f"2px solid {shell.CRIMSON}", "background": "#fff",
-                          "color": shell.CRIMSON, "borderRadius": "14px", "padding": "4px 14px",
-                          "cursor": "pointer", "fontFamily": "Teko, sans-serif",
-                          "fontSize": "13px", "margin": "8px 16px"}),
+        html.Div(kpi_rows(scoring), id="cauldron-kpi-rows"),
         html.Div([
-            *rows,
-            html.Button("Save Labels", id="cauldron-kpi-save", n_clicks=0,
-                       style={"border": "none", "background": shell.CRIMSON, "color": "#fff",
-                              "borderRadius": "14px", "padding": "5px 16px", "cursor": "pointer",
-                              "fontFamily": "Teko, sans-serif", "marginTop": "4px"}),
-            html.Div(id="cauldron-kpi-label-status",
-                    style={"fontSize": "12px", "color": shell.CRIMSON, "marginTop": "4px"}),
-        ], id="cauldron-kpi-panel", style={"display": "none", "padding": "0 16px 12px"}),
-    ])
+            dcc.Input(id="cauldron-kpi-new-label", type="text",
+                     placeholder="New KPI name...",
+                     style={"width": "180px", "padding": "4px 6px", "borderRadius": "6px",
+                            "border": "1px solid #ccc", "fontFamily": "Teko, sans-serif"}),
+            html.Button("+ Add Column", id="cauldron-kpi-add", n_clicks=0,
+                       style={"border": f"2px solid {shell.CRIMSON}", "background": "#fff",
+                              "color": shell.CRIMSON, "borderRadius": "14px", "padding": "4px 12px",
+                              "cursor": "pointer", "fontFamily": "Teko, sans-serif",
+                              "marginLeft": "8px"}),
+        ], style={"display": "flex", "alignItems": "center", "marginTop": "4px", "marginBottom": "8px"}),
+        html.Button("Save Labels", id="cauldron-kpi-save", n_clicks=0,
+                   style={"border": "none", "background": shell.CRIMSON, "color": "#fff",
+                          "borderRadius": "14px", "padding": "5px 16px", "cursor": "pointer",
+                          "fontFamily": "Teko, sans-serif"}),
+        html.Div(id="cauldron-kpi-label-status",
+                style={"fontSize": "12px", "color": shell.CRIMSON, "marginTop": "4px"}),
+    ], style={"padding": "10px 16px", "borderTop": "1px dashed #ccc", "marginTop": "8px"})
 
 
 def _auto_points(metrics: dict, metric, scoring_row) -> int | None:
@@ -297,6 +324,7 @@ def coach_grid(play_date, week_start, season, *, scoring: pd.DataFrame | None = 
             dcc.DatePickerSingle(id="cauldron-date", date=play_date),
         ], style={"textAlign": "center", "padding": "0 16px 8px"}),
         html.Div(grid, style={"padding": "0 16px"}),
+        kpi_label_editor(scoring),
     ], id="cauldron-grid-wrap", style={"display": "none"})
 
     return html.Div([buttons, grid_wrap])

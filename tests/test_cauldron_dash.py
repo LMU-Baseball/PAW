@@ -44,7 +44,8 @@ def test_serve_layout_renders_grid_for_coach(server):
     assert "Please log in" not in s
     assert "cauldron-grid" in s
     assert "cauldron-save" in s
-    assert "cauldron-kpi-toggle" in s
+    assert "cauldron-kpi-rows" in s
+    assert "cauldron-kpi-add" in s
     assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
@@ -65,7 +66,8 @@ def test_serve_layout_hides_grid_for_player(server):
     assert "Please log in" not in s
     assert "cauldron-grid" not in s
     assert "cauldron-save" not in s
-    assert "cauldron-kpi-toggle" not in s
+    assert "cauldron-kpi-rows" not in s
+    assert "cauldron-kpi-add" not in s
     assert "COMPETITIVE" in s and "CAULDRON" in s
 
 
@@ -91,6 +93,25 @@ def _raw_callback(dash_app, *, input_id):
         if ids == [input_id]:
             return spec["callback"].__wrapped__
     raise AssertionError(f"no callback found with sole Input id {input_id!r}")
+
+
+def _raw_pattern_callback(dash_app, *, input_type):
+    """Same idea as `_raw_callback`, for a callback whose sole Input is a
+    pattern-matching id like `{"type": input_type, "index": ALL}` -- Dash
+    stores a pattern-matching input's id as a JSON string (e.g.
+    '{"index":["ALL"],"type":"foo"}'), not a plain string, so this matches
+    on that JSON text containing the expected type instead of exact equality."""
+    import json
+    for spec in dash_app.callback_map.values():
+        ids = spec["inputs"]
+        if len(ids) == 1 and isinstance(ids[0]["id"], str):
+            try:
+                parsed = json.loads(ids[0]["id"])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") == input_type:
+                return spec["callback"].__wrapped__
+    raise AssertionError(f"no callback found with sole pattern-matching Input type {input_type!r}")
 
 
 def test_serve_layout_uses_week_not_cycle_for_coach(server):
@@ -233,6 +254,140 @@ def test_on_kpi_save_updates_label_and_refreshes_grid_columns(server):
     assert by_id["strike_pct"] == "Strike Rate"
     saved = cauldron.read_scoring().set_index("metric").loc["strike_pct"]
     assert saved["direction"] == "gte" and float(saved["threshold"]) == 55.0
+
+
+def test_on_kpi_add_creates_a_manual_column_and_refreshes_the_grid(server):
+    """2026-09-27 (Brad: "is it possible to have the edit KPI section also
+    have an ability to add or delete columns"). A coach typing a new KPI
+    name and clicking Add must persist a real (always-manual) scoring row
+    and have the callback's own return values reflect it immediately --
+    the new rows list, the cleared input, and the grid's refreshed columns."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    cauldron.ensure_tables()
+    cauldron.seed_default_scoring()
+
+    with server.app_context():
+        coach = User(email="cldkpadd@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpiadd/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_kpi_add = _raw_callback(dash_app, input_id="cauldron-kpi-add")
+
+        metric = None
+        try:
+            with server.test_request_context("/dash/cauldron/"):
+                login_user(coach)
+                rows, cleared, status, columns, _scoreboard_out = on_kpi_add(
+                    1, "__Test Sandbox Add__", "2026-03-02", "2025/2026")
+            assert cleared == ""
+            assert "Added" in status
+            scoring = cauldron.read_scoring()
+            metric = next(m for m in scoring["metric"]
+                          if scoring.set_index("metric").loc[m, "label"] == "__Test Sandbox Add__")
+            assert bool(scoring.set_index("metric").loc[metric, "is_manual"]) is True
+            assert {c["id"] for c in columns} >= {metric, "player", "team"}
+            assert str(rows).count(metric) >= 1   # the new row rendered in the KPI list
+        finally:
+            if metric:
+                cauldron.delete_scoring_metric(metric)
+
+
+def test_on_kpi_add_is_noop_for_non_coach(server, monkeypatch):
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash, no_update
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    add_calls = []
+    monkeypatch.setattr(cauldron, "add_scoring_metric", lambda *a, **k: add_calls.append(a))
+
+    with server.app_context():
+        player = User(email="cldkpaddnc@lmu.edu", name="Player", role="player", trackman_id=-996)
+        player.set_password("x")
+        db.session.add(player)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpiaddnc/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_kpi_add = _raw_callback(dash_app, input_id="cauldron-kpi-add")
+
+        with server.test_request_context("/dash/cauldron/"):
+            login_user(player)
+            out = on_kpi_add(1, "Sneaky KPI", "2026-03-02", "2025/2026")
+
+    assert all(v is no_update for v in out)
+    assert add_calls == []
+
+
+def test_on_kpi_delete_removes_the_clicked_column_only(server, monkeypatch):
+    """Pattern-matching delete buttons: `ctx.triggered_id` names which
+    metric was actually clicked (simulated the same way
+    test_splash_report_dash's script copy/paste tests fake the callback
+    context, since invoking `.__wrapped__` directly bypasses Dash's own
+    request-scoped ctx)."""
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    cauldron.ensure_tables()
+    cauldron.seed_default_scoring()
+    metric_a = cauldron.add_scoring_metric("__Test Sandbox Delete A__")
+    metric_b = cauldron.add_scoring_metric("__Test Sandbox Delete B__")
+
+    class FakeCtx:
+        triggered_id = None
+
+    fake_ctx = FakeCtx()
+
+    with server.app_context():
+        coach = User(email="cldkpdel@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpidel/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+
+        on_kpi_delete = _raw_pattern_callback(dash_app, input_type="cauldron-kpi-delete")
+        monkeypatch.setattr(callbacks, "ctx", fake_ctx)
+
+        try:
+            fake_ctx.triggered_id = {"type": "cauldron-kpi-delete", "index": metric_a}
+            with server.test_request_context("/dash/cauldron/"):
+                login_user(coach)
+                rows, status, columns, _scoreboard_out = on_kpi_delete(
+                    [1, 0], "2026-03-02", "2025/2026")
+            assert status == "Column removed."
+            remaining = set(cauldron.read_scoring()["metric"])
+            assert metric_a not in remaining
+            assert metric_b in remaining          # only the clicked one is gone
+            assert {c["id"] for c in columns} == remaining | {"player", "team", "captain"}
+        finally:
+            for m in (metric_a, metric_b):
+                if m in set(cauldron.read_scoring()["metric"]):
+                    cauldron.delete_scoring_metric(m)
 
 
 def test_pitching_hub_has_cauldron_card(server):

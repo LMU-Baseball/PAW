@@ -27,7 +27,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from dash import ALL, Input, Output, State, no_update
+from dash import ALL, Input, Output, State, ctx, no_update
 from flask_login import current_user
 
 from app.data import cauldron, pitching_caps, seasons, velo_board
@@ -160,19 +160,6 @@ def register_callbacks(dash_app) -> None:
         return no_update, scoreboard, "Saved.", False, _HIDDEN  # re-lock + hide
 
     @dash_app.callback(
-        Output("cauldron-kpi-panel", "style"),
-        Input("cauldron-kpi-toggle", "n_clicks"),
-        State("cauldron-kpi-panel", "style"),
-        prevent_initial_call=True,
-    )
-    def _on_kpi_toggle(n_clicks, style):
-        if not n_clicks or not _is_coach():
-            return no_update
-        hidden = (style or {}).get("display") == "none"
-        return {"display": "block", "padding": "0 16px 12px"} if hidden \
-            else {"display": "none", "padding": "0 16px 12px"}
-
-    @dash_app.callback(
         Output("cauldron-kpi-label-status", "children"),
         Output("cauldron-grid", "columns"),
         Output("cauldron-scoreboard", "children", allow_duplicate=True),
@@ -195,3 +182,57 @@ def register_callbacks(dash_app) -> None:
             cauldron.update_scoring_label(id_["index"], value or "")
         scoring = cauldron.read_scoring()
         return "Labels saved.", grid.grid_columns(scoring), _scoreboard(week_start, season)
+
+    @dash_app.callback(
+        Output("cauldron-kpi-rows", "children"),
+        Output("cauldron-kpi-new-label", "value"),
+        Output("cauldron-kpi-label-status", "children", allow_duplicate=True),
+        Output("cauldron-grid", "columns", allow_duplicate=True),
+        Output("cauldron-scoreboard", "children", allow_duplicate=True),
+        Input("cauldron-kpi-add", "n_clicks"),
+        State("cauldron-kpi-new-label", "value"),
+        State("cauldron-week", "date"),
+        State("cauldron-season", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_kpi_add(n_clicks, new_label, week_start, season):
+        """New column, always MANUAL (see `cauldron.add_scoring_metric`'s
+        docstring) -- Add only ever needs to refresh the grid's `columns`
+        (a brand-new manual metric has no data yet, so every row's cell for
+        it is correctly blank without re-fetching `data` at all)."""
+        if not n_clicks or not _is_coach():
+            return no_update, no_update, no_update, no_update, no_update
+        try:
+            cauldron.add_scoring_metric(new_label)
+        except ValueError as e:
+            return no_update, no_update, str(e), no_update, no_update
+        scoring = cauldron.read_scoring()
+        return (grid.kpi_rows(scoring), "", f"Added \"{(new_label or '').strip()}\".",
+                grid.grid_columns(scoring), _scoreboard(week_start, season))
+
+    @dash_app.callback(
+        Output("cauldron-kpi-rows", "children", allow_duplicate=True),
+        Output("cauldron-kpi-label-status", "children", allow_duplicate=True),
+        Output("cauldron-grid", "columns", allow_duplicate=True),
+        Output("cauldron-scoreboard", "children", allow_duplicate=True),
+        Input({"type": "cauldron-kpi-delete", "index": ALL}, "n_clicks"),
+        State("cauldron-week", "date"),
+        State("cauldron-season", "value"),
+        prevent_initial_call=True,
+    )
+    def _on_kpi_delete(n_clicks_list, week_start, season):
+        """One delete ("×") button per KPI row, pattern-matched -- `ctx.
+        triggered_id` names which metric was actually clicked. Guards
+        against the pattern-matching ALL Input re-firing when rows are
+        merely re-rendered (e.g. right after Add) rather than really
+        clicked: every fresh row starts at n_clicks=0, so `any(...)` is
+        only true for a real click."""
+        if not _is_coach() or not any(n_clicks_list):
+            return no_update, no_update, no_update, no_update
+        trig = ctx.triggered_id
+        if not trig:
+            return no_update, no_update, no_update, no_update
+        cauldron.delete_scoring_metric(trig["index"])
+        scoring = cauldron.read_scoring()
+        return (grid.kpi_rows(scoring), "Column removed.",
+                grid.grid_columns(scoring), _scoreboard(week_start, season))

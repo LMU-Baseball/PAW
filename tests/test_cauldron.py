@@ -2,6 +2,7 @@
 scoring seed idempotency, daily upsert-then-update semantics, and team
 upserts."""
 import pandas as pd
+import pytest
 
 from app.data import cauldron as C
 
@@ -103,6 +104,78 @@ def test_update_scoring_label_renames_only_the_label():
         assert pd.isna(C.read_scoring().set_index("metric").loc["strike_pct", "label"])
     finally:
         C.update_scoring_label("strike_pct", original["label"])
+
+
+def test_add_scoring_metric_is_manual_and_appended_last():
+    """2026-09-27 (Brad: "is it possible to have the edit KPI section also
+    have an ability to add or delete columns"). A new column always has NO
+    Trackman formula behind it, so it must be `is_manual` -- a coach types
+    its points directly. Cleans up the sandboxed row itself afterward
+    (SCORING_TABLE is shared global config)."""
+    C.ensure_tables()
+    C.seed_default_scoring()
+    before = C.read_scoring()
+    max_order_before = int(before["sort_order"].max())
+    metric = None
+    try:
+        metric = C.add_scoring_metric("__Test Sandbox KPI__")
+        assert metric  # a real slug, not blank
+        row = C.read_scoring().set_index("metric").loc[metric]
+        assert row["label"] == "__Test Sandbox KPI__"
+        assert bool(row["is_manual"]) is True
+        assert row["threshold"] is None or pd.isna(row["threshold"])
+        assert int(row["points_met"]) == 20 and int(row["points_missed"]) == -10
+        assert int(row["sort_order"]) == max_order_before + 1
+    finally:
+        if metric:
+            C.delete_scoring_metric(metric)
+    assert metric not in set(C.read_scoring()["metric"])
+
+
+def test_add_scoring_metric_dedupes_colliding_slugs():
+    """Two KPIs whose names slugify to the same key (e.g. differ only by
+    punctuation/case) must not collide -- the second gets a numeric suffix."""
+    C.ensure_tables()
+    C.seed_default_scoring()
+    m1 = m2 = None
+    try:
+        m1 = C.add_scoring_metric("Sandbox Dupe Test")
+        m2 = C.add_scoring_metric("sandbox dupe test!!")
+        assert m1 != m2
+        assert m1 in set(C.read_scoring()["metric"])
+        assert m2 in set(C.read_scoring()["metric"])
+    finally:
+        for m in (m1, m2):
+            if m:
+                C.delete_scoring_metric(m)
+
+
+def test_add_scoring_metric_rejects_blank_name():
+    with pytest.raises(ValueError):
+        C.add_scoring_metric("   ")
+
+
+def test_delete_scoring_metric_leaves_historical_daily_rows_untouched():
+    """Deleting a KPI column removes it from cauldron_scoring (so it stops
+    being shown/editable), but any cauldron_daily points already recorded
+    under that metric key are left alone -- same as the existing handling
+    for a metric id the scoring config no longer recognizes at all."""
+    C.ensure_tables()
+    C.seed_default_scoring()
+    metric = C.add_scoring_metric("__Test Sandbox Delete__")
+    pid = -999301
+    C.upsert_daily([{"player_id": pid, "play_date": "2026-03-02", "metric": metric,
+                     "raw_value": None, "points": 15, "source": "manual"}], updated_by=1)
+    try:
+        C.delete_scoring_metric(metric)
+        assert metric not in set(C.read_scoring()["metric"])
+        still_there = C.read_daily("2026-03-02")
+        assert (still_there["metric"] == metric).any()
+    finally:
+        from app.db import get_engine
+        from sqlalchemy import text
+        with get_engine().begin() as conn:
+            conn.execute(text(f"DELETE FROM {C.DAILY_TABLE} WHERE player_id = :p"), {"p": pid})
 
 
 def test_read_daily_and_read_teams_lazily_ensure_tables(monkeypatch):
