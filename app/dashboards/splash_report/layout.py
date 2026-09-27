@@ -475,16 +475,17 @@ def profile_text_row(plan: dict, *, editable: bool) -> html.Div:
 
 
 def workday_checklists_column(plan: dict, *, editable: bool) -> html.Div:
-    """High Day / Low Day / Mod Day, stacked single-column -- lands in the
-    narrow (290px) left sidebar, same spot Vision Statement/Player Training
-    Goals used to occupy (see `sidebar`)."""
+    """Low Day / Mod Day / High Day, stacked single-column, in that order
+    top to bottom (2026-09-27, Brad) -- lands in the narrow (290px) left
+    sidebar, same spot Vision Statement/Player Training Goals used to
+    occupy (see `sidebar`)."""
     sections = [
-        _text_section("High Day", plan["high_day_checklist"],
-                     editable=editable, input_id="splash-highday"),
         _text_section("Low Day", plan["low_day_checklist"],
                      editable=editable, input_id="splash-lowday"),
         _text_section("Mod Day", plan["mod_day_checklist"],
                      editable=editable, input_id="splash-modday"),
+        _text_section("High Day", plan["high_day_checklist"],
+                     editable=editable, input_id="splash-highday"),
     ]
     return html.Div(sections)
 
