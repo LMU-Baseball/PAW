@@ -9,12 +9,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+import pandas as pd
+
 from scripts.pitch_video_clips import (
     Segment,
+    TimelineSegment,
     build_corrector,
     confidence_flag,
+    continuous_timeline,
     find_game_csv,
+    locate_on_timeline,
     locate_segment,
+    parse_video_time,
+    predict_continuous,
     safe_filename_part,
     segment_windows,
 )
@@ -228,3 +235,75 @@ def test_find_game_csv_returns_none_when_not_found_in_window():
     sftp = _FakeSftp({"/v3/2026/05/15/CSV": ["some-other-game-1.csv"]})
     found = find_game_csv(sftp, "2026-05-15", "UofSanDiego", game_num=2)
     assert found is None
+
+
+# ---------------------------------------------------------------------------
+# continuous mode (one anchor for a whole angle)
+# ---------------------------------------------------------------------------
+
+def test_continuous_timeline_lays_files_end_to_end_and_measures_rollover_gaps(tmp_path):
+    _touch(tmp_path / "Cam_01.mp4", 10_000.0)
+    _touch(tmp_path / "Cam_02.mp4", 10_000.0 + 1080.0)       # seamless
+    _touch(tmp_path / "Cam_03.mp4", 10_000.0 + 2160.0 + 20)  # 20s lost before 03
+    tl = continuous_timeline(str(tmp_path), "Cam_", duration_fn=lambda _p: 1080.0)
+    assert [s.start for s in tl] == [0.0, 1080.0, 2160.0]
+    assert [round(s.rollover_gap, 1) for s in tl] == [0.0, 0.0, 20.0]
+
+
+def test_locate_on_timeline():
+    tl = [TimelineSegment("a", 0.0, 100.0, 0.0), TimelineSegment("b", 100.0, 100.0, 0.0)]
+    assert locate_on_timeline(150.0, tl) == (tl[1], 50.0)
+    assert locate_on_timeline(250.0, tl) == (None, None)
+
+
+def test_parse_video_time_accepts_mmss_hhmmss_and_seconds():
+    assert parse_video_time("12:48.8") == pytest.approx(768.8)
+    assert parse_video_time("1:02:03") == pytest.approx(3723.0)
+    assert parse_video_time("596") == pytest.approx(596.0)
+
+
+def _pitches(*ts):
+    return pd.DataFrame({"PitchNo": list(range(1, len(ts) + 1)), "ts": list(ts)})
+
+
+def test_predict_continuous_carries_one_anchor_across_files():
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, 0.0)]
+    # Anchor: pitch 1 released 596s into file a; pitch 2 is 1000s later in
+    # real time -> 1596s into the recording -> 516s into file b.
+    out = predict_continuous(_pitches(5000.0, 6000.0), tl, "a", 596.0, 1, 3.0, 4.0)
+    assert list(out["filename"]) == ["a", "b"]
+    assert out["offset"].tolist() == pytest.approx([596.0, 516.0])
+    assert out["flag"].isna().all()
+
+
+def test_predict_continuous_flags_pitches_past_a_non_seamless_rollover():
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, 15.0)]
+    out = predict_continuous(_pitches(5000.0, 6000.0), tl, "a", 596.0, 1, 3.0, 4.0)
+    assert out["flag"].iloc[0] is None
+    assert "non-seamless" in out["flag"].iloc[1]
+
+
+def test_predict_continuous_ignores_a_negative_gap():
+    """The recording's last file closes when the camera stops and its mtime
+    reads a few seconds early -- an impossible overlap, not lost footage."""
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, -3.3)]
+    out = predict_continuous(_pitches(5000.0, 6000.0), tl, "a", 596.0, 1, 3.0, 4.0)
+    assert out["flag"].isna().all()
+
+
+def test_predict_continuous_flags_clip_windows_that_cross_a_file_boundary():
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, 0.0)]
+    out = predict_continuous(_pitches(5000.0, 5482.0), tl, "a", 596.0, 1, 3.0, 4.0)  # 1078s
+    assert "file boundary" in out["flag"].iloc[1]
+
+
+def test_predict_continuous_marks_pitches_outside_the_recording():
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0)]
+    out = predict_continuous(_pitches(5000.0, 9000.0), tl, "a", 596.0, 1, 3.0, 4.0)
+    assert out["filename"].iloc[1] is None
+
+
+def test_predict_continuous_rejects_an_unknown_anchor_file():
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0)]
+    with pytest.raises(ValueError):
+        predict_continuous(_pitches(5000.0), tl, "zzz", 596.0, 1, 3.0, 4.0)

@@ -4,6 +4,105 @@ Tool: `scripts/pitch_video_clips.py`. This doc is the checklist for actually
 running it on a new game; the script's own module docstring has the
 mechanical details (file formats, function contracts).
 
+## Fast path — one anchor per camera angle (try this first)
+
+Tested 2026-09-27 on two more cards: HomeBehind for 5/15 @ USD (GameID 315)
+and Home Left `NORMAL*` files for 5/16 @ USD (GameID 319). Those cameras
+hand off between segment files **seamlessly** (each file's length matches
+the gap between file timestamps to within the 2-second precision FAT32
+timestamps have), so the whole game can be treated as one continuous
+recording. With only the first pitch anchored, spot-checked pitches from
+the 1st inning through the 9th/10th all landed within ~0.5s of prediction —
+no drift over 3-4 hours.
+
+For a new game or scrimmage (about 10 minutes of hands-on time, plus cutting):
+
+1. **Pull the CSV** — same as step 1 below (`fetch-csv`).
+2. **Find the first pitch** in whichever segment file it's in and note the
+   release time (e.g. `NORMAL00002.mp4` at `12:49.1`). Scrub past the
+   anthem/lineups/warmups — the first real pitch is usually 5-15 minutes
+   into the recording, and camera clocks are often off (the Home Left
+   camera's clock was ~26s slow AND a day ahead; the date on the files
+   means nothing).
+3. **Check before cutting** — about a minute:
+   ```bash
+   python scripts/pitch_video_clips.py check \
+       --video-dir "F:\video" --angle-prefix "NORMAL" \
+       --csv <csv> --game-id 319 \
+       --anchor-file NORMAL00002.mp4 --anchor-time 12:49.1 \
+       --out-dir <folder> --crop 1200:675:360:200
+   ```
+   It prints each file handoff as `seamless` or `GAP -- check`, and writes
+   contact sheets for ~6 in-play pitches spread through the game. Frame `0`
+   is the predicted release; the swing should show up around `+50` (0.5s)
+   in every sheet. If early sheets look right but later ones drift, a
+   handoff wasn't seamless — use the per-segment `clip` workflow below for
+   that card instead.
+4. **Cut everything**:
+   ```bash
+   python scripts/pitch_video_clips.py clip-continuous \
+       <same video/csv/game/anchor options> --out-dir "D:\PAW-clips\<game>_<angle>"
+   ```
+   ~290 pitches per angle. Clips run 3s before release to 4s after.
+   Flagged pitches are ones past a non-seamless handoff, or whose window
+   runs off the end of a file (a pitch right at a file boundary gets a
+   shortened clip).
+
+Pitches are matched by `PitchUID`, not `PitchNo` — the database renumbers
+after dropped pitches, so its PitchNo can differ from the CSV's by a few.
+A CSV pitch that isn't in `GAMES` gets no clip.
+
+### Scrimmage / game-day runbook (the exact steps that worked)
+
+1. **Copy nothing off the card first** — the tool reads the card directly
+   and writes clips elsewhere. Never write to the card.
+2. **Figure out which game each angle actually is.** Don't trust folder or
+   file names, or file dates: on the test card the `NORMAL*` files were a
+   different game than the `USD_5.15.2026_*` files next to them, and every
+   file was dated a day late. Instead:
+   - List the files with their mtimes (Explorer "Date modified" is fine).
+     Only the time of day is roughly right.
+   - Pull the candidate game CSVs (`fetch-csv`) and compare first-pitch
+     times (`LocalDateTime` of PitchNo 1) to what the camera covers. Camera
+     clocks were off by 0-26s on the test cards, so a game within a few
+     minutes is the right one; hours off is a different game.
+   - `GameID` comes from `GAMES` (`SELECT GameID, Date, HomeTeam, AwayTeam,
+     COUNT(*) FROM GAMES WHERE Date = ... GROUP BY GameID`).
+3. **Find pitch 1's release** in the right file. Traps seen so far: the
+   pregame plate meeting, the anthem/lineup line, and warmup throws all
+   look busy — the real first pitch has a batter in the box, the pitch clock
+   running, and (if visible) a velo reading on the board right after.
+   Contact sheets make this fast:
+   `ffmpeg -ss <sec> -i <file> -t 480 -vf "fps=1/10,scale=384:216,tile=6x8" -frames:v 1 scan.jpg`
+   scans 8 minutes in one image; then zoom in at 2-4 fps around the pitch.
+   Note the RELEASE moment (the ball leaving the hand), to a tenth of a
+   second. If the `check` sheets show the swing consistently ~0.8-1s after
+   frame 0 instead of ~0.5s, nudge the anchor 0.3-0.4s later and re-check
+   (both test anchors needed +0.3-0.4s).
+4. **`check`, then `clip-continuous`** (commands above). Use
+   `--crop 1200:675:360:200` on netted/wide angles to zoom the check sheets
+   on the plate; the clips themselves are never cropped.
+5. **Output location and naming**: one folder per game+angle,
+   `D:\PAW-clips\<YYYY-MM-DD>_<Opp>_G<GameID>_<Angle>\`, with `<Angle>` one
+   of `HomeBehind`, `HomeRight`, `HomeLeft`, `Broadcast` — the four angle
+   names the PAW video player already uses (`app/data/video.py` `ANGLES`).
+6. **Spot-check** 3-4 finished clips (first inning, middle, last) before
+   uploading anything.
+
+Tested timings: ~8 min to cut a 292-pitch angle, ~11 min for a 343-pitch
+one; clips are ~2 MB (open view) to ~4.5 MB (through netting) each.
+
+### Getting clips into PAW (not built yet)
+
+The PAW video player (Hitting/Pitching/Catching dashboards) reads the
+`video_clips` table: one row per (`pitch_uid`, `angle`) with a public S3
+URL. Last season a separate, out-of-repo tool uploaded 38k clips (3/8-5/15)
+to bucket `lmubsbvideo` (us-east-2) with keys
+`<YYYYMMDD>_LMU_Lions_@_<Opp>_<Mascot>/<Angle>/<PitchUID>.mp4`. An `upload`
+command that follows that same layout — skip-if-already-present per
+(`pitch_uid`, `angle`), dry run by default — is the next step; it needs an
+AWS access key with write access to that bucket.
+
 ## Background — why this isn't a one-command job
 
 Tested end-to-end on the 2026-05-15 @ USD game (HomeRight angle). Two
