@@ -5,6 +5,8 @@ same idiom as tests/test_ingest_bullpen_video_loader.py's remux_to_mp4
 tests); build_overlay_png genuinely renders with matplotlib (Agg,
 headless, fast) since that's the part worth actually exercising."""
 import subprocess
+import threading
+import time
 
 import pandas as pd
 import pytest
@@ -133,6 +135,50 @@ def test_composite_overlay_filter_uses_the_layouts_own_scale_and_pad_values(monk
     assert f"scale={layout['video_w']}:{layout['video_h']}" in captured["filter"]
     assert (f"pad={layout['width']}:{layout['height']}:"
            f"{layout['video_x']}:{layout['video_y']}:black") in captured["filter"]
+
+
+def test_composite_overlay_caps_ffmpeg_threads_and_uses_a_fast_preset(monkeypatch):
+    captured = {}
+
+    def _fake_run(args, check, capture_output):
+        captured["args"] = args
+        with open(args[-1], "wb") as f:
+            f.write(b"x")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(overlay.subprocess, "run", _fake_run)
+    overlay.composite_overlay(b"fake-video", b"fake-png", _layout())
+    args = captured["args"]
+    assert args[args.index("-threads") + 1] == overlay._ENCODE_THREADS
+    assert args[args.index("-preset") + 1] == "veryfast"
+
+
+def test_composite_overlay_runs_one_encode_at_a_time(monkeypatch):
+    """Concurrent downloads must queue, not encode side by side -- parallel
+    encodes are what exhausted the server's memory (2026-09-27 outage)."""
+    state = {"active": 0, "peak": 0}
+    guard = threading.Lock()
+
+    def _fake_run(args, check, capture_output):
+        with guard:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        time.sleep(0.05)
+        with guard:
+            state["active"] -= 1
+        with open(args[-1], "wb") as f:
+            f.write(b"x")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(overlay.subprocess, "run", _fake_run)
+    workers = [threading.Thread(
+        target=overlay.composite_overlay, args=(b"v", b"p", _layout()))
+        for _ in range(4)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    assert state["peak"] == 1
 
 
 def test_movement_chart_plots_only_this_pitchs_type(monkeypatch):

@@ -24,10 +24,12 @@ the clip. Three steps:
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import subprocess
 import tempfile
+import threading
 
 import matplotlib
 matplotlib.use("Agg")  # headless; must precede pyplot import
@@ -89,6 +91,33 @@ _TEKO_MEDIUM = _teko("Medium")
 
 class OverlayError(RuntimeError):
     """ffmpeg failed, or isn't installed, while compositing an overlay."""
+
+
+# The download route re-encodes on demand with no cap on concurrency, and a
+# few simultaneous libx264 encodes are enough to exhaust the 2 GB Lightsail
+# box and hard-freeze it (2026-09-27 outage). One encode at a time across
+# every gunicorn worker: a thread lock covers one worker's threads, an flock
+# on a shared file covers the other worker processes. fcntl is Unix-only, so
+# local Windows dev falls back to the thread lock alone.
+_ENCODE_THREADS = "2"
+_ENCODE_LOCK = threading.Lock()
+_ENCODE_LOCK_PATH = os.path.join(tempfile.gettempdir(), "paw-clip-encode.lock")
+
+
+@contextlib.contextmanager
+def _encode_slot():
+    with _ENCODE_LOCK:
+        try:
+            import fcntl
+        except ImportError:
+            yield
+            return
+        with open(_ENCODE_LOCK_PATH, "a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _ffmpeg_path() -> str:
@@ -406,12 +435,14 @@ def composite_overlay(video_bytes: bytes, overlay_png: bytes, layout: dict) -> b
             f"[bg][1:v]overlay=0:0"
         )
         try:
-            subprocess.run(
-                [_ffmpeg_path(), "-y", "-i", video_path, "-i", overlay_path,
-                 "-filter_complex", filter_complex, "-c:v", "libx264",
-                 "-crf", "20", "-movflags", "+faststart", "-an", out_path],
-                check=True, capture_output=True,
-            )
+            with _encode_slot():
+                subprocess.run(
+                    [_ffmpeg_path(), "-y", "-i", video_path, "-i", overlay_path,
+                     "-filter_complex", filter_complex, "-c:v", "libx264",
+                     "-preset", "veryfast", "-threads", _ENCODE_THREADS,
+                     "-crf", "20", "-movflags", "+faststart", "-an", out_path],
+                    check=True, capture_output=True,
+                )
         except FileNotFoundError as e:
             raise OverlayError(
                 "ffmpeg not found -- required to burn the pitch-data overlay "
