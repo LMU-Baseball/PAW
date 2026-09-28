@@ -4,6 +4,7 @@ Hitting (game + HitTrax practice), pitching, and catching Dash modules are
 registered here. All /dash/* routes require login.
 """
 import logging
+import threading
 
 from flask import redirect, request, url_for
 from flask_login import current_user
@@ -38,6 +39,7 @@ def register_dashboards(server):
     build_cauldron_dash(server)
     from app.dashboards.splash_report.index import build_splash_report_dash
     build_splash_report_dash(server)
+    _serialize_dash_setup(server)
 
     # Best-effort: seed cauldron_scoring so a fresh deploy's board isn't inert
     # (empty scoring config -> no grid columns, score_day is a no-op). The
@@ -66,3 +68,33 @@ def _protect_dash_routes(server):
     def _require_login_for_dash():
         if request.path.startswith("/dash/") and not current_user.is_authenticated:
             return redirect(url_for("auth.login", next=request.path))
+
+
+def _serialize_dash_setup(server):
+    """Dash 4.4.1's `_setup_server` (run as a before_request hook by every
+    Dash app) marks itself done on its FIRST line, then builds the library
+    registry. Under gunicorn's threaded workers, a parallel request landing
+    in that gap skips setup and 500s with '"dash" is not a registered
+    library' -- seen on a phone's first page load right after a restart
+    (2026-09-27). Holding a lock until the first run finishes makes those
+    requests wait instead; after that it's a plain flag check."""
+    lock = threading.Lock()
+    funcs = server.before_request_funcs.setdefault(None, [])
+    for i, func in enumerate(funcs):
+        if getattr(func, "__name__", "") == "_setup_server":
+            funcs[i] = _run_once_under(lock, func)
+
+
+def _run_once_under(lock, setup):
+    done = False
+
+    def _setup_server():
+        nonlocal done
+        if done:
+            return
+        with lock:
+            if not done:
+                setup()
+                done = True
+
+    return _setup_server
