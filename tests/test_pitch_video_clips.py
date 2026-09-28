@@ -283,6 +283,14 @@ def test_predict_continuous_flags_pitches_past_a_non_seamless_rollover():
     assert "non-seamless" in out["flag"].iloc[1]
 
 
+def test_predict_continuous_ignores_a_negative_gap():
+    """The recording's last file closes when the camera stops and its mtime
+    reads a few seconds early -- an impossible overlap, not lost footage."""
+    tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, -3.3)]
+    out = predict_continuous(_pitches(5000.0, 6000.0), tl, "a", 596.0, 1, 3.0, 4.0)
+    assert out["flag"].isna().all()
+
+
 def test_predict_continuous_flags_clip_windows_that_cross_a_file_boundary():
     tl = [TimelineSegment("a", 0.0, 1080.0, 0.0), TimelineSegment("b", 1080.0, 1080.0, 0.0)]
     out = predict_continuous(_pitches(5000.0, 5482.0), tl, "a", 596.0, 1, 3.0, 4.0)  # 1078s

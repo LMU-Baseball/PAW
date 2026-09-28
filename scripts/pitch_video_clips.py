@@ -374,7 +374,11 @@ def generate_clips(video_dir: str, angle_prefix: str, csv_path: str, game_id: st
 # and `predict_continuous` flags anything after a rollover that isn't.
 
 # FAT32 stores mtimes at 2-second resolution, so a measured gap smaller than
-# this is indistinguishable from a seamless handoff.
+# this is indistinguishable from a seamless handoff. Only a POSITIVE gap
+# means lost footage: the last file of a recording closes out when the
+# camera stops, and on both test cards its mtime came out 1.4-3.3s EARLIER
+# than its length implies -- an overlap that can't be real, and pitches in
+# that file were confirmed on-target by eye.
 SEAMLESS_GAP_SECONDS = 2.5
 
 
@@ -472,7 +476,7 @@ def predict_continuous(pitches: pd.DataFrame, timeline: list[TimelineSegment],
         if seg is not None:
             lo, hi = sorted((anchor_seg.start, seg.start))
             bad = [s.filename for s in timeline
-                   if lo < s.start <= hi and abs(s.rollover_gap) > SEAMLESS_GAP_SECONDS]
+                   if lo < s.start <= hi and s.rollover_gap > SEAMLESS_GAP_SECONDS]
             if bad:
                 flag = f"past a non-seamless rollover ({', '.join(bad)})"
             elif offset < pad_before or offset + pad_after > seg.duration:
@@ -617,7 +621,7 @@ def check_cmd(video_dir, angle_prefix, csv_path, game_id, anchor_file, anchor_ti
     about a minute."""
     timeline = continuous_timeline(video_dir, angle_prefix)
     for s in timeline[1:]:
-        ok = "seamless" if abs(s.rollover_gap) <= SEAMLESS_GAP_SECONDS else "GAP -- check"
+        ok = "seamless" if s.rollover_gap <= SEAMLESS_GAP_SECONDS else "GAP -- check"
         click.echo(f"  rollover into {s.filename}: {s.rollover_gap:+.2f}s ({ok})")
     df = predict_continuous(_game_pitches(csv_path, game_id), timeline, anchor_file,
                             parse_video_time(anchor_time), anchor_pitch, 3.0, 4.0)
