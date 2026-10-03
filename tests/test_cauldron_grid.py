@@ -54,6 +54,31 @@ def test_coach_grid_is_editable_and_has_required_ids(monkeypatch):
     assert "cauldron-cycle" not in s       # Cycle selector removed
 
 
+def _find_grid(comp):
+    if getattr(comp, "id", None) == "cauldron-grid":
+        return comp
+    children = getattr(comp, "children", None)
+    for child in children if isinstance(children, list) else [children]:
+        if child is not None and not isinstance(child, str):
+            found = _find_grid(child)
+            if found is not None:
+                return found
+    return None
+
+
+def test_coach_grid_header_sticks_to_the_viewport_without_a_nested_scroll(monkeypatch):
+    """KPI header row stays visible while a coach scrolls down the roster,
+    via CSS sticky against the page -- not fixed_rows, whose nested scroll
+    box would re-clip the Team/Captain dropdowns on the last rows."""
+    _patch_reads(monkeypatch)
+    grid = _find_grid(G.coach_grid("2026-03-02", "2026-03-02", "2025/2026"))
+
+    assert grid.style_header["position"] == "sticky"
+    assert grid.style_header["top"] == 0
+    assert grid.style_table == {"overflowX": "visible", "overflowY": "visible"}
+    assert not getattr(grid, "fixed_rows", None)
+
+
 def test_coach_grid_prefills_team_and_scores_auto_metric_live(monkeypatch):
     teams_df = pd.DataFrame([{"player_id": 823008, "cycle_id": "cycle-1", "team": "Team 2"}])
     _patch_reads(monkeypatch, teams_df=teams_df, computed={"strike_pct": 60.0})
