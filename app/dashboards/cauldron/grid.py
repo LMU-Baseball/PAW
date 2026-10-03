@@ -315,7 +315,14 @@ def coach_grid(play_date, week_start, season, *, scoring: pd.DataFrame | None = 
         style_table={"overflowX": "visible", "overflowY": "visible"},
         style_cell={"fontFamily": "Teko, sans-serif", "fontSize": "15px",
                     "padding": "4px 8px", "textAlign": "center"},
-        style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold"},
+        # Sticky to the viewport (Brad, 2026-10-02: coaches lose track of which
+        # KPI column they're typing into once the header scrolls away). Works
+        # only because the table and its wrappers are overflow:visible above,
+        # so the page itself is the scroll container. dash_table's own
+        # fixed_rows would instead wrap the body in a nested scroll box and
+        # bring back the clipped-dropdown bug.
+        style_header={"backgroundColor": shell.CRIMSON, "color": "white", "fontWeight": "bold",
+                      "position": "sticky", "top": 0, "zIndex": 2},
     )
 
     grid_wrap = html.Div([
