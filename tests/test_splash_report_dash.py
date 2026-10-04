@@ -981,14 +981,12 @@ def test_season_change_keeps_valid_player_else_falls_back_to_first(server, monke
     never silently keep an id that's invalid for the newly selected season."""
     from dash import Dash
     from app.dashboards.splash_report import layout, callbacks
-    from app.dashboards.splash_report import callbacks as cb_module
-
     roster_by_season = {
         "2026/2027": [{"label": "Placeholder, P", "value": -13}],
         "2025/2026": [{"label": "Behrens, Adam", "value": 823008},
                      {"label": "Casole, John", "value": 111}],
     }
-    monkeypatch.setattr(cb_module.selectors, "pitcher_options",
+    monkeypatch.setattr(layout.selectors, "pitcher_options",
                         lambda **kw: roster_by_season[kw["season"]])
 
     dash_app = Dash(__name__, server=server, url_base_pathname="/dash/splashseason/",
@@ -999,8 +997,8 @@ def test_season_change_keeps_valid_player_else_falls_back_to_first(server, monke
 
     # the OLD season's id (-13) doesn't exist in the new season's roster
     opts, value = on_season("2025/2026", -13)
-    assert value == 823008  # falls back to the new season's first option
-    assert {o["value"] for o in opts} == {823008, 111}
+    assert value == SR.DEMO_PLAYER_ID  # falls back to the first option, the demo player
+    assert {o["value"] for o in opts} == {823008, 111, SR.DEMO_PLAYER_ID}
 
     # a still-valid id is left untouched
     opts2, value2 = on_season("2025/2026", 111)
@@ -1080,3 +1078,42 @@ def test_pitching_hub_has_splash_report_card(server):
     client.post("/login", data={"email": "splashhub@lmu.edu", "password": "x"})
     body = client.get("/pitching").get_data(as_text=True)
     assert "Built on the Bluff" in body and "/dash/splash_report/" in body
+
+
+def test_player_options_puts_the_demo_player_first(monkeypatch):
+    from app.dashboards.splash_report import layout
+    monkeypatch.setattr(layout.selectors, "pitcher_options",
+                        lambda **k: [{"label": "Real, Pitcher", "value": -20}])
+    opts = layout.player_options(is_coach=True, own_trackman_id=None, season="2026/2027")
+    assert opts == [{"label": "Player Example", "value": SR.DEMO_PLAYER_ID},
+                    {"label": "Real, Pitcher", "value": -20}]
+
+
+def test_demo_player_id_is_outside_the_roster_placeholder_range():
+    """Roster placeholders are -roster_id (small negatives); the demo id must
+    never collide with one or it would show up on every dashboard."""
+    assert SR.DEMO_PLAYER_ID <= -9000
+
+
+def test_load_data_for_demo_player_never_reads_trackman(monkeypatch):
+    """The demo player has no GAMES rows: its profile card and KPI tiles come
+    from constants, while the plan sections load like any player's."""
+    from app.dashboards.splash_report import layout
+
+    def _boom(*a, **k):
+        raise AssertionError("demo player must not query Trackman data")
+
+    monkeypatch.setattr(layout.pitching_caps, "pitcher_profile", _boom)
+    monkeypatch.setattr(layout.pitching_caps, "range_summary", _boom)
+    for fn in ("read_engine_metrics", "read_gas_station", "read_scripts",
+               "read_pen_results", "read_deleted_pen_results"):
+        monkeypatch.setattr(SR, fn, lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(SR, "read_plan", lambda *a, **k: {})
+    monkeypatch.setattr(SR, "read_all_script_rows", lambda *a, **k: {})
+    monkeypatch.setattr(SR, "read_all_movement", lambda *a, **k: {})
+    monkeypatch.setattr(SR, "read_drill_options", lambda: [])
+    monkeypatch.setattr(SR, "list_videos", lambda *a, **k: pd.DataFrame())
+
+    data = layout.load_data(SR.DEMO_PLAYER_ID, "2026/2027", "Fall")
+    assert data["profile"]["name"] == "Player Example"
+    assert data["kpis"] == SR.DEMO_KPIS

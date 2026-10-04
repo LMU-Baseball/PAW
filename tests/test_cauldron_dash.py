@@ -182,6 +182,8 @@ def test_kpi_save_is_noop_for_non_coach(server, monkeypatch):
     label_calls = []
     monkeypatch.setattr(cauldron, "update_scoring_label",
                         lambda *a, **k: label_calls.append((a, k)))
+    monkeypatch.setattr(cauldron, "update_scoring_labels",
+                        lambda *a, **k: label_calls.append((a, k)))
 
     with server.app_context():
         player = User(email="cldkpc@lmu.edu", name="Player", role="player", trackman_id=-997)
@@ -205,6 +207,47 @@ def test_kpi_save_is_noop_for_non_coach(server, monkeypatch):
     from dash import no_update
     assert all(v is no_update for v in out)
     assert label_calls == []
+
+
+def test_on_kpi_save_writes_only_the_labels_that_changed(server, monkeypatch):
+    """Save submits every column's label; rewriting all of them one by one
+    made Save visibly slow (2026-10-04). Only changed labels are written,
+    in one batch, and an unchanged submit writes nothing."""
+    import pandas as pd
+    from app.extensions import db
+    from app.auth.models import User
+    from flask_login import login_user
+    from dash import Dash
+    from app.data import cauldron
+    from app.dashboards.cauldron import layout, callbacks
+
+    scoring = pd.DataFrame({"metric": ["k_pct", "bb_pct"], "label": ["K%", "BB%"],
+                            "is_manual": [0, 0], "sort_order": [1, 2]})
+    written = []
+    monkeypatch.setattr(cauldron, "read_scoring", lambda: scoring)
+    monkeypatch.setattr(cauldron, "update_scoring_labels", lambda labels: written.append(labels))
+    monkeypatch.setattr(callbacks, "_scoreboard", lambda *a: "scoreboard")
+    ids = [{"type": "cauldron-kpi-label-input", "index": m} for m in ("k_pct", "bb_pct")]
+
+    with server.app_context():
+        coach = User(email="cldkpch@lmu.edu", name="Coach", role="coach")
+        coach.set_password("x")
+        db.session.add(coach)
+        db.session.commit()
+        dash_app = Dash(__name__, server=server, url_base_pathname="/dash/cldkpich/",
+                        suppress_callback_exceptions=True)
+        dash_app.layout = layout.serve_layout
+        callbacks.register_callbacks(dash_app)
+        on_kpi_save = _raw_callback(dash_app, input_id="cauldron-kpi-save")
+
+        with server.test_request_context("/dash/cauldron/"):
+            login_user(coach)
+            status, _, _ = on_kpi_save(1, ["K%", "Walk%"], ids, "2026-03-02", "2025/2026")
+            unchanged_status, _, _ = on_kpi_save(2, ["K%", "BB%"], ids, "2026-03-02", "2025/2026")
+
+    assert written == [{"bb_pct": "Walk%"}]
+    assert status == "Labels saved."
+    assert unchanged_status == "No changes to save."
 
 
 def test_on_kpi_save_updates_label_and_refreshes_grid_columns(server):

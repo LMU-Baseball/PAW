@@ -178,8 +178,13 @@ def register_callbacks(dash_app) -> None:
         `cauldron.read_scoring()`."""
         if not n_clicks or not _is_coach():
             return no_update, no_update, no_update
-        for id_, value in zip(ids, values):
-            cauldron.update_scoring_label(id_["index"], value or "")
+        scoring = cauldron.read_scoring()
+        current = {row["metric"]: (row["label"] or "") for _, row in scoring.iterrows()}
+        changed = {id_["index"]: (value or "").strip() for id_, value in zip(ids, values)
+                   if (value or "").strip() != current.get(id_["index"], "")}
+        if not changed:
+            return "No changes to save.", no_update, no_update
+        cauldron.update_scoring_labels(changed)
         scoring = cauldron.read_scoring()
         return "Labels saved.", grid.grid_columns(scoring), _scoreboard(week_start, season)
 

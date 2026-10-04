@@ -78,6 +78,62 @@ def test_read_scoring_seeded_content_after_fresh_ensure_tables():
     assert orders == list(range(1, len(sc) + 1))
 
 
+class _RecordingEngine:
+    """Stands in for get_engine(): records every executed statement instead
+    of touching the shared scoring table."""
+    def __init__(self):
+        self.executed = []
+
+    def begin(self):
+        import contextlib
+
+        @contextlib.contextmanager
+        def _conn():
+            class _C:
+                def execute(_, sql, params=None):
+                    self.executed.append(params)
+            yield _C()
+        return _conn()
+
+
+def test_seed_default_scoring_fills_an_empty_table(monkeypatch):
+    engine = _RecordingEngine()
+    monkeypatch.setattr(C, "ensure_tables", lambda *a, **k: None)
+    monkeypatch.setattr(C, "get_engine", lambda: engine)
+    monkeypatch.setattr(C, "query_df", lambda sql, params=None: pd.DataFrame(columns=["metric"]))
+    C.seed_default_scoring()
+    assert [p["metric"] for p in engine.executed] == [d[0] for d in C._SCORING_DEFAULTS]
+
+
+def test_seed_default_scoring_never_resurrects_a_deleted_kpi(monkeypatch):
+    """2026-10-04: the seed ran on every boot and re-inserted any missing
+    default, so KPIs a coach deleted came back after each restart/deploy.
+    Once the coach has any KPIs configured, seeding must write nothing."""
+    engine = _RecordingEngine()
+    monkeypatch.setattr(C, "ensure_tables", lambda *a, **k: None)
+    monkeypatch.setattr(C, "get_engine", lambda: engine)
+    monkeypatch.setattr(C, "query_df", lambda sql, params=None: pd.DataFrame({"metric": ["k"]}))
+    C.seed_default_scoring()
+    assert engine.executed == []
+
+
+def test_totals_ignore_points_from_deleted_kpis(monkeypatch):
+    teams = pd.DataFrame({"player_id": [1, 2], "team": ["Team 1", "Team 2"]})
+    daily = pd.DataFrame({
+        "player_id": [1, 1, 2],
+        "metric": ["strike_pct", "count_work", "count_work"],
+        "points": [20, 15, -10],
+    })
+    monkeypatch.setattr(C, "read_teams", lambda cycle_id: teams)
+    monkeypatch.setattr(C, "read_scoring", lambda: pd.DataFrame({"metric": ["strike_pct"]}))
+    monkeypatch.setattr(C, "query_df", lambda sql, params=None: daily)
+
+    pt = C.player_totals("c1").set_index("player_id")["total"]
+    assert pt.to_dict() == {1: 20, 2: 0}
+    tt = C.team_totals("c1").set_index("team")["total"]
+    assert tt.to_dict() == {"Team 1": 20, "Team 2": 0}
+
+
 def test_update_scoring_label_renames_only_the_label():
     """2026-09-26 (Brad: "keep them as is for now, but give them the ability
     to change what each column is measuring") -- update_scoring_label must

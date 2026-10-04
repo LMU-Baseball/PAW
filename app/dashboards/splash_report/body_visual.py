@@ -93,9 +93,14 @@ def _ring_gauge(value, baseline, color, *, size_px: int = 112) -> html.Div:
     player who exceeds the D1 average still just shows a full ring instead
     of overflowing it; the raw number is always the actual value, not the
     clamped fraction."""
-    if value is None or baseline in (None, 0):
+    if value is None:
         pct = 0.0
         text = "—"
+    elif baseline in (None, 0):
+        # No threshold set yet (Grip, as of 2026-10-04): show the logged
+        # number on a full neutral ring rather than hiding it behind "—".
+        pct = 100.0
+        text = f"{value:g}"
     else:
         pct = max(0.0, min(1.0, float(value) / float(baseline))) * 100.0
         text = f"{value:g}"

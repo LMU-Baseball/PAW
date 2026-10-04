@@ -1006,11 +1006,18 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
     return html.Div([profile_card, workdays, *(extra or [])])
 
 
+def player_options(*, is_coach: bool, own_trackman_id, season) -> list[dict]:
+    """The Bluff-only demo player first (Brad, 2026-10-04: it's what coaches
+    open the page to show recruits), then the season's real pitchers."""
+    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own_trackman_id,
+                                        season=season)
+    return [{"label": SR.DEMO_PLAYER_NAME, "value": SR.DEMO_PLAYER_ID}] + players
+
+
 def filters(player_id, season_label, cycle) -> html.Div:
     is_coach = bool(getattr(current_user, "is_coach", False))
     own = getattr(current_user, "trackman_id", None)
-    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
-                                        season=season_label)
+    players = player_options(is_coach=is_coach, own_trackman_id=own, season=season_label)
     return html.Div([
         html.Div([html.Label("Player", style=_LABEL_STYLE),
                   dcc.Dropdown(id="splash-player", options=players, value=player_id,
@@ -1036,9 +1043,12 @@ def load_data(player_id, season_label, cycle) -> dict:
     if player_id is None:
         return {}
     pid = int(player_id)
-    profile = pitching_caps.pitcher_profile(pid)
-    s_b, e_b = seasons.season_bounds(season_label)
-    kpis = pitching_caps.range_summary(pid, s_b, e_b)
+    if SR.is_demo_player(pid):
+        profile, kpis = dict(SR.DEMO_PROFILE), dict(SR.DEMO_KPIS)
+    else:
+        profile = pitching_caps.pitcher_profile(pid)
+        s_b, e_b = seasons.season_bounds(season_label)
+        kpis = pitching_caps.range_summary(pid, s_b, e_b)
     plan = SR.read_plan(pid, season_label, cycle)
     engine = SR.read_engine_metrics(pid, season_label, cycle)
     gas = SR.read_gas_station(pid, season_label, cycle)
@@ -1181,9 +1191,11 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     cycle = SR.cycle_for_date(date.today())
-    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    players = player_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    # A player account still opens on their own plan; everyone else opens on
+    # the first option, the demo player.
     default_player = selectors.resolve_pitcher(None, is_coach=is_coach, own_trackman_id=own) \
-        or (players[0]["value"] if players else None)
+        or players[0]["value"]
 
     controls = []
     if is_coach:
