@@ -26,7 +26,6 @@ from dash import ALL, MATCH, Input, Output, State, ctx, no_update
 from flask_login import current_user
 
 from app.data import splash_report as SR
-from app.dashboards.pitching import selectors
 from app.dashboards.splash_report import charts, layout
 
 
@@ -65,7 +64,7 @@ def register_callbacks(dash_app) -> None:
     def _on_season_change(season, current_player_id):
         is_coach = _is_coach()
         own = getattr(current_user, "trackman_id", None)
-        opts = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
+        opts = layout.player_options(is_coach=is_coach, own_trackman_id=own, season=season)
         values = {o["value"] for o in opts}
         value = current_player_id if current_player_id in values else (
             opts[0]["value"] if opts else None)

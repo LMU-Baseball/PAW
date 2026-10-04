@@ -1006,11 +1006,17 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
     return html.Div([profile_card, workdays, *(extra or [])])
 
 
+def player_options(*, is_coach: bool, own_trackman_id, season) -> list[dict]:
+    """The season's real pitchers, plus the Bluff-only demo player last."""
+    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own_trackman_id,
+                                        season=season)
+    return players + [{"label": SR.DEMO_PLAYER_NAME, "value": SR.DEMO_PLAYER_ID}]
+
+
 def filters(player_id, season_label, cycle) -> html.Div:
     is_coach = bool(getattr(current_user, "is_coach", False))
     own = getattr(current_user, "trackman_id", None)
-    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own,
-                                        season=season_label)
+    players = player_options(is_coach=is_coach, own_trackman_id=own, season=season_label)
     return html.Div([
         html.Div([html.Label("Player", style=_LABEL_STYLE),
                   dcc.Dropdown(id="splash-player", options=players, value=player_id,
@@ -1036,9 +1042,12 @@ def load_data(player_id, season_label, cycle) -> dict:
     if player_id is None:
         return {}
     pid = int(player_id)
-    profile = pitching_caps.pitcher_profile(pid)
-    s_b, e_b = seasons.season_bounds(season_label)
-    kpis = pitching_caps.range_summary(pid, s_b, e_b)
+    if SR.is_demo_player(pid):
+        profile, kpis = dict(SR.DEMO_PROFILE), dict(SR.DEMO_KPIS)
+    else:
+        profile = pitching_caps.pitcher_profile(pid)
+        s_b, e_b = seasons.season_bounds(season_label)
+        kpis = pitching_caps.range_summary(pid, s_b, e_b)
     plan = SR.read_plan(pid, season_label, cycle)
     engine = SR.read_engine_metrics(pid, season_label, cycle)
     gas = SR.read_gas_station(pid, season_label, cycle)

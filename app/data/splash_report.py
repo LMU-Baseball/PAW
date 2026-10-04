@@ -112,6 +112,25 @@ N_SCRIPT_ROWS = 12
 # as goal/measurable.
 SCRIPT_TYPES: tuple[str, ...] = ("Velo", "Pitch Design", "Execution")
 
+# "Player Example" (2026-10-04, Brad): a made-up pitcher coaches can show
+# recruits and test on, listed ONLY on the Built on the Bluff page. Its id is
+# far below the roster placeholder range (-roster_id), so nothing that lists
+# real pitchers (GAMES / lmu_roster) can ever pick it up. It has no Trackman
+# data, so its profile card and KPI tiles come from these constants; its
+# plan/scripts/pen results live in the splash_* tables like any player's
+# (seeded by scripts/seed_player_example.py), so it stays editable.
+DEMO_PLAYER_ID = -9001
+DEMO_PLAYER_NAME = "Player Example"
+DEMO_PROFILE = {"name": DEMO_PLAYER_NAME, "class_year": "Jr.", "position": "RHP",
+                "throws": "Right", "jersey": "00", "photo": ""}
+DEMO_KPIS = {"appearances": "11", "ip": "34.2", "k_pct": "27.8%",
+             "bb_pct": "7.9%", "barrel_pct": "4.6%"}
+
+
+def is_demo_player(player_id) -> bool:
+    return player_id is not None and int(player_id) == DEMO_PLAYER_ID
+
+
 STRENGTH_METRICS: tuple[str, ...] = ("IR", "ER", "Scaption", "Grip")
 # "ScaptionROM" added 2026-09-14 (Brad: "we will be measuring Scaption ROM
 # as well, not just strength") -- placed after EROM, matching where Brad
