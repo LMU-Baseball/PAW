@@ -138,11 +138,15 @@ def _clean(value):
 # ============================== SCORING CONFIG ===============================
 
 def seed_default_scoring() -> None:
-    """Insert the placeholder metric config rows if they don't already exist.
-    `ON DUPLICATE KEY UPDATE metric=metric` is a no-op on conflict, so a
-    re-seed (e.g. on every app boot) NEVER overwrites a coach's tuned
-    threshold/points -- only fills in metrics that are missing."""
+    """Insert the placeholder metric config rows into an EMPTY scoring table
+    only -- i.e. a brand-new deploy. Once any KPI exists, the coach owns the
+    list: this runs on every app boot, and it used to re-insert any default
+    metric that was missing, which silently resurrected every KPI a coach
+    had deleted on the next restart/deploy (2026-10-04 -- the coach's deletes
+    "kept coming back" and the grid filled up with duplicate columns)."""
     ensure_tables()
+    if not query_df(f"SELECT metric FROM {SCORING_TABLE} LIMIT 1").empty:
+        return
     sql = text(f"""
         INSERT INTO {SCORING_TABLE}
             (metric, label, threshold, direction, points_met, points_missed,
@@ -240,6 +244,16 @@ def delete_scoring_metric(metric: str) -> None:
         conn.execute(text(f"DELETE FROM {SCORING_TABLE} WHERE metric = :metric"),
                      {"metric": metric})
 
+
+def set_scoring_order(metrics: list[str]) -> None:
+    """Sets the left-to-right column order: `metrics[0]` gets sort_order 1,
+    and so on. Metrics not listed keep their current sort_order."""
+    ensure_tables()
+    with get_engine().begin() as conn:
+        for i, metric in enumerate(metrics, start=1):
+            conn.execute(text(
+                f"UPDATE {SCORING_TABLE} SET sort_order = :o WHERE metric = :metric"),
+                {"o": i, "metric": metric})
 
 # ================================== DAILY ====================================
 
@@ -580,6 +594,17 @@ def score_day(play_date, season=None) -> int:
 
 # ============================== AGGREGATION ==================================
 
+def _current_kpi_points(daily: pd.DataFrame) -> pd.DataFrame:
+    """Only points recorded under a KPI that's still configured count toward
+    a total. Deleting a column keeps its historical cauldron_daily rows (see
+    `delete_scoring_metric`), but a column the coach removed shouldn't keep
+    moving the scoreboard."""
+    if daily.empty:
+        return daily
+    current = set(read_scoring()["metric"])
+    return daily[daily["metric"].isin(current)]
+
+
 def player_totals(cycle_id, start=None, end=None) -> pd.DataFrame:
     """Points summed per player from `cauldron_daily`, for players rostered
     onto a team in `cycle_id` (`read_teams`), optionally bounded to
@@ -600,7 +625,8 @@ def player_totals(cycle_id, start=None, end=None) -> pd.DataFrame:
         clauses.append("play_date <= :end")
         params["end"] = str(end)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    daily = query_df(f"SELECT player_id, points FROM {DAILY_TABLE}{where}", params)
+    daily = _current_kpi_points(
+        query_df(f"SELECT player_id, metric, points FROM {DAILY_TABLE}{where}", params))
 
     player_ids = teams["player_id"].astype(int)
     result = pd.DataFrame({"player_id": player_ids})
@@ -625,7 +651,8 @@ def team_totals(cycle_id) -> pd.DataFrame:
     if teams.empty:
         return pd.DataFrame(columns=cols)
 
-    daily = query_df(f"SELECT player_id, points FROM {DAILY_TABLE}")
+    daily = _current_kpi_points(
+        query_df(f"SELECT player_id, metric, points FROM {DAILY_TABLE}"))
     merged = teams[["player_id", "team"]].merge(daily, on="player_id", how="left")
     result = merged.groupby("team", as_index=False)["points"].sum()
     result = result.rename(columns={"points": "total"})
