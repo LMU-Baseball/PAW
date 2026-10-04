@@ -997,7 +997,7 @@ def test_season_change_keeps_valid_player_else_falls_back_to_first(server, monke
 
     # the OLD season's id (-13) doesn't exist in the new season's roster
     opts, value = on_season("2025/2026", -13)
-    assert value == 823008  # falls back to the new season's first option
+    assert value == SR.DEMO_PLAYER_ID  # falls back to the first option, the demo player
     assert {o["value"] for o in opts} == {823008, 111, SR.DEMO_PLAYER_ID}
 
     # a still-valid id is left untouched
@@ -1080,13 +1080,13 @@ def test_pitching_hub_has_splash_report_card(server):
     assert "Built on the Bluff" in body and "/dash/splash_report/" in body
 
 
-def test_player_options_adds_the_demo_player_last(monkeypatch):
+def test_player_options_puts_the_demo_player_first(monkeypatch):
     from app.dashboards.splash_report import layout
     monkeypatch.setattr(layout.selectors, "pitcher_options",
                         lambda **k: [{"label": "Real, Pitcher", "value": -20}])
     opts = layout.player_options(is_coach=True, own_trackman_id=None, season="2026/2027")
-    assert opts == [{"label": "Real, Pitcher", "value": -20},
-                    {"label": "Player Example", "value": SR.DEMO_PLAYER_ID}]
+    assert opts == [{"label": "Player Example", "value": SR.DEMO_PLAYER_ID},
+                    {"label": "Real, Pitcher", "value": -20}]
 
 
 def test_demo_player_id_is_outside_the_roster_placeholder_range():

@@ -82,4 +82,10 @@ def test_ring_gauge_clamps_fraction_and_shows_raw_value():
 
 def test_ring_gauge_handles_no_baseline_or_no_value():
     assert "—" in str(body_visual._ring_gauge(None, 50, "#c9c9c9"))
-    assert "—" in str(body_visual._ring_gauge(40, None, "#c9c9c9"))
+
+
+def test_ring_gauge_without_a_threshold_still_shows_the_logged_value():
+    """Grip has no red/green threshold yet; a logged reading must still show
+    (2026-10-04, Brad: the Grip gauge read "—" even with a value in the table)."""
+    gauge = str(body_visual._ring_gauge(43.0, None, "#c9c9c9"))
+    assert "43" in gauge and "—" not in gauge

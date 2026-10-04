@@ -63,22 +63,32 @@ def pen_results_fig(df: pd.DataFrame) -> go.Figure:
         fig.add_trace(go.Scatter(
             x=sub["instance"], y=sub["value"], mode="lines+markers",
             name=f"Script {int(script_number)}",
-            line=dict(color=color, width=2), marker=dict(color=color, size=7),
+            line=dict(color=color, width=3),
+            marker=dict(color=color, size=9, line=dict(width=1.5, color="white")),
             customdata=sub[["date_label"]].to_numpy(),
             hovertemplate=(f"Script {int(script_number)} - #%{{x}}"
-                           "<br>%{customdata[0]}<br>%{y:.0f}%<extra></extra>"),
+                           "<br>%{customdata[0]}<br>%{y:.1f}<extra></extra>"),
         ))
+        # 2026-10-04 (Brad: "the script lines are really close together"):
+        # name each line at its last point so it reads without the legend.
+        last = sub.iloc[-1]
+        fig.add_annotation(x=last["instance"], y=last["value"], text=f"S{int(script_number)}",
+                           xanchor="left", xshift=8, showarrow=False,
+                           font=dict(color=color, size=14, family="Teko, sans-serif"))
+    y_min, y_max = float(d["value"].min()), float(d["value"].max())
+    y_pad = max(3.0, (y_max - y_min) * 0.08)
+    grid = "rgba(0,0,0,0.07)"
     fig.update_layout(
         # 2026-09-17 (Brad, screenshot): the x-axis title and the legend row
         # were landing on top of each other -- taller bottom margin + legend
         # pushed further down gives each its own row instead of stacking.
-        title="Script Pen Results", height=380, margin=dict(l=40, r=20, t=50, b=90),
+        title="Script Pen Results", height=440, margin=dict(l=45, r=40, t=50, b=90),
         xaxis=dict(title="Time Thrown", tickmode="linear", tick0=1, dtick=1,
-                   range=[0.7, int(d["instance"].max()) + 0.3]),
-        yaxis=dict(title="Result (%)"),
+                   range=[0.7, int(d["instance"].max()) + 0.6], gridcolor=grid),
+        yaxis=dict(title="Result", range=[y_min - y_pad, y_max + y_pad], gridcolor=grid),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
-        font=dict(family="Teko, sans-serif"),
-        legend=dict(orientation="h", y=-0.35, x=0.5, xanchor="center"))
+        font=dict(family="Teko, sans-serif"), hovermode="closest",
+        legend=dict(orientation="h", y=-0.3, x=0.5, xanchor="center"))
     return fig
 
 
@@ -135,15 +145,18 @@ def scripts_movement_fig(movement_by_script: dict, selected: list[int] | None = 
     # (`bullpen.charts.movement_fig`). Dots stay per-script averages; the
     # ellipse is built from the underlying per-session entries, since a
     # handful of averaged dots is too few points for a covariance ellipse.
+    xs, ys = list(all_rows["hb"].dropna()), list(all_rows["ivb"].dropna())
     if agg["script_number"].nunique() > 1:
         for pitch_type, raw in all_rows.groupby("pitch_type"):
             ell = _ellipse_xy(raw["hb"], raw["ivb"])
             if ell is None:
                 continue
+            xs += list(ell[0])
+            ys += list(ell[1])
             color = color_for(pitch_type)
             fig.add_trace(go.Scatter(
                 x=ell[0], y=ell[1], mode="lines", fill="toself", fillcolor=color,
-                opacity=0.15, line=dict(color=color, width=1),
+                opacity=0.22, line=dict(color=color, width=1.5),
                 showlegend=False, hoverinfo="skip"))
     for pitch_type, sub in agg.groupby("pitch_type"):
         color = color_for(pitch_type)
@@ -162,8 +175,13 @@ def scripts_movement_fig(movement_by_script: dict, selected: list[int] | None = 
         # pitch-type legend were overlapping with only b=40/y=-0.2 to work
         # with -- taller bottom margin + legend pushed further down gives
         # the title its own row above the legend.
-        title="Movement", height=340, margin=dict(l=40, r=20, t=50, b=90),
-        xaxis=dict(title="HB (in)", zeroline=True), yaxis=dict(title="IVB (in)", zeroline=True),
+        # Explicit padded ranges (2026-10-04): autorange hugged the outermost
+        # dot, clipping its "S#" label and the edge of its ellipse.
+        title="Movement", height=400, margin=dict(l=45, r=20, t=50, b=90),
+        xaxis=dict(title="HB (in)", zeroline=True, range=[min(xs) - 3, max(xs) + 3],
+                   gridcolor="rgba(0,0,0,0.07)"),
+        yaxis=dict(title="IVB (in)", zeroline=True, range=[min(ys) - 3, max(ys) + 4],
+                   gridcolor="rgba(0,0,0,0.07)"),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,0.85)",
         font=dict(family="Teko, sans-serif"),
         legend=dict(orientation="h", y=-0.32, x=0.5, xanchor="center"))

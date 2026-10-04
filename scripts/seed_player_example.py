@@ -80,7 +80,7 @@ SCRIPTS = [
     {"script_number": 5, "script_type": "Execution", "goal": "Pre2K Zone 52%",
      "measurable": "2/3 Win%", "pitch_design_result": None},
     {"script_number": 6, "script_type": "Pitch Design", "goal": "Develop gyro SL",
-     "measurable": "SL Avg VB", "pitch_design_result": "1.2"},
+     "measurable": "SL Avg Velo", "pitch_design_result": "84.9"},
 ]
 
 
@@ -126,33 +126,47 @@ SCRIPT_ROWS = {
              ("FB", "4-seam", "Tunnel check", ""), ("SL", "Gyro grip", "Full intent", "")),
 }
 
-# Each script thrown 6-7 times across the fall, trending toward its goal with
-# realistic bullpen-to-bullpen noise.
+# Each script thrown 6 times across the fall, trending toward its goal with
+# realistic bullpen-to-bullpen noise. Velo/pitch-design values are mph,
+# execution values are %.
 PEN = {
-    1: [("2026-08-27", 91.2), ("2026-09-03", 91.8), ("2026-09-10", 91.5), ("2026-09-17", 92.6),
-        ("2026-09-24", 93.0), ("2026-10-01", 93.4)],
-    2: [("2026-08-28", 89.4), ("2026-09-04", 89.9), ("2026-09-11", 90.6), ("2026-09-18", 90.3),
-        ("2026-09-25", 91.4), ("2026-10-02", 91.7)],
-    3: [("2026-08-29", 52.0), ("2026-09-05", 58.0), ("2026-09-12", 55.0), ("2026-09-19", 61.0),
-        ("2026-09-26", 64.0), ("2026-10-02", 67.0)],
-    4: [("2026-08-30", 41.0), ("2026-09-06", 45.0), ("2026-09-13", 50.0), ("2026-09-20", 48.0),
-        ("2026-09-27", 55.0), ("2026-10-03", 58.0)],
-    5: [("2026-08-31", 46.0), ("2026-09-07", 50.0), ("2026-09-14", 54.0), ("2026-09-21", 53.0),
-        ("2026-09-28", 59.0), ("2026-10-03", 62.0)],
-    6: [("2026-09-01", 4.1), ("2026-09-08", 3.2), ("2026-09-15", 2.6), ("2026-09-22", 1.9),
-        ("2026-09-29", 1.4), ("2026-10-03", 1.2)],
+    1: [("2026-08-27", 91.6), ("2026-09-03", 92.3), ("2026-09-10", 92.0), ("2026-09-17", 93.1),
+        ("2026-09-24", 93.8), ("2026-10-01", 94.4)],
+    2: [("2026-08-28", 87.9), ("2026-09-04", 88.6), ("2026-09-11", 89.4), ("2026-09-18", 89.1),
+        ("2026-09-25", 90.2), ("2026-10-02", 90.8)],
+    3: [("2026-08-29", 55.0), ("2026-09-05", 61.0), ("2026-09-12", 58.0), ("2026-09-19", 66.0),
+        ("2026-09-26", 70.0), ("2026-10-02", 74.0)],
+    4: [("2026-08-30", 34.0), ("2026-09-06", 39.0), ("2026-09-13", 45.0), ("2026-09-20", 43.0),
+        ("2026-09-27", 49.0), ("2026-10-03", 53.0)],
+    5: [("2026-08-31", 44.0), ("2026-09-07", 48.0), ("2026-09-14", 52.0), ("2026-09-21", 57.0),
+        ("2026-09-28", 55.0), ("2026-10-03", 61.0)],
+    6: [("2026-09-01", 81.8), ("2026-09-08", 82.6), ("2026-09-15", 83.1), ("2026-09-22", 83.9),
+        ("2026-09-29", 84.3), ("2026-10-03", 84.9)],
 }
 
-# The slider tightening toward a true gyro shape over the fall; fastball
-# shape stable on the velo scripts.
+# Several sessions per pitch type with natural session-to-session scatter
+# (so each pitch type gets a real shape on the movement chart): fastball on
+# the velo scripts, slider + changeup on the off-speed and pitch-design ones,
+# the slider drifting toward a tighter gyro shape over the fall.
 MOVEMENT = {
-    1: [("2026-08-27", "Fastball", 9.4, 16.8), ("2026-09-17", "Fastball", 9.1, 17.3),
-        ("2026-10-01", "Fastball", 8.8, 17.6)],
-    2: [("2026-09-04", "Fastball", 9.2, 17.0), ("2026-09-25", "Fastball", 8.9, 17.5)],
-    6: [("2026-09-01", "Slider", -6.2, 4.1), ("2026-09-08", "Slider", -5.1, 3.2),
-        ("2026-09-15", "Slider", -4.0, 2.6), ("2026-09-22", "Slider", -3.1, 1.9),
-        ("2026-09-29", "Slider", -2.4, 1.4), ("2026-10-03", "Slider", -2.0, 1.2),
-        ("2026-09-22", "Changeup", 14.2, 7.1), ("2026-10-03", "Changeup", 14.8, 6.4)],
+    # Max-effort fastballs (Script 1) ride a little more than the ladder's.
+    1: [("2026-08-27", "Fastball", 10.6, 18.9), ("2026-09-10", "Fastball", 9.2, 17.6),
+        ("2026-09-17", "Fastball", 11.4, 18.2), ("2026-09-24", "Fastball", 9.9, 19.4),
+        ("2026-10-01", "Fastball", 10.8, 17.9)],
+    2: [("2026-08-28", "Fastball", 7.6, 15.9), ("2026-09-11", "Fastball", 9.1, 16.8),
+        ("2026-09-18", "Fastball", 8.0, 14.7), ("2026-09-25", "Fastball", 6.9, 16.2),
+        ("2026-10-02", "Fastball", 8.6, 15.4)],
+    # His current sweepy slider and firm changeup on the off-speed script...
+    4: [("2026-09-06", "Slider", -7.4, 4.6), ("2026-09-13", "Slider", -6.1, 3.1),
+        ("2026-09-20", "Slider", -7.9, 3.4), ("2026-10-03", "Slider", -6.6, 5.0),
+        ("2026-09-06", "Changeup", 15.8, 8.9), ("2026-09-20", "Changeup", 17.1, 7.6),
+        ("2026-10-03", "Changeup", 16.2, 9.6)],
+    # ...versus the tighter gyro slider being built on the pitch-design script.
+    6: [("2026-09-01", "Slider", -3.6, 1.9), ("2026-09-08", "Slider", -2.1, 0.4),
+        ("2026-09-15", "Slider", -2.9, 2.3), ("2026-09-22", "Slider", -1.2, 0.9),
+        ("2026-09-29", "Slider", -1.9, -0.6), ("2026-10-03", "Slider", -0.8, 0.6),
+        ("2026-09-15", "Changeup", 12.9, 5.8), ("2026-09-29", "Changeup", 14.1, 4.6),
+        ("2026-10-03", "Changeup", 13.4, 6.7)],
 }
 
 

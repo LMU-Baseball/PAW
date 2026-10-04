@@ -1007,10 +1007,11 @@ def sidebar(profile: dict, kpis: dict, plan: dict, *, editable: bool,
 
 
 def player_options(*, is_coach: bool, own_trackman_id, season) -> list[dict]:
-    """The season's real pitchers, plus the Bluff-only demo player last."""
+    """The Bluff-only demo player first (Brad, 2026-10-04: it's what coaches
+    open the page to show recruits), then the season's real pitchers."""
     players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own_trackman_id,
                                         season=season)
-    return players + [{"label": SR.DEMO_PLAYER_NAME, "value": SR.DEMO_PLAYER_ID}]
+    return [{"label": SR.DEMO_PLAYER_NAME, "value": SR.DEMO_PLAYER_ID}] + players
 
 
 def filters(player_id, season_label, cycle) -> html.Div:
@@ -1190,9 +1191,11 @@ def serve_layout() -> html.Div:
     own = getattr(current_user, "trackman_id", None)
     season = seasons.current_season()
     cycle = SR.cycle_for_date(date.today())
-    players = selectors.pitcher_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    players = player_options(is_coach=is_coach, own_trackman_id=own, season=season)
+    # A player account still opens on their own plan; everyone else opens on
+    # the first option, the demo player.
     default_player = selectors.resolve_pitcher(None, is_coach=is_coach, own_trackman_id=own) \
-        or (players[0]["value"] if players else None)
+        or players[0]["value"]
 
     controls = []
     if is_coach:
