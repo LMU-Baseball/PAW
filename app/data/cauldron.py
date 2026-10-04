@@ -106,15 +106,27 @@ def _ensure_column(conn, table, col, coldef) -> None:
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {coldef}"))
 
 
+_TABLES_ENSURED = False
+
+
 def ensure_tables(engine=None) -> None:
     """Idempotently create cauldron_scoring/cauldron_teams/cauldron_daily, and
-    migrate cauldron_teams to carry the (additive) is_captain flag."""
+    migrate cauldron_teams to carry the (additive) is_captain flag -- once per
+    process. Every read/write below calls this first, and each check is
+    several RDS round trips (~0.5s from a home connection) whose answer never
+    changes at runtime; paying it on every call made the KPI editor's Delete
+    and Save visibly slow (2026-10-04). Same guard as
+    `app.data.splash_report.ensure_tables`."""
+    global _TABLES_ENSURED
+    if _TABLES_ENSURED:
+        return
     engine = engine or get_engine()
     with engine.begin() as conn:
         for ddl in _DDL.values():
             conn.execute(text(ddl))
         _ensure_column(conn, TEAMS_TABLE, "is_captain",
                        "is_captain TINYINT(1) NOT NULL DEFAULT 0")
+    _TABLES_ENSURED = True
 
 
 def _now() -> str:
@@ -194,6 +206,19 @@ def update_scoring_label(metric: str, label: str) -> None:
             f"UPDATE {SCORING_TABLE} SET label = :label WHERE metric = :metric"),
             {"label": _clean((label or "").strip() or None), "metric": metric})
 
+
+
+def update_scoring_labels(labels: dict[str, str]) -> None:
+    """`update_scoring_label` for several KPIs in one transaction -- the KPI
+    editor's Save submits every column's label at once."""
+    if not labels:
+        return
+    ensure_tables()
+    with get_engine().begin() as conn:
+        for metric, label in labels.items():
+            conn.execute(text(
+                f"UPDATE {SCORING_TABLE} SET label = :label WHERE metric = :metric"),
+                {"label": _clean((label or "").strip() or None), "metric": metric})
 
 def _slugify_metric(label: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
