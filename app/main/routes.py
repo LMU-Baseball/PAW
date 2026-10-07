@@ -2,7 +2,7 @@
 import io
 import re
 
-from flask import Blueprint, abort, render_template, send_file
+from flask import Blueprint, abort, render_template, request, send_file
 from flask_login import current_user, login_required
 
 main_bp = Blueprint("main", __name__)
@@ -57,9 +57,13 @@ def bullpen_video(play_id: str):
     TrackMan play ids are GUIDs, which never contain a `/`, but `path` costs
     nothing and is a strictly safer converter to default to for an id string
     sourced from an external system. Login-gated + team-transparent, same as
-    `/splash-video/<id>` above."""
+    `/splash-video/<id>` above. `?angle=CF` / `?angle=PitcherRight` serves a
+    hand-cut SD-card angle instead of the Edgertronic clip."""
     from app.data import bullpen_video as BV
-    clip = BV.get_clip(play_id)
+    angle = request.args.get("angle", BV.EDGER)
+    if angle not in {k for k, _ in BV.ANGLES}:
+        abort(404)
+    clip = BV.get_clip(play_id, angle)
     if clip is None or clip.get("data") is None:
         abort(404)
     resp = send_file(io.BytesIO(clip["data"]), mimetype=clip.get("mimetype") or "video/mp4",

@@ -33,6 +33,15 @@ from app.data import bullpen as B
 from app.db import get_engine, query_df
 
 TABLE = "bullpen_video_clips"
+ANGLE_TABLE = "bullpen_video_angles"
+
+# Edger lives in TABLE (one Edgertronic clip per play, loaded by the cron).
+# Every other angle is a hand-cut SD-card clip uploaded into ANGLE_TABLE --
+# a separate table rather than an `angle` column on TABLE because TABLE's
+# primary key is play_id alone and changing it would rewrite a 13 GB table.
+EDGER = "Edger"
+ANGLES = [(EDGER, "Edger"), ("CF", "Centerfield"), ("PitcherRight", "Right")]
+_ANGLE_KEYS = {k for k, _ in ANGLES}
 
 _DDL = f"""
     CREATE TABLE IF NOT EXISTS {TABLE} (
@@ -49,12 +58,33 @@ _DDL = f"""
         PRIMARY KEY (play_id)
     )"""
 
+_ANGLE_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {ANGLE_TABLE} (
+        play_id       VARCHAR(64) NOT NULL,
+        angle         VARCHAR(32) NOT NULL,
+        mimetype      VARCHAR(64),
+        size_bytes    INT,
+        data          LONGBLOB,
+        duration_sec  FLOAT,
+        width         INT,
+        height        INT,
+        source_file   VARCHAR(255),
+        uploaded_at   DATETIME,
+        PRIMARY KEY (play_id, angle)
+    )"""
+
 
 def ensure_table(engine=None) -> None:
-    """Idempotently create bullpen_video_clips."""
+    """Idempotently create bullpen_video_clips and bullpen_video_angles."""
     engine = engine or get_engine()
     with engine.begin() as conn:
         conn.execute(text(_DDL))
+        conn.execute(text(_ANGLE_DDL))
+
+
+def _in_clause(ids: list[str]) -> tuple[str, dict]:
+    placeholders = ", ".join(f":p{i}" for i in range(len(ids)))
+    return placeholders, {f"p{i}": pid for i, pid in enumerate(ids)}
 
 
 def existing_play_ids(play_ids: list[str]) -> set[str]:
@@ -105,13 +135,61 @@ def add_clip(play_id: str, session_id: str, data: bytes, *, mimetype: str = "vid
         })
 
 
-def get_clip(play_id: str) -> dict | None:
-    """{"data" (raw bytes), "mimetype", ...} for one play's clip, or None if
-    it hasn't been downloaded (or doesn't have Edgertronic video). Used by
-    the streaming route and by the (future) video-tab data layer."""
+def add_angle_clip(play_id: str, angle: str, data: bytes, *, mimetype: str = "video/mp4",
+                   duration_sec=None, width=None, height=None, source_file=None) -> None:
+    """Insert (or replace) one non-Edger angle's clip for a play."""
+    if angle not in _ANGLE_KEYS or angle == EDGER:
+        raise ValueError(f"unknown extra angle {angle!r}")
     ensure_table()
-    df = query_df(f"SELECT * FROM {TABLE} WHERE play_id = :p", {"p": play_id})
+    sql = text(f"""
+        INSERT INTO {ANGLE_TABLE}
+            (play_id, angle, mimetype, size_bytes, data, duration_sec, width, height,
+             source_file, uploaded_at)
+        VALUES
+            (:play_id, :angle, :mimetype, :size_bytes, :data, :duration_sec, :width, :height,
+             :source_file, :uploaded_at)
+        ON DUPLICATE KEY UPDATE mimetype = VALUES(mimetype),
+            size_bytes = VALUES(size_bytes), data = VALUES(data),
+            duration_sec = VALUES(duration_sec), width = VALUES(width),
+            height = VALUES(height), source_file = VALUES(source_file),
+            uploaded_at = VALUES(uploaded_at)
+    """)
+    with get_engine().begin() as conn:
+        conn.execute(sql, {
+            "play_id": play_id, "angle": angle, "mimetype": mimetype,
+            "size_bytes": len(data), "data": data, "duration_sec": duration_sec,
+            "width": width, "height": height, "source_file": source_file,
+            "uploaded_at": datetime.now(timezone.utc),
+        })
+
+
+def get_clip(play_id: str, angle: str = EDGER) -> dict | None:
+    """{"data" (raw bytes), "mimetype", ...} for one play's clip at `angle`,
+    or None if there isn't one. Used by the streaming route."""
+    ensure_table()
+    if angle == EDGER:
+        df = query_df(f"SELECT * FROM {TABLE} WHERE play_id = :p", {"p": play_id})
+    else:
+        df = query_df(f"SELECT * FROM {ANGLE_TABLE} WHERE play_id = :p AND angle = :a",
+                      {"p": play_id, "a": angle})
     return None if df.empty else df.iloc[0].to_dict()
+
+
+def angles_by_play_id(play_ids: list[str]) -> dict[str, set[str]]:
+    """{play_id: {angle, ...}} for every angle (Edger included) that has a
+    clip, never selecting the clip bytes. Plays with no clip are absent."""
+    ensure_table()
+    if not play_ids:
+        return {}
+    placeholders, params = _in_clause(play_ids)
+    out: dict[str, set[str]] = {}
+    for pid in existing_play_ids(play_ids):
+        out.setdefault(pid, set()).add(EDGER)
+    df = query_df(
+        f"SELECT play_id, angle FROM {ANGLE_TABLE} WHERE play_id IN ({placeholders})", params)
+    for pid, angle in df.itertuples(index=False):
+        out.setdefault(pid, set()).add(angle)
+    return out
 
 
 def clip_meta(play_id: str) -> dict | None:
@@ -134,6 +212,7 @@ def session_pitch_video_df(pitcher_id: int, date) -> pd.DataFrame:
     `play_id`/`has_video` so the table can flag which rows have a downloaded
     Edgertronic clip to play. Queried directly from BULLPEN (not
     `bullpen.session_pitches`, whose `_COLMAP` doesn't expose PlayID).
+    `angles` lists which camera angles have a clip, in `ANGLES` order.
     `InducedVertBreak`, not raw `VertBreak` (2026-09-24, Brad: "IVB needs to
     be used with HB") -- matches `app.data.bullpen`'s own `ind_vert_break`
     convention; raw VertBreak includes gravity and isn't the number pitching
@@ -161,8 +240,11 @@ def session_pitch_video_df(pitcher_id: int, date) -> pd.DataFrame:
     df["pocket"] = df.apply(
         lambda r: B.pocket_label(r["plate_loc_side"], r["plate_loc_height"]) or "—", axis=1)
 
-    found = existing_play_ids([p for p in df["play_id"] if pd.notna(p)])
-    df["has_video"] = df["play_id"].isin(found)
+    found = angles_by_play_id([p for p in df["play_id"] if pd.notna(p)])
+    # Comma-joined (not a list) so it rides along as a plain DataTable cell.
+    df["angles"] = df["play_id"].map(
+        lambda p: ",".join(k for k, _ in ANGLES if k in found.get(p, ())))
+    df["has_video"] = df["angles"] != ""
     return df
 
 
