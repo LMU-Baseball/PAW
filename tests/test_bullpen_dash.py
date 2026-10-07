@@ -508,3 +508,14 @@ def test_pitching_hub_has_bullpen_dashboard_card(server):
     client.post("/login", data={"email": "c@lmu.edu", "password": "x"})
     html_body = client.get("/pitching").get_data(as_text=True)
     assert "Bullpen Dashboard" in html_body and "/dash/bullpen/" in html_body
+
+
+def test_video_pick_angle_prefers_click_then_current_then_edger():
+    from app.dashboards.bullpen.tabs.video import _pick_angle
+    both = ["Edger", "CF", "PitcherRight"]
+    assert _pick_angle(both, "PitcherRight", "CF") == "PitcherRight"
+    assert _pick_angle(both, None, "CF") == "CF"
+    assert _pick_angle(both, None, None) == "Edger"
+    assert _pick_angle(["CF"], None, "PitcherRight") == "CF"
+    assert _pick_angle(["Edger"], "CF", "CF") == "Edger"
+    assert _pick_angle([], None, "CF") is None

@@ -98,3 +98,47 @@ def test_pitch_row_by_play_id_known_real_row():
 
 def test_pitch_row_by_play_id_missing_returns_none():
     assert BV.pitch_row_by_play_id("no-such-play-id-at-all") is None
+
+
+def _cleanup_angles(*play_ids):
+    from app.db import get_engine
+    from sqlalchemy import text
+    with get_engine().begin() as c:
+        for pid in play_ids:
+            c.execute(text(f"DELETE FROM {BV.ANGLE_TABLE} WHERE play_id=:p"), {"p": pid})
+
+
+def test_add_angle_clip_then_get_clip_by_angle():
+    try:
+        BV.add_angle_clip(TEST_PLAY_1, "CF", b"cf-bytes", width=1920, height=1080,
+                          duration_sec=7.0, source_file="001_LiveAB.mp4")
+        got = BV.get_clip(TEST_PLAY_1, "CF")
+        assert got["data"] == b"cf-bytes"
+        assert got["source_file"] == "001_LiveAB.mp4"
+        assert BV.get_clip(TEST_PLAY_1, "PitcherRight") is None
+        assert BV.get_clip(TEST_PLAY_1) is None  # Edger is a separate table
+    finally:
+        _cleanup_angles(TEST_PLAY_1)
+
+
+def test_add_angle_clip_rejects_unknown_or_edger_angle():
+    import pytest
+    for bad in ("Edger", "Broadcast"):
+        with pytest.raises(ValueError):
+            BV.add_angle_clip(TEST_PLAY_1, bad, b"x")
+
+
+def test_angles_by_play_id_merges_edger_and_extra_angles():
+    try:
+        BV.add_clip(TEST_PLAY_1, "sess-1", b"edger")
+        BV.add_angle_clip(TEST_PLAY_1, "PitcherRight", b"right")
+        BV.add_angle_clip(TEST_PLAY_2, "CF", b"cf")
+        got = BV.angles_by_play_id([TEST_PLAY_1, TEST_PLAY_2, "no-such-play"])
+        assert got == {TEST_PLAY_1: {"Edger", "PitcherRight"}, TEST_PLAY_2: {"CF"}}
+    finally:
+        _cleanup(TEST_PLAY_1, TEST_PLAY_2)
+        _cleanup_angles(TEST_PLAY_1, TEST_PLAY_2)
+
+
+def test_angles_by_play_id_empty_input():
+    assert BV.angles_by_play_id([]) == {}

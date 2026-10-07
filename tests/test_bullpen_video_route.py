@@ -93,3 +93,31 @@ def test_bullpen_video_download_route_requires_login_and_404s_without_a_bullpen_
         with get_engine().begin() as conn:
             conn.execute(_text(f"DELETE FROM {BV.TABLE} WHERE play_id = :p"),
                         {"p": TEST_PLAY_ID})
+
+
+def test_bullpen_video_route_serves_extra_angle_and_404s_unknown_angle(server):
+    from app.auth.models import User
+    from app.extensions import db
+    server.config["WTF_CSRF_ENABLED"] = False
+    with server.app_context():
+        u = User(email="bullpenvid3@lmu.edu", name="Coach", role="coach")
+        u.set_password("x")
+        db.session.add(u)
+        db.session.commit()
+        BV.add_angle_clip(TEST_PLAY_ID, "CF", b"fake-cf-bytes")
+
+    try:
+        client = server.test_client()
+        client.post("/login", data={"email": "bullpenvid3@lmu.edu", "password": "x"})
+        rv = client.get(f"/bullpen-video/{TEST_PLAY_ID}?angle=CF")
+        assert rv.status_code == 200 and rv.data == b"fake-cf-bytes"
+        assert client.get(f"/bullpen-video/{TEST_PLAY_ID}?angle=PitcherRight").status_code == 404
+        assert client.get(f"/bullpen-video/{TEST_PLAY_ID}?angle=Bogus").status_code == 404
+        assert client.get(f"/bullpen-video/{TEST_PLAY_ID}").status_code == 404
+    finally:
+        from sqlalchemy import text as _text
+
+        from app.db import get_engine
+        with get_engine().begin() as conn:
+            conn.execute(_text(f"DELETE FROM {BV.ANGLE_TABLE} WHERE play_id = :p"),
+                        {"p": TEST_PLAY_ID})
