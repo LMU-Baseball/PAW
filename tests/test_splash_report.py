@@ -676,6 +676,19 @@ def test_scripts_movement_fig_adds_ellipse_only_with_multiple_scripts():
     assert list(fb.x) == [9.0, 10.0] and list(fb.text) == ["S1", "S2"]
 
 
+def test_scripts_movement_fig_draws_origin_lines_in_range():
+    """2026-10-08: bold (0,0) cross lines like the bullpen movement chart,
+    with the axis ranges stretched to include 0 even when every dot is
+    on one side of it."""
+    fig = SC.scripts_movement_fig(
+        {"1": [{"pitch_type": "Fastball", "hb": 8.0, "ivb": 15.0}]})
+    shapes = fig.layout.shapes
+    assert any(s.y0 == 0 and s.y1 == 0 for s in shapes)
+    assert any(s.x0 == 0 and s.x1 == 0 for s in shapes)
+    assert fig.layout.xaxis.range[0] < 0 < fig.layout.xaxis.range[1]
+    assert fig.layout.yaxis.range[0] < 0 < fig.layout.yaxis.range[1]
+
+
 def test_scripts_movement_fig_empty_when_no_rows():
     fig = SC.scripts_movement_fig({})
     assert fig.layout.annotations[0].text == "No movement logged for this script yet."
