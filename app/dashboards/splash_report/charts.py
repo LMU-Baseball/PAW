@@ -158,6 +158,12 @@ def scripts_movement_fig(movement_by_script: dict, selected: list[int] | None = 
                 x=ell[0], y=ell[1], mode="lines", fill="toself", fillcolor=color,
                 opacity=0.22, line=dict(color=color, width=1.5),
                 showlegend=False, hoverinfo="skip"))
+    # 2026-10-08, Brad: same (0,0) cross lines as the bullpen movement chart;
+    # the padded ranges must include 0 or the lines fall off the chart.
+    xs.append(0)
+    ys.append(0)
+    fig.add_hline(y=0, line_color="#ccc")
+    fig.add_vline(x=0, line_color="#ccc")
     for pitch_type, sub in agg.groupby("pitch_type"):
         color = color_for(pitch_type)
         fig.add_trace(go.Scatter(
