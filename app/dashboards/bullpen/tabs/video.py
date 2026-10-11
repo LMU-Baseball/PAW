@@ -10,6 +10,7 @@ from __future__ import annotations
 from dash import ALL, Input, Output, State, ctx, dash_table, dcc, html, no_update
 
 from app.dashboards import shell
+from app.dashboards.bullpen.selectors import ALL_SESSIONS
 from app.dashboards.video.component import _btn_style
 from app.data import bullpen_video as BV
 
@@ -26,6 +27,8 @@ def render(pitcher_id, date) -> html.Div:
         return html.Div("Select a pitcher.", style=_MUTED)
     if not date:
         return html.Div("No bullpen session in this date range.", style=_MUTED)
+    if date == ALL_SESSIONS:
+        return html.Div("Pick a single session to watch its video.", style=_MUTED)
     df = BV.session_pitch_video_df(int(pitcher_id), date)
     if df.empty:
         return html.Div("No pitches for this session.", style=_MUTED)

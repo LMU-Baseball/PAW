@@ -36,9 +36,25 @@ def pitcher_options(*, is_coach: bool, own_trackman_id, start=None, end=None) ->
             for r in df.itertuples()]
 
 
+ALL_SESSIONS = "all"
+
+
 def session_dropdown_options(sessions_df) -> list[dict]:
-    """Session-date dropdown options (newest first) from B.session_options()."""
+    """Session-date dropdown options (newest first) from B.session_options(),
+    led by an "All sessions in range" option once there's more than one
+    session -- a pitcher rarely throws every pitch type in one pen, so the
+    season-wide view is what fills the by-pitch-type table (Brad, 2026-10-11)."""
     if sessions_df is None or sessions_df.empty:
         return []
-    return [{"label": f"{r.date} ({int(r.pitches)})", "value": str(r.date)}
+    opts = [{"label": f"{r.date} ({int(r.pitches)})", "value": str(r.date)}
             for r in sessions_df.itertuples()]
+    if len(opts) > 1:
+        total = int(sessions_df["pitches"].sum())
+        opts.insert(0, {"label": f"All sessions in range ({total})", "value": ALL_SESSIONS})
+    return opts
+
+
+def default_session_value(opts: list[dict]):
+    """Most recent single session -- the page still opens on one pen, not the
+    all-sessions view."""
+    return next((o["value"] for o in opts if o["value"] != ALL_SESSIONS), None)

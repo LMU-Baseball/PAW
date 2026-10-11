@@ -88,8 +88,43 @@ def test_session_dropdown_options_labels():
     from app.dashboards.bullpen import selectors
     df = pd.DataFrame({"date": ["2026-05-13", "2026-05-06"], "pitches": [18, 17]})
     opts = selectors.session_dropdown_options(df)
-    assert opts[0] == {"label": "2026-05-13 (18)", "value": "2026-05-13"}
+    assert opts[1] == {"label": "2026-05-13 (18)", "value": "2026-05-13"}
     assert selectors.session_dropdown_options(pd.DataFrame(columns=["date", "pitches"])) == []
+
+
+def test_session_dropdown_leads_with_all_sessions_but_defaults_to_latest():
+    """2026-10-11: "All sessions in range" heads the list (total pitch count)
+    once there's more than one session; the page still opens on the newest
+    single session."""
+    from app.dashboards.bullpen import selectors
+    df = pd.DataFrame({"date": ["2026-05-13", "2026-05-06"], "pitches": [18, 17]})
+    opts = selectors.session_dropdown_options(df)
+    assert opts[0] == {"label": "All sessions in range (35)", "value": selectors.ALL_SESSIONS}
+    assert selectors.default_session_value(opts) == "2026-05-13"
+    one = selectors.session_dropdown_options(df.head(1))
+    assert [o["value"] for o in one] == ["2026-05-13"]
+    assert selectors.default_session_value([]) is None
+
+
+def test_session_detail_all_sessions_live():
+    from app.dashboards.bullpen import selectors
+    from app.dashboards.bullpen.tabs import session_detail
+    from app.data import bullpen as B
+    start, end = "2025-09-01", "2026-05-13"
+    s = B.session_options(GEIS, start, end)
+    if len(s) < 2:
+        pytest.skip("need 2+ in-window sessions for anchor pitcher")
+    df = B.range_pitches(GEIS, start, end)
+    assert len(df) == int(s["pitches"].sum())
+    out = str(session_detail.render(GEIS, selectors.ALL_SESSIONS, start=start, end=end))
+    assert "bp-summary" in out and "bp-pitches" not in out
+    assert "single session" in out
+
+
+def test_video_tab_all_sessions_asks_for_one_session():
+    from app.dashboards.bullpen import selectors
+    from app.dashboards.bullpen.tabs import video
+    assert "single session" in str(video.render(GEIS, selectors.ALL_SESSIONS))
 
 
 def _session_df():
