@@ -67,7 +67,7 @@ def register_callbacks(dash_app) -> None:
         if pid is None or not start or not end:
             return [], None
         opts = selectors.session_dropdown_options(B.session_options(pid, start, end))
-        return opts, (opts[0]["value"] if opts else None)
+        return opts, selectors.default_session_value(opts)
 
     # Any selection change -> selection store + sidebar.
     @dash_app.callback(
@@ -92,7 +92,8 @@ def register_callbacks(dash_app) -> None:
             return trends.render(pid, sel.get("start"), sel.get("end"))
         if tab == "video":
             return video.render(pid, sel.get("session_date"))
-        return session_detail.render(pid, sel.get("session_date"))
+        return session_detail.render(pid, sel.get("session_date"),
+                                     start=sel.get("start"), end=sel.get("end"))
 
     # Metric change -> re-render the trend body from the stored df.
     @dash_app.callback(

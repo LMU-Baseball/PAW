@@ -91,7 +91,7 @@ def serve_layout() -> html.Div:
         default_pitcher = pitchers[0]["value"] if pitchers else None
     sess = B.session_options(default_pitcher, start_d, end_d) if default_pitcher is not None else None
     session_opts = selectors.session_dropdown_options(sess)
-    default_session = session_opts[0]["value"] if session_opts else None
+    default_session = selectors.default_session_value(session_opts)
 
     selector_row = html.Div([
         html.Div([

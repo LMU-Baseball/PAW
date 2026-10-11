@@ -6,7 +6,7 @@ from dash import dcc, html
 
 from app.data import bullpen as B
 from app.data import pitching as P
-from app.dashboards.bullpen import charts, tables
+from app.dashboards.bullpen import charts, selectors, tables
 
 _MUTED = {"padding": "12px", "color": "#555"}
 
@@ -53,12 +53,16 @@ def _display_summary(summ_df: pd.DataFrame) -> pd.DataFrame:
     return out.rename(columns=_SUMMARY_HEADERS)
 
 
-def render(pitcher_id, date) -> html.Div:
+def render(pitcher_id, date, start=None, end=None) -> html.Div:
     if pitcher_id is None:
         return html.Div("Select a pitcher.", style=_MUTED)
     if not date:
         return html.Div("No bullpen session in this date range.", style=_MUTED)
-    df = B.session_pitches(int(pitcher_id), date)
+    all_sessions = date == selectors.ALL_SESSIONS
+    if all_sessions:
+        df = B.range_pitches(int(pitcher_id), start, end)
+    else:
+        df = B.session_pitches(int(pitcher_id), date)
     if df.empty:
         return html.Div("No pitches for this session.", style=_MUTED)
 
@@ -83,6 +87,17 @@ def render(pitcher_id, date) -> html.Div:
             f" — Avg Velo {fb['avg_velo']} · Max {fb['max_velo']} · Avg Spin {avg_spin}"],
             style={"padding": "6px 4px", "color": "#555", "fontSize": "15px"})
 
+    # A season of pens is hundreds of rows -- the per-pitch list only
+    # makes sense for one session.
+    if all_sessions:
+        pitch_list = html.Div("Pick a single session to see the pitch-by-pitch list.",
+                              style=_MUTED)
+    else:
+        pitch_list = html.Div([
+            html.H4("All pitches", style={"color": "#9A0021", "marginTop": "14px"}),
+            tables.df_table(_display_pitches(df), id_="bp-pitches", color_col="Pitch"),
+        ])
+
     return html.Div([
         tables.df_table(_display_summary(summ_df), id_="bp-summary", color_col="Pitch"),
         callout,
@@ -93,6 +108,5 @@ def render(pitcher_id, date) -> html.Div:
                  config={"responsive": True}),
         html.Div(style={"height": "12px"}),
         charts_grid,
-        html.H4("All pitches", style={"color": "#9A0021", "marginTop": "14px"}),
-        tables.df_table(_display_pitches(df), id_="bp-pitches", color_col="Pitch"),
+        pitch_list,
     ])

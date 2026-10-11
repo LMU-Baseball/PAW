@@ -153,6 +153,25 @@ def session_pitches(pitcher_trackman_id: int, date) -> pd.DataFrame:
     return df[list(keep)].rename(columns=keep).reset_index(drop=True)
 
 
+def range_pitches(pitcher_trackman_id: int, start, end) -> pd.DataFrame:
+    """Every per-pitch row in [start, end] (same columns as
+    `session_pitches`), for the bullpen "All sessions in range" view."""
+    clause, params = _in_clause("PitcherId", pitcher_ids_for(pitcher_trackman_id), "pid")
+    params["start"], params["end"] = str(start), str(end)
+    df = query_df(
+        f"""
+        SELECT * FROM BULLPEN
+         WHERE {clause} AND `Date` BETWEEN :start AND :end
+         ORDER BY `Date`, PitchNo
+        """,
+        params,
+    )
+    if df.empty:
+        return pd.DataFrame(columns=list(_COLMAP.values()))
+    keep = {k: v for k, v in _COLMAP.items() if k in df.columns}
+    return df[list(keep)].rename(columns=keep).reset_index(drop=True)
+
+
 def _r1(x):
     return None if x is None or pd.isna(x) else round(float(x), 1)
 
