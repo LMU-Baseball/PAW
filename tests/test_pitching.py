@@ -326,3 +326,57 @@ def test_pa_count_does_not_conflate_pas_across_games():
     assert P._pa_count(df[df["game_id"] == 100]) == 2   # single game still right
     # df without a game_id column falls back to the single-game assumption
     assert P._pa_count(df.drop(columns=["game_id"])) == 2
+
+
+def _pa(game, inning, pa, calls, counts, korbb=None, outs=0, play_result=None):
+    """One PA's pitch rows; `counts` = (balls, strikes) BEFORE each pitch, and
+    korbb/outs/play_result land on the last pitch."""
+    rows = []
+    for i, (call, (b, s)) in enumerate(zip(calls, counts), 1):
+        last = i == len(calls)
+        rows.append({"game_id": game, "inning": inning, "pa_of_inning": pa, "pitch_of_pa": i,
+                     "pitch_call": call, "balls": b, "strikes": s,
+                     "korbb": korbb if last else None, "outs_on_play": outs if last else 0,
+                     "play_result": play_result if last else None})
+    return rows
+
+
+def test_ea_pct_coaches_definition():
+    """2026-10-12: E+A = out within 3 pitches, OR 2 strikes within the first
+    3 pitches (0-2/1-2). A hit early, or 2 strikes only at 2-2, doesn't count."""
+    df = pd.DataFrame(
+        _pa(1, 1, 1, ["InPlay"], [(0, 0)], outs=1, play_result="Out")              # E+A: 1-pitch out
+        + _pa(1, 1, 2, ["StrikeCalled", "StrikeSwinging", "BallCalled", "BallCalled", "InPlay"],
+              [(0, 0), (0, 1), (0, 2), (1, 2), (2, 2)], outs=0, play_result="Single")  # E+A: 0-2 early
+        + _pa(1, 1, 3, ["InPlay"], [(0, 0)], outs=0, play_result="Single")         # not: early hit
+        + _pa(1, 1, 4, ["BallCalled", "BallCalled", "StrikeCalled", "StrikeCalled", "InPlay"],
+              [(0, 0), (1, 0), (2, 0), (2, 1), (2, 2)], outs=1, play_result="Out"))  # not: 2K only at 2-2
+    assert P.ea_pct(df) == (50.0, 2)
+
+
+def test_twok_kill_pct_counts_any_out():
+    """2026-10-12: 2K Kill% = PAs that reached 2 strikes AND ended in any
+    out (groundout counts, not just the strikeout)."""
+    two_k = [(0, 0), (0, 1), (0, 2)]
+    df = pd.DataFrame(
+        _pa(1, 1, 1, ["StrikeCalled", "StrikeCalled", "StrikeSwinging"], two_k, korbb="Strikeout")
+        + _pa(1, 1, 2, ["StrikeCalled", "StrikeCalled", "InPlay"], two_k, outs=1, play_result="Out")
+        + _pa(1, 1, 3, ["StrikeCalled", "StrikeCalled", "InPlay"], two_k, play_result="Double")
+        + _pa(1, 1, 4, ["InPlay"], [(0, 0)], outs=1, play_result="Out"))   # never reached 2K
+    assert P.twok_kill_pct(df) == (round(100 * 2 / 3, 1), 2)
+
+
+def test_pa_metrics_keep_games_apart():
+    """Same (inning, pa_of_inning) in two games are two PAs, not one."""
+    df = pd.DataFrame(_pa(1, 1, 1, ["InPlay"], [(0, 0)], outs=1, play_result="Out")
+                      + _pa(2, 1, 1, ["InPlay"], [(0, 0)], play_result="Single"))
+    assert P.ea_pct(df) == (50.0, 1)
+
+
+def test_barrel_pct_counts_ground_balls():
+    """2026-10-12: Barrel% = any ball in play at 95+, ground balls included."""
+    df = pd.DataFrame({
+        "pitch_call": ["InPlay", "InPlay", "InPlay", "StrikeCalled"],
+        "exit_speed": [98.0, 96.0, 80.0, None],
+        "tagged_hit_type": ["GroundBall", "LineDrive", "FlyBall", None]})
+    assert P.barrel_pct(df) == P.barrel_pct_ev(df) == (round(100 * 2 / 3, 1), 2)
