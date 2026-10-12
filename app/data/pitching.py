@@ -101,16 +101,39 @@ def bb_pct(df: pd.DataFrame) -> tuple[float, int]:
     return _pct(bb, _pa_count(df)), bb
 
 
+def _pa_keys(df: pd.DataFrame) -> list[str]:
+    """Columns that identify one plate appearance -- game_id included when
+    present, for the same cross-game reason as `_pa_count`."""
+    return ["game_id", "inning", "pa_of_inning"] if "game_id" in df.columns         else ["inning", "pa_of_inning"]
+
+
+def _ends_in_out(pa: pd.DataFrame) -> bool:
+    """The PA's last pitch put the batter out: a strikeout, or a ball in play
+    with an out recorded on it."""
+    last = pa.sort_values("pitch_of_pa").iloc[-1]
+    if last.get("korbb") == "Strikeout":
+        return True
+    outs = last.get("outs_on_play")
+    if last.get("pitch_call") == "InPlay" and outs is not None and not pd.isna(outs):
+        return float(outs) > 0
+    return last.get("pitch_call") == "InPlay" and last.get("play_result") == "Out"
+
+
 def ea_pct(df: pd.DataFrame) -> tuple[float, int]:
-    """Early & Ahead %. PROVISIONAL v1 definition (confirm with coaches):
-    share of PAs where the pitcher reached an ahead count (strikes-balls >= 1)
-    at any point in the PA. balls/strikes are the recorded count on each pitch.
-    """
+    """E+A %, coaches' definition (Brad, 2026-10-12): share of PAs that end
+    in an out within 3 pitches, OR reach a 2-strike count within the first 3
+    pitches (0-2 / 1-2 -- i.e. the count on pitch 4 or earlier has 2
+    strikes). balls/strikes on each row are the count BEFORE that pitch."""
     if df.empty:
         return 0.0, 0
-    ahead = df.groupby(["inning", "pa_of_inning"]).apply(
-        lambda p: bool(((p["strikes"] - p["balls"]).max()) >= 1), include_groups=False)
-    return _pct(int(ahead.sum()), int(ahead.shape[0])), int(ahead.sum())
+
+    def _ea(p):
+        early_out = int(p["pitch_of_pa"].max()) <= 3 and _ends_in_out(p)
+        early_2k = bool(((p["pitch_of_pa"] <= 4) & (p["strikes"] >= 2)).any())
+        return early_out or early_2k
+
+    ea = df.groupby(_pa_keys(df)).apply(_ea, include_groups=False)
+    return _pct(int(ea.sum()), int(ea.shape[0])), int(ea.sum())
 
 
 def pre2k_pct(df: pd.DataFrame) -> tuple[float, int]:
@@ -122,13 +145,15 @@ def pre2k_pct(df: pd.DataFrame) -> tuple[float, int]:
 
 
 def twok_kill_pct(df: pd.DataFrame) -> tuple[float, int]:
-    """2K Kill %. PROVISIONAL v1: strikeouts / PAs that reached a 2-strike count."""
+    """2K Kill %, coaches' definition (Brad, 2026-10-12): of the PAs that
+    reached a 2-strike count, the share that ended in ANY out (not just
+    strikeouts)."""
     if df.empty:
         return 0.0, 0
-    g = df.groupby(["inning", "pa_of_inning"])
+    g = df.groupby(_pa_keys(df))
     reached = g.apply(lambda p: bool((p["strikes"] >= 2).any()), include_groups=False)
-    ks = g.apply(lambda p: bool((p["korbb"] == "Strikeout").any()), include_groups=False)
-    kills = int((reached & ks).sum())
+    outs = g.apply(_ends_in_out, include_groups=False)
+    kills = int((reached & outs).sum())
     return _pct(kills, int(reached.sum())), kills
 
 
@@ -143,12 +168,10 @@ def count_work_pct(df: pd.DataFrame) -> tuple[float, int]:
 
 
 def barrel_pct(df: pd.DataFrame) -> tuple[float, int]:
-    """Barrel %. PROVISIONAL v1 (no launch-angle column in the warehouse):
-    barrels / balls in play, barrel ~ exit_speed >= 95 and tagged_hit_type in
-    {LineDrive, FlyBall}."""
+    """Barrel %, coaches' definition (Brad, 2026-10-12): balls in play hit
+    95+ mph, ground balls included, over all balls in play."""
     bip = df[df["pitch_call"] == "InPlay"]
-    barrels = int(((bip["exit_speed"] >= 95)
-                   & (bip["tagged_hit_type"].isin({"LineDrive", "FlyBall"}))).sum())
+    barrels = int((bip["exit_speed"] >= 95).sum())
     return _pct(barrels, len(bip)), barrels
 
 
@@ -159,12 +182,9 @@ def format_ip(outs: int) -> str:
 
 
 def barrel_pct_ev(df: pd.DataFrame) -> tuple[float, int]:
-    """Barrel% — coaches' SIMPLIFIED def: balls-in-play with exit_speed >= 95,
-    over balls-in-play. Intentionally DROPS the LineDrive/FlyBall qualifier that
-    `barrel_pct` keeps (the two therefore differ by design). PROVISIONAL."""
-    bip = df[df["pitch_call"] == "InPlay"]
-    barrels = int((bip["exit_speed"] >= 95).sum())
-    return _pct(barrels, len(bip)), barrels
+    """Same as `barrel_pct` since the 2026-10-12 coaches' definition; kept
+    for the Cauldron / pitching-caps callers."""
+    return barrel_pct(df)
 
 
 def header_stat_line(df: pd.DataFrame) -> dict:
