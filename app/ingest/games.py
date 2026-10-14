@@ -28,6 +28,7 @@ import stat
 import pandas as pd
 
 from app.ingest.common import LoadResult, chunked_insert, existing_keys
+from app.ingest.normalize_games_date import iso_date
 
 # Game CSV basenames look like "20260416-CypressCollege-1.csv": 8 digits
 # (the game date) then a dash.
@@ -317,15 +318,21 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
 
     Renames via ``CSV_TO_GAMES`` first (so ``Top/Bottom`` becomes
     ``Top.Bottom``), then selects whichever ``GAMES_COLS`` are present in
-    the renamed frame -- dropping any extra/unexpected columns. Returns a
-    copy; filters no rows. ``PitchUID`` is preserved unchanged so a later
+    the renamed frame -- dropping any extra/unexpected columns, and normalizes
+    ``Date`` to ISO YYYY-MM-DD. Returns a copy; filters no rows. ``PitchUID`` is preserved unchanged so a later
     loader can dedup on it. ``source_file`` is accepted for interface
     symmetry with the eventual loader but not otherwise used by this pure
     parser.
     """
     renamed = df.rename(columns=CSV_TO_GAMES)
     cols = [c for c in GAMES_COLS if c in renamed.columns]
-    return renamed[cols].copy()
+    out = renamed[cols].copy()
+    # Trackman exports Date as m/d/Y; the dashboards' season/date-range filters
+    # only match ISO dates (seasons._NUMERIC_DATE), so store ISO like the
+    # one-time normalize_games_date backfill did for older rows.
+    if "Date" in out.columns:
+        out["Date"] = [iso_date(d) or d for d in out["Date"]]
+    return out
 
 
 def dedup_key(row: dict) -> str:

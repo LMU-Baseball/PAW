@@ -1,8 +1,9 @@
 # app/data/video.py
-"""Pitch-level video: one row per pitch with the four camera-angle S3 URLs.
+"""Pitch-level video: one row per pitch with a URL column per camera angle.
 
 Source = video_clips (base table: pitch_uid/angle/s3_url/game_date, public S3
-.mp4 urls) joined to GAMES on PitchUID for the pitch metadata (velo, plate
+.mp4 urls) plus app.data.game_video's DB-BLOB clips (served by the
+login-gated /game-video route), joined to GAMES on PitchUID for the pitch metadata (velo, plate
 zone, count, result, batter side) and the surrogate GameID. Fully on CAPS --
 no legacy warehouse (view/fact) dependency, so video survives the tm_* drop.
 (The `test_video_source_is_caps_only` guard enforces the absence of any
@@ -18,10 +19,19 @@ from app.db import query_df
 from app.data.cache import cached
 from app.data.catching import CS_RESULTS
 
+# Keys are what video_clips / game_video_angles store. Broadcast is the
+# centerfield camera; HomeRight/HomeLeft are the hitter-side cameras (the
+# hitting tab already defaulted Right batters to HomeRight), so they carry the
+# RHH/LHH labels; LHP/RHP are the open-side pitcher cameras added 2026-10-13.
 ANGLES: list[tuple[str, str]] = [
-    ("HomeBehind", "Behind"), ("HomeRight", "Home R"),
-    ("HomeLeft", "Home L"), ("Broadcast", "Broadcast"),
+    ("Broadcast", "CF"), ("HomeBehind", "Behind"),
+    ("HomeRight", "RHH"), ("HomeLeft", "LHH"),
+    ("LHP", "LHP"), ("RHP", "RHP"),
 ]
+# Which angle buttons each dashboard's Video tab shows (Brad, 2026-10-13).
+PITCHER_ANGLES: list[str] = ["Broadcast", "HomeBehind", "LHP", "RHP"]
+HITTER_ANGLES: list[str] = ["Broadcast", "HomeBehind", "HomeRight", "HomeLeft"]
+CATCHER_ANGLES: list[str] = ["Broadcast", "HomeBehind"]
 URL_COL: dict[str, str] = {a: f"url_{a.lower()}" for a, _ in ANGLES}
 # Date is intentionally omitted from the table display (Item 2); it is still
 # computed in pitch_video_df for sorting, then dropped by the _ALL_COLS projection.
@@ -45,6 +55,25 @@ _RESULT_MAP = {
     "FoulBallNotFieldable": "Foul", "FoulBallFieldable": "Foul", "HitByPitch": "HBP",
     "InPlay": "In Play",
 }
+
+
+_CLIP_SOURCE = """
+    (SELECT pitch_uid, angle, s3_url, game_date FROM video_clips
+     UNION ALL
+     SELECT pitch_uid, angle, CONCAT('/game-video/', pitch_uid, '?angle=', angle) AS s3_url,
+            NULL AS game_date
+       FROM game_video_angles)"""
+
+
+def _ensure_clip_tables() -> None:
+    global _CLIP_TABLES_READY
+    if not _CLIP_TABLES_READY:
+        from app.data import game_video
+        game_video.ensure_table()
+        _CLIP_TABLES_READY = True
+
+
+_CLIP_TABLES_READY = False
 
 
 def _spaced(s: str) -> str:
@@ -101,6 +130,7 @@ def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=No
     subj_col, sib = _sibling_ids(batter_id=batter_id, pitcher_id=pitcher_id, catcher_id=catcher_id)
     if not sib:
         return set()
+    _ensure_clip_tables()
     gph = ", ".join(f":g{i}" for i in range(len(gids)))
     sph = ", ".join(f":s{i}" for i in range(len(sib)))
     params = {f"g{i}": str(g) for i, g in enumerate(gids)}
@@ -108,7 +138,7 @@ def games_with_video(game_ids, *, batter_id=None, pitcher_id=None, catcher_id=No
     df = query_df(
         f"""
         SELECT DISTINCT g.GameID
-          FROM video_clips v
+          FROM {_CLIP_SOURCE} v
           JOIN GAMES g ON g.PitchUID = v.pitch_uid
          WHERE g.GameID IN ({gph}) AND g.{subj_col} IN ({sph})
         """,
@@ -140,6 +170,7 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
     if not sib:  # resolvers currently always return >=1; guard the IN () trap defensively
         return pd.DataFrame(columns=_ALL_COLS)
 
+    _ensure_clip_tables()
     gph = ", ".join(f":g{i}" for i in range(len(gids)))
     sph = ", ".join(f":s{i}" for i in range(len(sib)))
     params = {f"g{i}": str(g) for i, g in enumerate(gids)}
@@ -150,11 +181,11 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
         SELECT v.pitch_uid, g.PitchNo AS pitch_no, g.Inning AS inning,
                g.Balls AS balls, g.Strikes AS strikes,
                g.TaggedPitchType AS tagged_pitch_type, g.PitchCall AS pitch_call,
-               g.PlayResult AS play_result, v.game_date,
+               g.PlayResult AS play_result, COALESCE(v.game_date, g.Date) AS game_date,
                v.angle, v.s3_url,
                g.RelSpeed AS rel_speed, g.Zone AS izt_zone,
                g.BatterSide AS batter_side
-          FROM video_clips v
+          FROM {_CLIP_SOURCE} v
           JOIN GAMES g ON g.PitchUID = v.pitch_uid
          WHERE g.GameID IN ({gph}) AND g.{subj_col} IN ({sph})
         """,

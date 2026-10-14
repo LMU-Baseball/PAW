@@ -112,6 +112,19 @@ def test_parse_game_csv_returns_a_copy_not_a_view():
     assert (df["PitchNo"] != 999999).any()
 
 
+def test_parse_game_csv_normalizes_us_dates_to_iso():
+    df = pd.read_csv(FIXTURE)
+    df["Date"] = "10/13/2026"
+    out = parse_game_csv(df, source_file="game_sample.csv")
+    assert set(out["Date"]) == {"2026-10-13"}
+
+
+def test_parse_game_csv_keeps_iso_dates():
+    df = pd.read_csv(FIXTURE)
+    out = parse_game_csv(df, source_file="game_sample.csv")
+    assert set(out["Date"]) == {"2026-04-16"}
+
+
 # --- Pipeline (goal 3): LMU-aware + upload-folder-pruned selection -----------
 
 def test_dir_within_window_year_month_day():

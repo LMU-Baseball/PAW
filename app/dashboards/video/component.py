@@ -18,8 +18,12 @@ def _btn_style(has: bool, on: bool) -> dict:
             "fontFamily": "Teko, sans-serif", "fontSize": "15px"}
 
 
+def _angles(keys: list[str] | None) -> list[tuple[str, str]]:
+    return list(ANGLES) if keys is None else [(k, lbl) for k, lbl in ANGLES if k in keys]
+
+
 def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
-           columns: list[str] | None = None) -> html.Div:
+           columns: list[str] | None = None, angles: list[str] | None = None) -> html.Div:
     if df is None or df.empty:
         return html.Div("No video available for this selection.",
                         style={"padding": "16px", "color": "#555",
@@ -40,7 +44,7 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
     )
     buttons = [html.Button(label, id={"type": f"{prefix}-angle", "index": key},
                            n_clicks=0, style=_btn_style(True, False))
-               for key, label in ANGLES]
+               for key, label in _angles(angles)]
     player = html.Video(
         id=f"{prefix}-video-player", controls=True, autoPlay=True, muted=True,
         loop=True, preload="auto",
@@ -66,21 +70,24 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
     ])
 
 
-def _resolve_default(pitch: dict | None, default_angle: str) -> str:
+def _resolve_default(pitch: dict | None, default_angle: str,
+                     angles: list[str] | None = None) -> str:
     urls = (pitch or {}).get("urls") or {}
     side = (pitch or {}).get("side")
     if default_angle == "batter_side":
         order = ["HomeRight" if side == "Right" else "HomeLeft", "HomeBehind", "Broadcast"]
     else:
-        order = [default_angle]
-    order += [k for k, _ in ANGLES if k not in order]
+        order = [default_angle, "HomeBehind"]
+    allowed = [k for k, _ in _angles(angles)]
+    order = [k for k in order if k in allowed] + [k for k in allowed if k not in order]
     for k in order:
         if urls.get(k):
             return k
     return "HomeBehind" if default_angle == "batter_side" else default_angle
 
 
-def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind") -> None:
+def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind",
+                       angles: list[str] | None = None) -> None:
 
     @dash_app.callback(
         Output(f"{prefix}-video-pitch", "data"),
@@ -108,7 +115,7 @@ def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind")
         trig = ctx.triggered_id
         if isinstance(trig, dict):
             return trig["index"]
-        return _resolve_default(pitch, default_angle)
+        return _resolve_default(pitch, default_angle, angles)
 
     @dash_app.callback(
         Output(f"{prefix}-video-source", "src"),

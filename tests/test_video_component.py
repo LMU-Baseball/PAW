@@ -34,9 +34,36 @@ def test_render_has_table_player_and_angle_buttons():
     ids = [getattr(n, "id", None) for n in _walk(out)]
     assert "pit-video-table" in ids
     assert "pit-video-player" in ids
-    # four angle buttons as pattern-matching dict ids
+    # one angle button per known angle when no per-dashboard list is given
     btns = [i for i in ids if isinstance(i, dict) and i.get("type") == "pit-angle"]
-    assert len(btns) == 4
+    assert len(btns) == len(vdata.ANGLES)
+
+
+def _btn_keys(out, prefix):
+    return [i["index"] for i in (getattr(n, "id", None) for n in _walk(out))
+            if isinstance(i, dict) and i.get("type") == f"{prefix}-angle"]
+
+
+def test_render_shows_only_the_dashboards_angles():
+    assert _btn_keys(vc.render(_df(), prefix="pit", default_angle="Broadcast",
+                               angles=vdata.PITCHER_ANGLES), "pit") == vdata.PITCHER_ANGLES
+    assert _btn_keys(vc.render(_df(), prefix="hit", default_angle="batter_side",
+                               angles=vdata.HITTER_ANGLES), "hit") == vdata.HITTER_ANGLES
+    assert _btn_keys(vc.render(_df(), prefix="cat", default_angle="HomeBehind",
+                               angles=vdata.CATCHER_ANGLES), "cat") == vdata.CATCHER_ANGLES
+
+
+def test_resolve_default_stays_within_the_dashboards_angles():
+    from app.dashboards.video import component as comp
+    # pitcher with only an RHH clip and an RHP clip: never lands on RHH
+    p = {"urls": {"HomeRight": "http://x/r.mp4", "RHP": "http://x/p.mp4"}, "side": "Right"}
+    assert comp._resolve_default(p, "Broadcast", vdata.PITCHER_ANGLES) == "RHP"
+    # Behind is the fallback when CF is missing
+    p2 = {"urls": {"HomeBehind": "http://x/b.mp4", "LHP": "http://x/l.mp4"}, "side": "Left"}
+    assert comp._resolve_default(p2, "Broadcast", vdata.PITCHER_ANGLES) == "HomeBehind"
+    # left-handed hitter defaults to the LHH camera
+    p3 = {"urls": {"HomeLeft": "http://x/l.mp4", "HomeBehind": "http://x/b.mp4"}, "side": "Left"}
+    assert comp._resolve_default(p3, "batter_side", vdata.HITTER_ANGLES) == "HomeLeft"
 
 
 def test_resolve_default_prefers_broadcast_then_falls_back():

@@ -34,9 +34,24 @@ def sample():
 
 
 def test_constants_shape():
-    assert [a for a, _ in video.ANGLES] == ["HomeBehind", "HomeRight", "HomeLeft", "Broadcast"]
+    assert [a for a, _ in video.ANGLES] == ["Broadcast", "HomeBehind", "HomeRight", "HomeLeft",
+                                            "LHP", "RHP"]
+    assert dict(video.ANGLES)["Broadcast"] == "CF"
     assert video.URL_COL["HomeBehind"] == "url_homebehind"
     assert video.DISPLAY_COLS[0] == "Pitch"
+
+
+def test_role_angle_lists_match_coaches_spec():
+    keys = {a for a, _ in video.ANGLES}
+    assert video.PITCHER_ANGLES == ["Broadcast", "HomeBehind", "LHP", "RHP"]
+    assert video.HITTER_ANGLES == ["Broadcast", "HomeBehind", "HomeRight", "HomeLeft"]
+    assert video.CATCHER_ANGLES == ["Broadcast", "HomeBehind"]
+    for lst in (video.PITCHER_ANGLES, video.HITTER_ANGLES, video.CATCHER_ANGLES):
+        assert set(lst) <= keys
+
+
+def test_url_columns_cover_every_angle():
+    assert set(video.URL_COL) == {a for a, _ in video.ANGLES}
 
 
 def test_default_display_cols_unchanged():
