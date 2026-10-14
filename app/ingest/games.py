@@ -335,6 +335,47 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
     return out
 
 
+# Fields an operator hand-corrects in a game CSV after the fact (who threw/hit/
+# caught, inning, count, result). Correcting an already-loaded game updates
+# only these -- never times or tracking, which Excel mangles on save (e.g.
+# Time 14:32:27.01 -> "32:27.0").
+CORRECTABLE_COLS: list[str] = [
+    "Pitcher", "PitcherId", "PitcherThrows", "PitcherTeam",
+    "Batter", "BatterId", "BatterSide", "BatterTeam",
+    "Catcher", "CatcherId", "CatcherThrows", "CatcherTeam",
+    "Inning", "Top.Bottom", "PAofInning", "PitchofPA", "Outs", "Balls", "Strikes",
+    "TaggedPitchType", "PitchCall", "KorBB", "TaggedHitType", "PlayResult",
+    "OutsOnPlay", "RunsScored",
+]
+
+
+def _same(a, b) -> bool:
+    if pd.isna(a) and pd.isna(b):
+        return True
+    na, nb = pd.to_numeric(pd.Series([a, b]), errors="coerce")
+    if pd.notna(na) and pd.notna(nb):
+        return abs(na - nb) < 1e-9
+    return str(a) == str(b)
+
+
+def scoring_corrections(parsed: pd.DataFrame, existing: pd.DataFrame) -> dict[str, dict]:
+    """{PitchUID: {col: corrected value}} for CORRECTABLE_COLS cells where the
+    corrected CSV (`parsed`) differs from what GAMES already holds
+    (`existing`, same PitchUIDs). Pitches with nothing to fix are absent."""
+    have = existing.set_index("PitchUID")
+    out: dict[str, dict] = {}
+    for row in parsed.to_dict(orient="records"):
+        uid = row.get("PitchUID")
+        if uid not in have.index:
+            continue
+        cur = have.loc[uid]
+        fix = {c: row[c] for c in CORRECTABLE_COLS
+               if c in row and c in cur.index and not _same(row[c], cur[c])}
+        if fix:
+            out[uid] = fix
+    return out
+
+
 def dedup_key(row: dict) -> str:
     """Per-row dedup key: PitchUID if present, else a composite key.
 

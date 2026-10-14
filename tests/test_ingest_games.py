@@ -125,6 +125,27 @@ def test_parse_game_csv_keeps_iso_dates():
     assert set(out["Date"]) == {"2026-04-16"}
 
 
+def test_scoring_corrections_only_reports_changed_correctable_cells():
+    from app.ingest.games import scoring_corrections
+    existing = pd.DataFrame([
+        {"PitchUID": "a", "Pitcher": "Giesen, Corbin", "PitcherId": 844294.0,
+         "Inning": 1.0, "Time": "14:32:27.01"},
+        {"PitchUID": "b", "Pitcher": "Wade, Branson", "PitcherId": 10295512.0,
+         "Inning": 2.0, "Time": "14:40:00.00"},
+    ])
+    parsed = pd.DataFrame([
+        # pitcher fixed; Time is Excel-mangled and must be ignored
+        {"PitchUID": "a", "Pitcher": "Phillips, Andrew", "PitcherId": 1000268106,
+         "Inning": 1, "Time": "32:27.0"},
+        # int vs float of the same value is not a change
+        {"PitchUID": "b", "Pitcher": "Wade, Branson", "PitcherId": 10295512,
+         "Inning": 2, "Time": "40:00.0"},
+        {"PitchUID": "not-loaded", "Pitcher": "X", "PitcherId": 1, "Inning": 1, "Time": ""},
+    ])
+    assert scoring_corrections(parsed, existing) == {
+        "a": {"Pitcher": "Phillips, Andrew", "PitcherId": 1000268106}}
+
+
 # --- Pipeline (goal 3): LMU-aware + upload-folder-pruned selection -----------
 
 def test_dir_within_window_year_month_day():
