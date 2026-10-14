@@ -78,6 +78,27 @@ def bullpen_video(play_id: str):
     return resp
 
 
+@main_bp.route("/game-video/<path:pitch_uid>")
+@login_required
+def game_video(pitch_uid: str):
+    """Streams one hand-cut game/scrimmage clip (app.data.game_video) for the
+    pitching/hitting/catching Video tabs. Login-gated + team-transparent,
+    same as `/bullpen-video/<play_id>` above, with the same browser caching."""
+    from app.data import game_video as GV
+    from app.data.video import ANGLES
+    angle = request.args.get("angle", "")
+    if angle not in {k for k, _ in ANGLES}:
+        abort(404)
+    clip = GV.get_clip(pitch_uid, angle)
+    if clip is None or clip.get("data") is None:
+        abort(404)
+    resp = send_file(io.BytesIO(clip["data"]), mimetype=clip.get("mimetype") or "video/mp4",
+                     as_attachment=False)
+    resp.cache_control.private = True
+    resp.cache_control.max_age = 86400
+    return resp
+
+
 @main_bp.route("/bullpen-video/<path:play_id>/download")
 @login_required
 def bullpen_video_download(play_id: str):

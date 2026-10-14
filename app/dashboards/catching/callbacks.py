@@ -189,7 +189,7 @@ def register_callbacks(dash_app) -> None:
             else:
                 gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, catcher_id=int(cid))
-            return videotab.render(vdf, prefix="cat", default_angle="HomeBehind",
+            return videotab.render(vdf, prefix="cat", angles=videodata.CATCHER_ANGLES, default_angle="HomeBehind",
                                     columns=videodata.CATCHING_DISPLAY_COLS)
         df = _read_game_df(data_json)
         if df.empty:
@@ -294,5 +294,6 @@ def register_callbacks(dash_app) -> None:
                         "fontFamily": "Teko, sans-serif", "fontSize": "15px"})
         return out
 
-    videotab.register_callbacks(dash_app, "cat", default_angle="HomeBehind")
+    videotab.register_callbacks(dash_app, "cat", default_angle="HomeBehind",
+                                angles=videodata.CATCHER_ANGLES)
     notes_ui.register_note_callbacks(dash_app, "catching", "catcher_id")

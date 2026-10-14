@@ -267,7 +267,7 @@ def register_callbacks(dash_app) -> None:
             else:
                 gids = [str(gid)]
             vdf = videodata.pitch_video_df(gids, batter_id=int(bid))
-            return videotab.render(vdf, prefix="hit", default_angle="batter_side")
+            return videotab.render(vdf, prefix="hit", angles=videodata.HITTER_ANGLES, default_angle="batter_side")
         df = _read_game_df(data_json)
         if tab == "game":
             return game_tab_body(df)
@@ -376,5 +376,6 @@ def register_callbacks(dash_app) -> None:
             return "", "Deleted."
         return "", ""
 
-    videotab.register_callbacks(dash_app, "hit", default_angle="batter_side")
+    videotab.register_callbacks(dash_app, "hit", default_angle="batter_side",
+                                angles=videodata.HITTER_ANGLES)
     notes_ui.register_note_callbacks(dash_app, "hitting", "batter_id")
