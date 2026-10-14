@@ -254,15 +254,23 @@ def test_fig_release_axis_titles_and_hover():
                "Rel Height:" in (t.hovertemplate or "") for t in fig.data)
 
 
-def test_fig_release_x_axis_symmetric_about_zero():
-    """Arm side only reads correctly when 0 (the middle of the rubber) is the
-    middle of the panel -- a lefty's cluster must NOT be recentred."""
-    fig = P.fig_release(_release_df())
-    lo, hi = fig.layout.xaxis.range
-    assert lo == pytest.approx(-hi)
-    assert hi >= 1.4                       # widest release point is inside
-    # ...and the cluster is genuinely off-centre, so this isn't a free pass
-    assert _release_df()["rel_side"].mean() < -1.0
+def test_fig_release_zooms_to_the_cluster():
+    """The window is centred on the cluster (not on 0) and only as big as it
+    needs to be, with the same width on both axes so 1:1 holds."""
+    df = _release_df()
+    fig = P.fig_release(df)
+    (x0, x1), (y0, y1) = fig.layout.xaxis.range, fig.layout.yaxis.range
+    assert x0 < df["rel_side"].min() and df["rel_side"].max() < x1
+    assert y0 < df["rel_height"].min() and df["rel_height"].max() < y1
+    assert x1 - x0 == pytest.approx(y1 - y0)
+    assert x1 - x0 < 1.5                    # zoomed in, not the old +/-1.9 ft window
+    assert x1 < 0                           # an off-centre cluster is no longer padded out to 0
+
+
+def test_fig_release_tight_cluster_keeps_a_minimum_window():
+    df = _release_df().assign(rel_side=-1.2, rel_height=5.8)
+    (x0, x1) = P.fig_release(df).layout.xaxis.range
+    assert x1 - x0 == pytest.approx(2 * P._RELEASE_MIN_HALF)
 
 
 def test_fig_release_preserves_aspect_ratio():

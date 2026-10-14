@@ -440,9 +440,12 @@ def fig_movement(df: pd.DataFrame) -> go.Figure:
 # usable rel_side -- keeps the empty-state figure from collapsing to a
 # degenerate [-0, 0] range that Plotly renders as a single hairline.
 _RELEASE_X_FALLBACK = 3.0
-# Padding (ft) beyond the outermost release point, so a marker sitting at the
-# pitcher's extreme arm side isn't clipped by the axis line.
-_RELEASE_X_PAD = 0.5
+# Padding (ft) beyond the outermost release point, so an edge marker isn't
+# clipped by the axis line.
+_RELEASE_PAD = 0.25
+# Smallest half-width (ft) of the zoomed window, so a very tight cluster isn't
+# magnified until normal inch-level scatter looks like a mess.
+_RELEASE_MIN_HALF = 0.5
 
 
 def fig_release(df: pd.DataFrame) -> go.Figure:
@@ -458,14 +461,14 @@ def fig_release(df: pd.DataFrame) -> go.Figure:
       markers it describes -- it would hide the points instead of summarizing
       them. Coaches read this plot for cluster tightness and for drift between
       pitch types, both of which need the raw points visible.
-    * **Axes are pinned, not autoranged.** x is forced symmetric about 0
-      because 0 IS the middle of the rubber: letting Plotly autorange would
-      recentre a lefty's cluster in the panel and destroy the "which arm side
-      does he work from" read, which is the whole point of plotting rel_side.
-      y is then scaleanchor'd to x at 1:1 so a foot of height and a foot of
-      side occupy the same pixels -- without it Plotly stretches the
-      (typically much narrower) side spread to fill the panel and a genuinely
-      repeatable release looks scattered.
+    * **Zoomed to the cluster at 1:1** (2026-10-14, Brad: the old window,
+      symmetric about 0, left the cluster a tiny clump in one corner). Both
+      axes get the same width -- the larger of the side/height spreads plus
+      `_RELEASE_PAD`, never under `_RELEASE_MIN_HALF` -- centred on the
+      cluster, and y is scaleanchor'd to x at 1:1 so a foot of height and a
+      foot of side occupy the same pixels; without that Plotly stretches the
+      narrower spread to fill the panel and a repeatable release looks
+      scattered. Arm side still reads off the x tick labels.
 
     Both release columns are dropna'd up front, so an all-NaN frame yields an
     empty figure (chrome + axes, zero traces) rather than raising -- the same
@@ -481,17 +484,21 @@ def fig_release(df: pd.DataFrame) -> go.Figure:
                 marker=dict(color=pitch_color(pt), size=9),
                 hovertemplate=(f"{pt}<br>Rel Side: %{{x:.2f}} ft<br>"
                                "Rel Height: %{y:.2f} ft<extra></extra>")))
-    span = float(d["rel_side"].abs().max()) if not d.empty else float("nan")
-    if not np.isfinite(span) or span <= 0:
-        span = _RELEASE_X_FALLBACK
-    half = span + _RELEASE_X_PAD
+    if d.empty:
+        x_range, y_range = [-_RELEASE_X_FALLBACK, _RELEASE_X_FALLBACK], None
+    else:
+        xs, ys = d["rel_side"], d["rel_height"]
+        half = max((xs.max() - xs.min()) / 2, (ys.max() - ys.min()) / 2) + _RELEASE_PAD
+        half = max(float(half), _RELEASE_MIN_HALF)
+        cx, cy = (xs.max() + xs.min()) / 2, (ys.max() + ys.min()) / 2
+        x_range, y_range = [cx - half, cx + half], [cy - half, cy + half]
     # constrain="domain" on both axes: keeps a box-zoom drag matching exactly
     # what was dragged. Plotly's default "range" mode instead grows one
     # axis's range to hold the locked 1:1 aspect ratio, which is what makes
     # zoom look recentered on the chart's shape rather than the mouse.
-    fig.update_xaxes(title="Release Side (ft)", range=[-half, half], zeroline=True,
+    fig.update_xaxes(title="Release Side (ft)", range=x_range, zeroline=True,
                      constrain="domain")
-    fig.update_yaxes(title="Release Height (ft)", zeroline=True,
+    fig.update_yaxes(title="Release Height (ft)", zeroline=True, range=y_range,
                      scaleanchor="x", scaleratio=1, constrain="domain")
     return _base_layout(fig, "Release Point")
 
