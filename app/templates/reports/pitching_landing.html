@@ -64,6 +64,12 @@
 
 <div class="card">
   <form method="get" action="{{ url_for('reports.pitching_landing') }}">
+    <label for="season">Season</label>
+    <select name="season" id="season" onchange="this.form.submit()" style="margin-bottom: 12px;">
+      {% for s in seasons %}
+        <option value="{{ s }}" {% if s == season %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
     <label for="game_id">Game</label>
     <select name="game_id" id="game_id">
       <option value="">— Select a game —</option>
@@ -84,9 +90,9 @@
     <span class="filter-label">Sort pitchers</span>
     <div class="seg">
       <a class="seg-opt {% if sort == 'pitch' %}active{% endif %}"
-         href="{{ url_for('reports.pitching_landing', game_id=game_id, sort='pitch') }}">Pitch order</a>
+         href="{{ url_for('reports.pitching_landing', season=season, game_id=game_id, sort='pitch') }}">Pitch order</a>
       <a class="seg-opt {% if sort == 'alpha' %}active{% endif %}"
-         href="{{ url_for('reports.pitching_landing', game_id=game_id, sort='alpha') }}">Alphabetical</a>
+         href="{{ url_for('reports.pitching_landing', season=season, game_id=game_id, sort='alpha') }}">Alphabetical</a>
     </div>
   </div>
   <div class="filter-group" style="margin-left: auto;">

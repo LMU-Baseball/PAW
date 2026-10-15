@@ -483,7 +483,7 @@ def pitchers_for_game(game_id, sort: str = "pitch") -> pd.DataFrame:
     )
 
 
-def recent_games(limit: int = 25) -> pd.DataFrame:
+def recent_games(limit: int = 25, start=None, end=None) -> pd.DataFrame:
     """LMU games (home or away), newest first, for the report picker.
     `GAMES` has no season_label column, so it's derived via `_season_label`.
 
@@ -491,18 +491,28 @@ def recent_games(limit: int = 25) -> pd.DataFrame:
     LOY_LIO (same OR app.ingest.games.is_lmu_game already uses) -- a private/
     intra-squad scrimmage gets tagged with Trackman's own "Private" session
     foreign id on BOTH sides, never 78, so a ForeignID-only filter silently
-    dropped every scrimmage from this picker regardless of how recent it was."""
+    dropped every scrimmage from this picker regardless of how recent it was.
+
+    Optional `start`/`end` (inclusive, mirrors games_for_pitcher) scope to one
+    season -- the reports picker's Season dropdown, so last year's games don't
+    clog a list that's otherwise just "most recent 25 overall"."""
+    date_clause = ""
+    params = {"lmu": LMU_TEAM_ID, "team": LMU_PITCHER_TEAM, "lim": limit}
+    if start is not None and end is not None:
+        date_clause = " AND Date BETWEEN :start AND :end"
+        params["start"] = str(start)
+        params["end"] = str(end)
     df = query_df(
-        """
+        f"""
         SELECT DISTINCT GameID AS game_id, Date AS game_date,
                GameType AS game_type, HomeTeam AS home_team, AwayTeam AS away_team
           FROM GAMES
-         WHERE HomeTeamForeignID = :lmu OR AwayTeamForeignID = :lmu
-            OR PitcherTeam = :team OR BatterTeam = :team
+         WHERE (HomeTeamForeignID = :lmu OR AwayTeamForeignID = :lmu
+            OR PitcherTeam = :team OR BatterTeam = :team){date_clause}
          ORDER BY Date DESC, GameID DESC
          LIMIT :lim
         """,
-        {"lmu": LMU_TEAM_ID, "team": LMU_PITCHER_TEAM, "lim": limit},
+        params,
     )
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "season_label",

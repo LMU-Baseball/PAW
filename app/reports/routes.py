@@ -51,8 +51,19 @@ def _safe(text: str) -> str:
 @report_bp.route("/pitching")
 @login_required
 def pitching_landing():
-    """Pick a recent game, then download any of that game's pitcher reports."""
-    games = pitching_caps.recent_games(limit=25)
+    """Pick a recent game, then download any of that game's pitcher reports.
+
+    A Season dropdown (default = current season, same convention as
+    bullpen_landing) scopes the game list so last year's games don't clog it
+    once this season has more than a game or two -- see pitching_caps.recent_games.
+    """
+    from app.data import seasons
+    season = request.args.get("season") or seasons.current_season()
+    if season not in seasons.available_seasons():
+        season = seasons.current_season()
+    s_b, e_b = seasons.season_bounds(season)
+
+    games = pitching_caps.recent_games(limit=500, start=s_b, end=e_b)
     # GameID is an opaque string (numeric for warehouse-backfilled games,
     # composite like "20261013-LoyolaMarymount-Private-3" for cron/scrimmage
     # loads -- see pitching_caps.games_for_pitcher), so this is never int()-cast.
@@ -71,6 +82,7 @@ def pitching_landing():
 
     return render_template(
         "reports/pitching_landing.html",
+        seasons=seasons.available_seasons(), season=season,
         games=games.to_dict("records"),
         game_id=game_id,
         selected_game=selected,

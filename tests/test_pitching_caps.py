@@ -330,3 +330,24 @@ def test_pitchers_for_game_columns_lmu_and_ordering():
     da = pitching_caps.pitchers_for_game(gid, sort="alpha")
     assert set(da["player_id"]) == set(df["player_id"])
     assert list(da["display_name"]) == sorted(da["display_name"])
+
+
+def test_recent_games_scoped_to_season_excludes_other_seasons():
+    """The reports picker's Season dropdown: a [start, end] window must
+    exclude games from a different academic season, not just narrow by date
+    within the same unscoped top-N."""
+    from app.data import seasons
+    s_b, e_b = seasons.season_bounds("2025/2026")  # the Spring 2026 games
+    df = pitching_caps.recent_games(limit=500, start=s_b, end=e_b)
+    assert not df.empty
+    assert (df["game_date"] >= s_b).all()
+    assert (df["game_date"] <= e_b).all()
+    # the 2026-10-13 scrimmage is "2026/2027" -- must not leak into this window
+    assert "20261013-LoyolaMarymount-Private-3" not in set(df["game_id"])
+
+
+def test_recent_games_current_season_includes_the_scrimmage():
+    from app.data import seasons
+    s_b, e_b = seasons.season_bounds(seasons.current_season())
+    df = pitching_caps.recent_games(limit=500, start=s_b, end=e_b)
+    assert "20261013-LoyolaMarymount-Private-3" in set(df["game_id"])
