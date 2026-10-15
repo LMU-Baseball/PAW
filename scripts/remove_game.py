@@ -9,12 +9,16 @@ up as a duplicate entry in the outing/game picker. This deletes every GAMES
 row for one bad GameID -- never the whole table -- and rebuilds the precalc
 rollups so dashboards/reports stop seeing it.
 
-On --apply, also appends the GameID to data/excluded_games.json (unless
---no-exclude) -- without that, the next cron run would just re-insert the
-same rows: its dedup is per-PitchUID against what's currently in GAMES, so a
-deleted row's PitchUID looks "new" again the moment the source file is
-re-walked on the SFTP server (which this script has no reach into and does
-not delete). app.ingest.games.load_games checks that list on every row.
+On --apply, also appends the GameID AND its exact PitchUIDs to
+data/excluded_games.json (unless --no-exclude) -- without that, the next
+cron run would just re-insert the same rows: its dedup is per-PitchUID
+against what's currently in GAMES, so a deleted row's PitchUID looks "new"
+again the moment the source file is re-walked on the SFTP server (which this
+script has no reach into and does not delete). PitchUIDs are recorded too,
+not just the GameID, because Trackman's sidecar per-game files (e.g.
+"..._playerpositioning_FHC.csv") carry the same PitchUIDs with no GameID
+column at all -- a GameID-only exclusion misses those.
+app.ingest.games.load_games checks both lists on every row.
 
 Without --apply, prints what would be deleted and does nothing else (dry run,
 the default -- mirrors load_game_csv.py). Deleting GAMES rows is the kind of
@@ -39,7 +43,7 @@ from app.db import get_engine, query_df  # noqa: E402
 from app.ingest.games import EXCLUDED_GAMES_PATH  # noqa: E402
 
 
-def _append_exclusion(game_id: str, summary_row) -> None:
+def _append_exclusion(game_id: str, summary_row, pitch_uids: list[str]) -> None:
     entries = []
     if EXCLUDED_GAMES_PATH.exists():
         with open(EXCLUDED_GAMES_PATH, encoding="utf-8") as fh:
@@ -52,6 +56,7 @@ def _append_exclusion(game_id: str, summary_row) -> None:
                   f"GameType={summary_row['GameType']}, "
                   f"{summary_row['HomeTeam']} vs {summary_row['AwayTeam']}.",
         "removed": date.today().isoformat(),
+        "pitch_uids": pitch_uids,
     })
     with open(EXCLUDED_GAMES_PATH, "w", encoding="utf-8") as fh:
         json.dump(entries, fh, indent=2)
@@ -86,11 +91,14 @@ def main(argv=None) -> int:
         print("dry run -- add --apply to delete")
         return 0
 
+    pitch_uids = [str(u) for u in query_df(
+        "SELECT PitchUID FROM GAMES WHERE GameID = :g", {"g": args.game_id})["PitchUID"]]
+
     engine = get_engine()
     with engine.begin() as conn:
         result = conn.execute(text("DELETE FROM GAMES WHERE GameID = :g"), {"g": args.game_id})
     if not args.no_exclude:
-        _append_exclusion(args.game_id, row)
+        _append_exclusion(args.game_id, row, pitch_uids)
     precalc.rebuild_all(engine)
     print(f"deleted {result.rowcount} rows for GameID={args.game_id!r}"
           + ("" if args.no_exclude else " and added it to data/excluded_games.json"))

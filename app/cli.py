@@ -125,5 +125,6 @@ def register_cli(server):
         click.echo(
             f"pipeline-load: files={r.files} inserted={r.inserted} "
             f"skipped={r.skipped} non_lmu={r.skipped_non_lmu} "
+            f"excluded={r.skipped_excluded} "
             f"span={r.date_min}..{r.date_max} dry_run={r.dry_run} "
             f"rebuilt={out['rebuilt']}")

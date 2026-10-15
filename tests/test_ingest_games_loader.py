@@ -263,9 +263,56 @@ def test_excluded_game_ids_reads_committed_list(tmp_path):
     assert games.excluded_game_ids(p) == {"gid1", "gid2"}
 
 
+def test_excluded_pitch_uids_empty_when_file_absent(tmp_path):
+    assert games.excluded_pitch_uids(tmp_path / "nope.json") == set()
+
+
+def test_excluded_pitch_uids_flattens_every_entrys_list(tmp_path):
+    p = tmp_path / "excluded_games.json"
+    p.write_text(
+        '[{"game_id": "gid1", "reason": "dup", "removed": "2026-10-15", '
+        '  "pitch_uids": ["u1", "u2"]}, '
+        ' {"game_id": "gid2", "reason": "dup", "removed": "2026-10-15", '
+        '  "pitch_uids": ["u3"]}]',
+        encoding="utf-8",
+    )
+    assert games.excluded_pitch_uids(p) == {"u1", "u2", "u3"}
+
+
+def test_excluded_pitch_uids_tolerates_entries_without_the_field(tmp_path):
+    """An older exclude-list entry written before pitch_uids existed."""
+    p = tmp_path / "excluded_games.json"
+    p.write_text(
+        '[{"game_id": "gid1", "reason": "dup", "removed": "2026-10-15"}]',
+        encoding="utf-8",
+    )
+    assert games.excluded_pitch_uids(p) == set()
+
+
 def test_load_games_skips_rows_whose_gameid_is_excluded(monkeypatch, fixture_df):
     excluded_gid = str(fixture_df.iloc[0]["GameID"])
     monkeypatch.setattr(games, "excluded_game_ids", lambda path=None: {excluded_gid})
+    monkeypatch.setattr(games, "excluded_pitch_uids", lambda path=None: set())
+    monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: set())
+    monkeypatch.setattr(
+        games, "chunked_insert",
+        lambda *a, **k: pytest.fail("chunked_insert must not be called with nothing new to insert"),
+    )
+
+    result = load_games(engine=object(), sftp=object(), dry_run=True)
+
+    assert result.inserted == 0
+    assert result.skipped == 0
+    assert result.skipped_excluded == 30
+
+
+def test_load_games_skips_rows_whose_pitchuid_is_excluded(monkeypatch, fixture_df):
+    """Catches Trackman's sidecar per-game files (e.g. a playerpositioning
+    export), which carry an excluded game's PitchUIDs but no GameID column
+    for `excluded_game_ids` to match on."""
+    excluded_pids = set(fixture_df["PitchUID"].astype(str))
+    monkeypatch.setattr(games, "excluded_pitch_uids", lambda path=None: excluded_pids)
+    monkeypatch.setattr(games, "excluded_game_ids", lambda path=None: set())
     monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: set())
     monkeypatch.setattr(
         games, "chunked_insert",

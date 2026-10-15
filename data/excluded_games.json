@@ -2,6 +2,16 @@
   {
     "game_id": "20261013-LoyolaMarymount-Private-2",
     "reason": "Incomplete auto-pull duplicate (8 pitches, no GameType, no video) of 20261013-LoyolaMarymount-Private-3, the correct hand-uploaded camera file (171 pitches, GameType=Scrimmage, video on every pitch). Removed via scripts/remove_game.py so the cron doesn't re-insert it from the same source file.",
-    "removed": "2026-10-15"
+    "removed": "2026-10-15",
+    "pitch_uids": [
+      "fdc31be0-c741-11f1-a671-6fcecae639f3",
+      "fe80eda0-c741-11f1-8cc5-57c15017eca4",
+      "099c6750-c742-11f1-a671-6fcecae639f3",
+      "0a59c3e0-c742-11f1-8cc5-57c15017eca4",
+      "0d856150-c742-11f1-a671-6fcecae639f3",
+      "0e43a840-c742-11f1-8cc5-57c15017eca4",
+      "18898270-c742-11f1-a671-6fcecae639f3",
+      "1947a250-c742-11f1-8cc5-57c15017eca4"
+    ]
   }
 ]
