@@ -53,7 +53,10 @@ def _safe(text: str) -> str:
 def pitching_landing():
     """Pick a recent game, then download any of that game's pitcher reports."""
     games = pitching_caps.recent_games(limit=25)
-    game_id = request.args.get("game_id", type=int)
+    # GameID is an opaque string (numeric for warehouse-backfilled games,
+    # composite like "20261013-LoyolaMarymount-Private-3" for cron/scrimmage
+    # loads -- see pitching_caps.games_for_pitcher), so this is never int()-cast.
+    game_id = request.args.get("game_id") or None
     sort = request.args.get("sort", "pitch")
     if sort not in ("pitch", "alpha"):
         sort = "pitch"
@@ -76,9 +79,9 @@ def pitching_landing():
     )
 
 
-@report_bp.route("/pitcher/<int:game_id>/<int:pitcher_id>.pdf")
+@report_bp.route("/pitcher/<game_id>/<int:pitcher_id>.pdf")
 @login_required
-def pitcher_pdf(game_id: int, pitcher_id: int):
+def pitcher_pdf(game_id: str, pitcher_id: int):
     if not can_view_pitcher_report(current_user, pitcher_id):
         abort(403)
     try:
@@ -94,9 +97,9 @@ def pitcher_pdf(game_id: int, pitcher_id: int):
     )
 
 
-@report_bp.route("/pitching/<int:game_id>/all.zip")
+@report_bp.route("/pitching/<game_id>/all.zip")
 @login_required
-def pitching_all_zip(game_id: int):
+def pitching_all_zip(game_id: str):
     """Download every viewable LMU pitcher report for a game as one ZIP.
 
     Uses the same LMU-only picker list and the same per-pitcher access gate as

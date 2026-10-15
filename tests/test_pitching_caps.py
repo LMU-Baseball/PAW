@@ -314,7 +314,7 @@ def test_pitchers_for_game_columns_lmu_and_ordering():
     GROUP BY): same columns, pitch-order = ascending first-pitch, alpha-order =
     name-sorted, and both sorts return the same pitcher set."""
     g = pitching_caps.recent_games(5)
-    gid = int(g.iloc[0]["game_id"])
+    gid = g.iloc[0]["game_id"]  # opaque string -- may be numeric or composite
     df = pitching_caps.pitchers_for_game(gid, sort="pitch")
     assert list(df.columns) == ["game_id", "player_id", "display_name"]
     assert not df.empty
