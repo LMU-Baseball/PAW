@@ -96,6 +96,33 @@ def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
     assert "/reports/pitcher/166/2.pdf" in body
 
 
+_SCRIMMAGE_GAMES = pd.DataFrame([
+    {"game_id": "20261013-LoyolaMarymount-Private-3", "game_date": "2026-10-13",
+     "season_label": "Fall 2026", "game_type": "Scrimmage",
+     "home_team": "LOY_LIO", "away_team": "LOY_LIO"},
+])
+
+_SCRIMMAGE_PITCHERS = pd.DataFrame([
+    {"game_id": "20261013-LoyolaMarymount-Private-3", "player_id": 1,
+     "display_name": "Giesen, Corbin"},
+])
+
+
+def test_landing_selects_and_downloads_composite_string_game_id(logged_in_client, monkeypatch):
+    """A cron/scrimmage GameID (e.g. "20261013-LoyolaMarymount-Private-3") is
+    never purely numeric -- the picker, the selected-game lookup, and the
+    download links must all work for it, not just for legacy numeric ids."""
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _SCRIMMAGE_GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
+                        lambda gid, sort="pitch": _SCRIMMAGE_PITCHERS)
+    resp = logged_in_client.get("/reports/pitching?game_id=20261013-LoyolaMarymount-Private-3")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Giesen, Corbin" in body
+    assert "/reports/pitcher/20261013-LoyolaMarymount-Private-3/1.pdf" in body
+    assert "/reports/pitching/20261013-LoyolaMarymount-Private-3/all.zip" in body
+
+
 def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypatch):
     monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
     monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",

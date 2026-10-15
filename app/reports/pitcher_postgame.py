@@ -58,7 +58,7 @@ def _inline_fonts(css_text: str) -> str:
     return _FONT_URL_RE.sub(repl, css_text)
 
 
-def _build_html(game_id: int, pitcher_id: int) -> str:
+def _build_html(game_id, pitcher_id: int) -> str:
     """Render the one-page pitcher report to an HTML string (no PDF step)."""
     df = pitching_caps.game_pitches(game_id, pitcher_id)
     if df.empty:
@@ -128,12 +128,12 @@ def _build_html(game_id: int, pitcher_id: int) -> str:
 _CODE_VERSION = "2026-08-polish-2-caps"
 
 
-def _cache_path(game_id: int, pitcher_id: int, version: str) -> Path:
+def _cache_path(game_id, pitcher_id: int, version: str) -> Path:
     safe = re.sub(r"[^0-9A-Za-z._-]", "_", f"{version}_{_CODE_VERSION}")
     return _CACHE_DIR / f"pitcher_{pitcher_id}_game_{game_id}_{safe}.pdf"
 
 
-def build_pitcher_postgame(game_id: int, pitcher_id: int) -> bytes:
+def build_pitcher_postgame(game_id, pitcher_id: int) -> bytes:
     # Serve a cached PDF when one exists for this exact data version. The
     # version token advances when the pitcher gets new data, so a cached report
     # can never show a stale season velo-trend — it just rebuilds.

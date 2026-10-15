@@ -485,17 +485,24 @@ def pitchers_for_game(game_id, sort: str = "pitch") -> pd.DataFrame:
 
 def recent_games(limit: int = 25) -> pd.DataFrame:
     """LMU games (home or away), newest first, for the report picker.
-    `GAMES` has no season_label column, so it's derived via `_season_label`."""
+    `GAMES` has no season_label column, so it's derived via `_season_label`.
+
+    Matches on ForeignID==78 (real opponents) OR PitcherTeam/BatterTeam==
+    LOY_LIO (same OR app.ingest.games.is_lmu_game already uses) -- a private/
+    intra-squad scrimmage gets tagged with Trackman's own "Private" session
+    foreign id on BOTH sides, never 78, so a ForeignID-only filter silently
+    dropped every scrimmage from this picker regardless of how recent it was."""
     df = query_df(
         """
         SELECT DISTINCT GameID AS game_id, Date AS game_date,
                GameType AS game_type, HomeTeam AS home_team, AwayTeam AS away_team
           FROM GAMES
          WHERE HomeTeamForeignID = :lmu OR AwayTeamForeignID = :lmu
+            OR PitcherTeam = :team OR BatterTeam = :team
          ORDER BY Date DESC, GameID DESC
          LIMIT :lim
         """,
-        {"lmu": LMU_TEAM_ID, "lim": limit},
+        {"lmu": LMU_TEAM_ID, "team": LMU_PITCHER_TEAM, "lim": limit},
     )
     if df.empty:
         return pd.DataFrame(columns=["game_id", "game_date", "season_label",
