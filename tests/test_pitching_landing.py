@@ -60,7 +60,7 @@ def test_anonymous_redirects(app_ctx):
 
 
 def test_landing_lists_games(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching")
@@ -70,8 +70,52 @@ def test_landing_lists_games(app_ctx, monkeypatch):
     assert "SMC" in body and "USD" in body  # both games offered
 
 
+def test_landing_scopes_game_list_to_selected_season(logged_in_client, monkeypatch):
+    """The Season dropdown passes that season's date bounds to recent_games,
+    and defaults to today's real calendar season -- same convention as
+    bullpen_landing's Season dropdown."""
+    from datetime import date
+    from app.data import seasons
+    calls = []
+
+    def fake(limit=25, start=None, end=None):
+        calls.append((start, end))
+        return _GAMES
+
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", fake)
+    cur = seasons.season_label_for(date.today().isoformat())
+    cur_bounds = seasons.season_bounds(cur)
+    others = [s for s in seasons.available_seasons() if s < cur]
+
+    # Default (no season param) -> current season's bounds.
+    resp = logged_in_client.get("/reports/pitching")
+    assert resp.status_code == 200
+    assert cur_bounds in calls
+    body = resp.get_data(as_text=True)
+    assert f'value="{cur}"' in body and "selected" in body
+
+    # Explicit season param -> that season's bounds.
+    if others:
+        other = others[0]
+        other_bounds = seasons.season_bounds(other)
+        calls.clear()
+        r2 = logged_in_client.get(f"/reports/pitching?season={other}")
+        assert r2.status_code == 200
+        assert other_bounds in calls
+
+
+def test_landing_rejects_unknown_season_falls_back_to_current(logged_in_client, monkeypatch):
+    from datetime import date
+    from app.data import seasons
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
+    cur = seasons.season_label_for(date.today().isoformat())
+    resp = logged_in_client.get("/reports/pitching?season=1899/1900")
+    body = resp.get_data(as_text=True)
+    assert f'value="{cur}"' in body and "selected" in body
+
+
 def test_landing_has_white_header_back_link(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     body = client.get("/reports/pitching").get_data(as_text=True)
@@ -81,7 +125,7 @@ def test_landing_has_white_header_back_link(app_ctx, monkeypatch):
 
 
 def test_landing_shows_pitchers_and_download_links(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
@@ -112,7 +156,7 @@ def test_landing_selects_and_downloads_composite_string_game_id(logged_in_client
     """A cron/scrimmage GameID (e.g. "20261013-LoyolaMarymount-Private-3") is
     never purely numeric -- the picker, the selected-game lookup, and the
     download links must all work for it, not just for legacy numeric ids."""
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _SCRIMMAGE_GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _SCRIMMAGE_GAMES)
     monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _SCRIMMAGE_PITCHERS)
     resp = logged_in_client.get("/reports/pitching?game_id=20261013-LoyolaMarymount-Private-3")
@@ -124,7 +168,7 @@ def test_landing_selects_and_downloads_composite_string_game_id(logged_in_client
 
 
 def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
@@ -141,7 +185,7 @@ def test_landing_shows_sort_filter_and_defaults_to_pitch_order(app_ctx, monkeypa
 
 
 def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     seen = {}
     def _fake(gid, sort="pitch"):
         seen["sort"] = sort
@@ -155,7 +199,7 @@ def test_landing_sort_alpha_is_passed_to_data_layer(app_ctx, monkeypatch):
 
 
 def test_landing_shows_download_all_button(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     monkeypatch.setattr("app.data.pitching_caps.pitchers_for_game",
                         lambda gid, sort="pitch": _PITCHERS)
     client = app_ctx.test_client()
@@ -216,7 +260,7 @@ def test_download_all_404_when_nothing_viewable(app_ctx, monkeypatch):
 
 
 def test_landing_renders_hero_banner(app_ctx, monkeypatch):
-    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25: _GAMES)
+    monkeypatch.setattr("app.data.pitching_caps.recent_games", lambda limit=25, start=None, end=None: _GAMES)
     client = app_ctx.test_client()
     _login(client, "c@lmu.edu")
     resp = client.get("/reports/pitching")
