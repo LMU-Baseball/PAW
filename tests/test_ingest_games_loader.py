@@ -247,6 +247,52 @@ def test_load_games_rows_with_blank_pitchuid_use_composite_key_not_collapsed(mon
     assert result.skipped == 0
 
 
+# ---- excluded_game_ids / exclusion during load --------------------------
+
+def test_excluded_game_ids_empty_when_file_absent(tmp_path):
+    assert games.excluded_game_ids(tmp_path / "nope.json") == set()
+
+
+def test_excluded_game_ids_reads_committed_list(tmp_path):
+    p = tmp_path / "excluded_games.json"
+    p.write_text(
+        '[{"game_id": "gid1", "reason": "dup", "removed": "2026-10-15"}, '
+        '{"game_id": "gid2", "reason": "dup", "removed": "2026-10-15"}]',
+        encoding="utf-8",
+    )
+    assert games.excluded_game_ids(p) == {"gid1", "gid2"}
+
+
+def test_load_games_skips_rows_whose_gameid_is_excluded(monkeypatch, fixture_df):
+    excluded_gid = str(fixture_df.iloc[0]["GameID"])
+    monkeypatch.setattr(games, "excluded_game_ids", lambda path=None: {excluded_gid})
+    monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: set())
+    monkeypatch.setattr(
+        games, "chunked_insert",
+        lambda *a, **k: pytest.fail("chunked_insert must not be called with nothing new to insert"),
+    )
+
+    result = load_games(engine=object(), sftp=object(), dry_run=True)
+
+    assert result.inserted == 0
+    assert result.skipped == 0
+    assert result.skipped_excluded == 30
+
+
+def test_load_games_excluded_rows_never_reach_already_loaded_dedup(monkeypatch, fixture_df):
+    """An excluded GameID is skipped outright -- it must not also get counted
+    in `skipped` (the already-loaded/duplicate-within-run bucket)."""
+    excluded_gid = str(fixture_df.iloc[0]["GameID"])
+    monkeypatch.setattr(games, "excluded_game_ids", lambda path=None: {excluded_gid})
+    all_pitch_uids = set(fixture_df["PitchUID"].astype(str))
+    monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: all_pitch_uids)
+
+    result = load_games(engine=object(), sftp=object(), dry_run=True)
+
+    assert result.skipped_excluded == 30
+    assert result.skipped == 0
+
+
 def test_load_games_limit_caps_files_processed(monkeypatch):
     monkeypatch.setattr(games, "existing_keys", lambda engine, table, col: set())
     monkeypatch.setattr(

@@ -21,14 +21,36 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import json
 import posixpath
 import re
 import stat
+from pathlib import Path
 
 import pandas as pd
 
 from app.ingest.common import LoadResult, chunked_insert, existing_keys
 from app.ingest.normalize_games_date import iso_date
+
+# Git-tracked, reviewed list of GameIDs to permanently skip on every load --
+# e.g. a known-bad/incomplete duplicate removed via scripts/remove_game.py.
+# Without this, the cron would re-insert the same rows on its next run: the
+# dedup in `load_games` is per-PitchUID against what's currently in GAMES, so
+# once a removed game's rows are gone, their PitchUIDs look "new" again the
+# next time the source file is walked on the SFTP server (which nothing here
+# deletes). Checked by GameID, not file path, since GameID is what every row
+# (and `remove_game.py`) already carries.
+EXCLUDED_GAMES_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "excluded_games.json"
+
+
+def excluded_game_ids(path: Path = EXCLUDED_GAMES_PATH) -> set[str]:
+    """GameIDs to never (re)insert, from the committed exclude list. Empty set
+    if the file is absent (e.g. a fresh checkout before it's ever been needed)."""
+    if not path.exists():
+        return set()
+    with open(path, encoding="utf-8") as fh:
+        entries = json.load(fh)
+    return {str(e["game_id"]) for e in entries}
 
 # Game CSV basenames look like "20260416-CypressCollege-1.csv": 8 digits
 # (the game date) then a dash.
@@ -464,6 +486,9 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
 
     Insert-only: never DELETEs or DROPs existing rows. `date_min`/`date_max`
     are computed from the `Date` column of the rows selected for insert.
+
+    Rows whose GameID is in `excluded_game_ids()` are skipped and counted in
+    `skipped_excluded`, never inserted -- see that function's docstring.
     """
     # Call the old positional signature when since_days is None so existing
     # callers/tests that monkeypatch iter_game_files with a narrow lambda keep
@@ -474,10 +499,12 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
         files = files[:limit]
 
     already_loaded = existing_keys(engine, "GAMES", "PitchUID")
+    excluded = excluded_game_ids()
     seen: set[str] = set()
     rows_to_insert: list[dict] = []
     skipped = 0
     skipped_non_lmu = 0
+    skipped_excluded = 0
 
     for path in files:
         raw_df = _read_csv_from_sftp(sftp, path)
@@ -486,6 +513,9 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
             skipped_non_lmu += 1
             continue
         for row in parsed.to_dict(orient="records"):
+            if str(row.get("GameID")) in excluded:
+                skipped_excluded += 1
+                continue
             key = dedup_key(row)
             if key in already_loaded or key in seen:
                 skipped += 1
@@ -509,4 +539,5 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
         date_max=date_max,
         dry_run=dry_run,
         skipped_non_lmu=skipped_non_lmu,
+        skipped_excluded=skipped_excluded,
     )
