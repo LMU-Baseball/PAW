@@ -32,25 +32,41 @@ import pandas as pd
 from app.ingest.common import LoadResult, chunked_insert, existing_keys
 from app.ingest.normalize_games_date import iso_date
 
-# Git-tracked, reviewed list of GameIDs to permanently skip on every load --
-# e.g. a known-bad/incomplete duplicate removed via scripts/remove_game.py.
-# Without this, the cron would re-insert the same rows on its next run: the
-# dedup in `load_games` is per-PitchUID against what's currently in GAMES, so
-# once a removed game's rows are gone, their PitchUIDs look "new" again the
-# next time the source file is walked on the SFTP server (which nothing here
-# deletes). Checked by GameID, not file path, since GameID is what every row
-# (and `remove_game.py`) already carries.
+# Git-tracked, reviewed list of GameIDs (+ their PitchUIDs) to permanently
+# skip on every load -- e.g. a known-bad/incomplete duplicate removed via
+# scripts/remove_game.py. Without this, the cron would re-insert the same
+# rows on its next run: the dedup in `load_games` is per-PitchUID against
+# what's currently in GAMES, so once a removed game's rows are gone, their
+# PitchUIDs look "new" again the next time the source file is walked on the
+# SFTP server (which nothing here deletes).
+#
+# Matched on BOTH GameID and PitchUID (not GameID alone): Trackman also
+# writes sidecar per-game files (e.g. "..._playerpositioning_FHC.csv", fielder
+# positions, not pitch metrics) that carry the same PitchUIDs but NO GameID
+# column at all, so a GameID-only check misses them -- they'd still slip a
+# near-empty row per excluded PitchUID past the GameID filter.
 EXCLUDED_GAMES_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "excluded_games.json"
+
+
+def _excluded_entries(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def excluded_game_ids(path: Path = EXCLUDED_GAMES_PATH) -> set[str]:
     """GameIDs to never (re)insert, from the committed exclude list. Empty set
     if the file is absent (e.g. a fresh checkout before it's ever been needed)."""
-    if not path.exists():
-        return set()
-    with open(path, encoding="utf-8") as fh:
-        entries = json.load(fh)
-    return {str(e["game_id"]) for e in entries}
+    return {str(e["game_id"]) for e in _excluded_entries(path)}
+
+
+def excluded_pitch_uids(path: Path = EXCLUDED_GAMES_PATH) -> set[str]:
+    """PitchUIDs to never (re)insert -- every `pitch_uids` entry across the
+    committed exclude list, flattened. Catches sidecar files (see module
+    docstring note above) that carry an excluded game's PitchUIDs but no
+    GameID column for `excluded_game_ids` to match on."""
+    return {str(u) for e in _excluded_entries(path) for u in e.get("pitch_uids", [])}
 
 # Game CSV basenames look like "20260416-CypressCollege-1.csv": 8 digits
 # (the game date) then a dash.
@@ -487,8 +503,10 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
     Insert-only: never DELETEs or DROPs existing rows. `date_min`/`date_max`
     are computed from the `Date` column of the rows selected for insert.
 
-    Rows whose GameID is in `excluded_game_ids()` are skipped and counted in
-    `skipped_excluded`, never inserted -- see that function's docstring.
+    Rows whose GameID is in `excluded_game_ids()`, OR whose PitchUID is in
+    `excluded_pitch_uids()` (catches sidecar files with no GameID column --
+    see that function's docstring), are skipped and counted in
+    `skipped_excluded`, never inserted.
     """
     # Call the old positional signature when since_days is None so existing
     # callers/tests that monkeypatch iter_game_files with a narrow lambda keep
@@ -499,7 +517,8 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
         files = files[:limit]
 
     already_loaded = existing_keys(engine, "GAMES", "PitchUID")
-    excluded = excluded_game_ids()
+    excluded_gids = excluded_game_ids()
+    excluded_pids = excluded_pitch_uids()
     seen: set[str] = set()
     rows_to_insert: list[dict] = []
     skipped = 0
@@ -513,7 +532,11 @@ def load_games(engine, sftp, *, dry_run: bool = True, limit: int | None = None,
             skipped_non_lmu += 1
             continue
         for row in parsed.to_dict(orient="records"):
-            if str(row.get("GameID")) in excluded:
+            pitch_uid = row.get("PitchUID")
+            if isinstance(pitch_uid, float) and pd.isna(pitch_uid):
+                pitch_uid = None
+            if (str(row.get("GameID")) in excluded_gids
+                    or (pitch_uid is not None and str(pitch_uid) in excluded_pids)):
                 skipped_excluded += 1
                 continue
             key = dedup_key(row)
