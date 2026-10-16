@@ -17,7 +17,7 @@ GOALS: dict[str, float] = {
     "barrel_pct": 7.0,
 }
 
-# Metrics where a LOWER value is better (blue when value <= goal).
+# Metrics where a LOWER value is better (met goal when value <= goal).
 LOWER_IS_BETTER: set[str] = {"bb_pct", "barrel_pct"}
 
 # Relative band (fraction of the goal) that separates a "slight" beat/miss from a
@@ -28,8 +28,8 @@ LOWER_IS_BETTER: set[str] = {"bb_pct", "barrel_pct"}
 TIER_BAND = 0.10
 
 # tier key -> CSS chip class (see report.css):
-#   good-strong = dark blue  (exceeded goal)     good = light blue (barely met)
-#   bad         = light red  (barely missed)     bad-strong = dark red (badly missed)
+#   good-strong = dark red   (exceeded goal)     good = light red  (barely met)
+#   bad         = light blue (barely missed)     bad-strong = dark blue (badly missed)
 _TIER_CLASS = {
     "good_strong": "good-strong",
     "good_slight": "good",
