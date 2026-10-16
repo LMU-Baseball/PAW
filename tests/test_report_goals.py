@@ -51,8 +51,8 @@ def test_goal_tier_none_when_no_goal_or_value():
 
 
 def test_apply_goals_adds_tier_and_chip_class():
-    rows = [{"key": "strike_pct", "value_pct": 90.0},   # far over -> dark blue
-            {"key": "k_pct", "value_pct": 0.0}]          # far under -> dark red
+    rows = [{"key": "strike_pct", "value_pct": 90.0},   # far over -> dark red
+            {"key": "k_pct", "value_pct": 0.0}]          # far under -> dark blue
     out = apply_goals(rows)
     assert out[0]["tier"] == "good_strong" and out[0]["chip"] == "good-strong"
     assert out[1]["tier"] == "bad_strong" and out[1]["chip"] == "bad-strong"

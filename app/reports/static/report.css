@@ -33,11 +33,12 @@ td.l, th.l { text-align: left; }
 .chip { display: inline-block; padding: 1px 7px; border-radius: 10px;
         background: #eef2f7; font-weight: 700; }
 /* 4-tier chip coloring in the school colors (crimson + royal blue), not green.
-   Blue = met goal, red = missed; the darker/solid fill = by a wide margin. */
-.chip.good        { background: #d6e4f5; color: #005e84; }  /* barely met goal   */
-.chip.good-strong { background: #005e84; color: #fff;    }  /* exceeded goal      */
-.chip.bad         { background: #fbe3e3; color: #a3271f; }  /* barely missed goal */
-.chip.bad-strong  { background: #9A0021; color: #fff;    }  /* badly missed goal  */
+   Red = met goal, blue = missed (Brad, 2026-10-15: flipped from blue = met);
+   the darker/solid fill = by a wide margin. */
+.chip.good        { background: #fbe3e3; color: #a3271f; }  /* barely met goal   */
+.chip.good-strong { background: #9A0021; color: #fff;    }  /* exceeded goal      */
+.chip.bad         { background: #d6e4f5; color: #005e84; }  /* barely missed goal */
+.chip.bad-strong  { background: #005e84; color: #fff;    }  /* badly missed goal  */
 /* Pitch-type names carry the chart color (tables double as the chart legend). */
 td.pt { font-weight: 700; }
 .fb-callout { padding: 5px 10px; color: #555; font-size: 12px; border-top: 1px solid #eee; }
