@@ -22,6 +22,29 @@ def _angles(keys: list[str] | None) -> list[tuple[str, str]]:
     return list(ANGLES) if keys is None else [(k, lbl) for k, lbl in ANGLES if k in keys]
 
 
+def media_panel(prefix: str, angles: list[str] | None = None) -> list:
+    """Angle pills + player + the stores `register_callbacks` drives. A page
+    that lays out its own `{prefix}-video-table` (with url_* + batter_side
+    columns) can embed this and reuse the callbacks unchanged."""
+    buttons = [html.Button(label, id={"type": f"{prefix}-angle", "index": key},
+                           n_clicks=0, style=_btn_style(True, False))
+               for key, label in _angles(angles)]
+    player = html.Video(
+        id=f"{prefix}-video-player", controls=True, autoPlay=True, muted=True,
+        loop=True, preload="auto",
+        children=html.Source(id=f"{prefix}-video-source", src="", type="video/mp4"),
+        style={"width": "100%", "borderRadius": "8px", "background": "#000"})
+    return [
+        dcc.Store(id=f"{prefix}-video-pitch"),
+        dcc.Store(id=f"{prefix}-video-angle"),
+        html.Div(buttons, style={"marginBottom": "8px"}),
+        html.Div("Click a pitch row to load video.", id=f"{prefix}-video-hint",
+                 style={"color": "#555", "marginBottom": "6px"}),
+        player,
+        html.Div(id=f"{prefix}-video-reload", style={"display": "none"}),
+    ]
+
+
 def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
            columns: list[str] | None = None, angles: list[str] | None = None) -> html.Div:
     if df is None or df.empty:
@@ -42,27 +65,11 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
                                  "backgroundColor": "rgba(154,0,33,.15)",
                                  "border": f"1px solid {CRIMSON}"}],
     )
-    buttons = [html.Button(label, id={"type": f"{prefix}-angle", "index": key},
-                           n_clicks=0, style=_btn_style(True, False))
-               for key, label in _angles(angles)]
-    player = html.Video(
-        id=f"{prefix}-video-player", controls=True, autoPlay=True, muted=True,
-        loop=True, preload="auto",
-        children=html.Source(id=f"{prefix}-video-source", src="", type="video/mp4"),
-        style={"width": "100%", "borderRadius": "8px", "background": "#000"})
-    reload_sink = html.Div(id=f"{prefix}-video-reload", style={"display": "none"})
     return html.Div([
-        dcc.Store(id=f"{prefix}-video-pitch"),
-        dcc.Store(id=f"{prefix}-video-angle"),
         html.Div([
             # LEFT: the video is the dominant element (large).
-            html.Div([
-                html.Div(buttons, style={"marginBottom": "8px"}),
-                html.Div("Click a pitch row to load video.", id=f"{prefix}-video-hint",
-                         style={"color": "#555", "marginBottom": "6px"}),
-                player,
-                reload_sink,
-            ], className="paw-video-media", style={"flex": "2", "minWidth": "480px"}),
+            html.Div(media_panel(prefix, angles),
+                     className="paw-video-media", style={"flex": "2", "minWidth": "480px"}),
             # RIGHT: the pitch table, compact.
             html.Div([table], className="paw-video-table", style={"flex": "1", "minWidth": "300px"}),
         ], className="paw-video-row",

@@ -160,6 +160,23 @@ def video_game_ids(games_df, **subject) -> set:
         return set()
 
 
+def clip_urls(pitch_uids) -> dict[str, dict[str, str]]:
+    """{pitch_uid: {angle: url}} for whichever of `pitch_uids` have clips,
+    from both clip sources."""
+    uids = [str(u) for u in pitch_uids if u]
+    if not uids:
+        return {}
+    _ensure_clip_tables()
+    ph = ", ".join(f":u{i}" for i in range(len(uids)))
+    df = query_df(f"SELECT pitch_uid, angle, s3_url FROM {_CLIP_SOURCE} v WHERE v.pitch_uid IN ({ph})",
+                  {f"u{i}": u for i, u in enumerate(uids)})
+    out: dict[str, dict[str, str]] = {}
+    for uid, angle, url in df.itertuples(index=False):
+        if url:
+            out.setdefault(str(uid), {}).setdefault(str(angle), str(url))
+    return out
+
+
 def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None) -> pd.DataFrame:
     """One row per pitch (angles pivoted to url columns) for a game (or list of
     games) and one subject. Empty full-column frame when there is no video."""
