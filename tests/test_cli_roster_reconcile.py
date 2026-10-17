@@ -25,7 +25,7 @@ def _test_app():
 
 def test_roster_reconcile_command_runs_and_reports_count(monkeypatch):
     from app.data import lmu_roster
-    monkeypatch.setattr(lmu_roster, "reconcile_ids", lambda season, engine=None: 3)
+    monkeypatch.setattr(lmu_roster, "reconcile_ids", lambda season, engine=None, dry_run=False: 3)
     app = _test_app()
     runner = CliRunner()
     result = runner.invoke(app.cli, ["roster-reconcile", "--season", "1899/1900"])

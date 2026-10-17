@@ -24,7 +24,7 @@ from sqlalchemy import text
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.data import precalc  # noqa: E402
+from app.data import lmu_roster, precalc  # noqa: E402
 from app.db import get_engine, query_df  # noqa: E402
 from app.ingest import games  # noqa: E402
 
@@ -79,6 +79,7 @@ def main(argv=None) -> int:
                          {"gt": args.game_type, **{f"u{i}": u for i, u in enumerate(loaded_uids)}})
     if rows or fixes:
         precalc.rebuild_all(engine)
+        lmu_roster.reconcile_after_load(engine)
     print(f"loaded {len(rows)} rows, corrected {len(fixes)} pitches")
     return 0
 

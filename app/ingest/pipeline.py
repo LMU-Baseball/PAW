@@ -11,7 +11,7 @@ from app.db import get_engine
 from app.ingest.connections import open_sftp
 from app.ingest.config import trackman_cfg
 from app.ingest.games import load_games
-from app.data import precalc
+from app.data import lmu_roster, precalc
 
 
 def run_pipeline(engine=None, *, dry_run: bool = True, since_days: int = 3) -> dict:
@@ -25,4 +25,6 @@ def run_pipeline(engine=None, *, dry_run: bool = True, since_days: int = 3) -> d
     rebuilt = None
     if not dry_run and res.inserted > 0:
         rebuilt = precalc.rebuild_all(engine)
+    if not dry_run:
+        lmu_roster.reconcile_after_load(engine)
     return {"load": res, "rebuilt": rebuilt}

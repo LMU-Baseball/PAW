@@ -16,8 +16,10 @@ BIGINTs, so this can never collide, and it flows through every existing such
 column untouched. Once a player's real Trackman id appears (they throw or hit
 something tracked), `union_with_roster`'s name-based dedup makes the
 placeholder disappear from every *read*, and `reconcile_ids` migrates any
-*persisted* Cauldron/Velo Board rows saved against the placeholder over to
-the real id.
+*persisted* Cauldron/Velo Board/Built on the Bluff rows saved against the
+placeholder over to the real id. It runs automatically after every GAMES load
+(`reconcile_after_load`) -- the first tracked outing is exactly when a
+pitcher's id changes.
 """
 from __future__ import annotations
 
@@ -61,6 +63,18 @@ _RECONCILE_TABLES = (
     ("velo_board_overrides", "pitcher_id"),
     ("velo_board_cycle_overrides", "pitcher_id"),
 )
+
+# Built on the Bluff (app.data.splash_report) is keyed (player_id,
+# season_label, cycle) and holds hand-typed coach work, so it reconciles
+# per (season_label, cycle) group and NEVER deletes: a group the real id
+# already has rows for is skipped and left under the placeholder (logged)
+# rather than merged or dropped. 2026-10-13: the first fall scrimmage moved
+# every pitcher who threw onto a real id; this table list didn't exist yet,
+# so their strength numbers and Gas Station rows disappeared from the page.
+def _splash_tables() -> tuple[str, ...]:
+    from app.data import splash_report as SR
+    return (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
+            SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE)
 
 
 def ensure_table(engine=None) -> None:
@@ -245,16 +259,42 @@ def union_with_roster(df: pd.DataFrame, season_label: str, groups: tuple[str, ..
     return out.sort_values(name_col, kind="mergesort").reset_index(drop=True)
 
 
-def reconcile_ids(season_label: str, engine=None) -> int:
-    """Migrate any cauldron_teams/cauldron_daily/velo_board_entries/
-    velo_board_overrides/velo_board_cycle_overrides row saved against a
-    pitcher placeholder id (-roster_id) over to that pitcher's real
-    Trackman PitcherId, once one exists (matched by name). Idempotent: once migrated, a placeholder id no
-    longer has any row referencing it, so re-running is a safe no-op. Only
-    PITCHER placeholders are ever reconciled -- Cauldron and Velo Board are
-    both pitcher-only systems (see _RECONCILE_TABLES); hitter/catcher
-    placeholders never persist anywhere, so there's nothing to migrate for
-    them. Returns the total number of rows migrated across all five tables.
+def _reconcile_splash(conn, placeholder_id: int, real_id: int) -> int:
+    """Move a placeholder's Built on the Bluff rows to the real id, one
+    (season_label, cycle) group at a time; skip (and keep) any group the real
+    id already has rows for."""
+    def groups(table, pid):
+        rows = conn.execute(text(f"SELECT DISTINCT season_label, cycle FROM {table} "
+                                 "WHERE player_id = :p"), {"p": pid}).fetchall()
+        return {(r[0], r[1]) for r in rows}
+
+    moved = 0
+    for table in _splash_tables():
+        taken = groups(table, real_id)
+        for season_label, cycle in sorted(groups(table, placeholder_id)):
+            if (season_label, cycle) in taken:
+                logging.warning(
+                    f"reconcile_ids: {table} {season_label} {cycle} already has rows for real "
+                    f"id {real_id}; left placeholder {placeholder_id}'s rows in place")
+                continue
+            moved += conn.execute(
+                text(f"UPDATE {table} SET player_id = :real WHERE player_id = :ph "
+                     "AND season_label = :s AND cycle = :c"),
+                {"real": real_id, "ph": placeholder_id, "s": season_label, "c": cycle}).rowcount
+    return moved
+
+
+def reconcile_ids(season_label: str, engine=None, *, dry_run: bool = False) -> int:
+    """Migrate rows saved against a pitcher placeholder id (-roster_id) over
+    to that pitcher's real Trackman PitcherId, once one exists (matched by
+    name): the Cauldron/Velo Board tables in _RECONCILE_TABLES plus every
+    Built on the Bluff table (`_reconcile_splash`). Idempotent: once
+    migrated, a placeholder id no longer has any row referencing it, so
+    re-running is a safe no-op. Only PITCHER placeholders are ever reconciled
+    -- these are pitcher-only systems; hitter/catcher placeholders never
+    persist anywhere, so there's nothing to migrate for them. `dry_run`
+    rolls the whole transaction back, so the returned count is a preview.
+    Returns the total number of rows migrated.
     """
     engine = engine or get_engine()
     roster = load_roster(season_label)
@@ -275,8 +315,11 @@ def reconcile_ids(season_label: str, engine=None) -> int:
     real_by_name = {_norm_name(n): int(pid) for pid, n in
                     zip(real["PitcherId"], real["Pitcher"])} if not real.empty else {}
 
+    from app.data import splash_report
+    splash_report.ensure_tables(engine)
     migrated = 0
-    with engine.begin() as conn:
+    with engine.connect() as conn:
+        txn = conn.begin()
         for _, r in pitchers.iterrows():
             key = _norm_name(f"{r['last_name']}, {r['first_name']}")
             real_id = real_by_name.get(key)
@@ -304,4 +347,26 @@ def reconcile_ids(season_label: str, engine=None) -> int:
                         conn.execute(
                             text(f"DELETE FROM {table} WHERE {col} = :placeholder"),
                             {"placeholder": placeholder_id})
+            migrated += _reconcile_splash(conn, placeholder_id, real_id)
+        if dry_run:
+            txn.rollback()
+        else:
+            txn.commit()
     return migrated
+
+
+def reconcile_after_load(engine=None) -> None:
+    """Run after any GAMES load: a pitcher's first tracked outing of the
+    season is what moves them off their placeholder id. Best-effort -- a
+    failure here must never fail the load itself (re-run with
+    `flask roster-reconcile`)."""
+    from datetime import date
+    from app.data import seasons
+    from app.data.cache import clear_all
+    try:
+        clear_all()  # lmu_pitchers is @cached; it must see the rows just loaded
+        n = reconcile_ids(seasons.season_label_for(date.today().isoformat()), engine)
+        if n:
+            logging.warning(f"reconcile_after_load: migrated {n} placeholder row(s)")
+    except Exception:
+        logging.exception("reconcile_after_load failed; run `flask roster-reconcile`")

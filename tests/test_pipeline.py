@@ -28,6 +28,9 @@ def _wire(monkeypatch, inserted):
     rebuilds = {"n": 0}
     monkeypatch.setattr(pipeline.precalc, "rebuild_all",
                         lambda e=None: rebuilds.__setitem__("n", rebuilds["n"] + 1) or {})
+    captured["reconciles"] = 0
+    monkeypatch.setattr(pipeline.lmu_roster, "reconcile_after_load",
+                        lambda e=None: captured.__setitem__("reconciles", captured["reconciles"] + 1))
     return captured, rebuilds
 
 
@@ -49,3 +52,15 @@ def test_pipeline_skips_rebuild_when_no_inserts(monkeypatch):
     _captured, rebuilds = _wire(monkeypatch, inserted=0)
     out = pipeline.run_pipeline(engine=object(), dry_run=False, since_days=3)
     assert rebuilds["n"] == 0 and out["rebuilt"] is None   # nothing new -> no rebuild
+
+
+def test_pipeline_reconciles_placeholder_ids_on_every_real_run(monkeypatch):
+    # A pitcher's first tracked outing moves them off their roster placeholder
+    # id; Built on the Bluff/Cauldron/Velo Board rows must follow them.
+    for inserted in (5, 0):
+        captured, _ = _wire(monkeypatch, inserted=inserted)
+        pipeline.run_pipeline(engine=object(), dry_run=False, since_days=3)
+        assert captured["reconciles"] == 1
+    captured, _ = _wire(monkeypatch, inserted=5)
+    pipeline.run_pipeline(engine=object(), dry_run=True, since_days=3)
+    assert captured["reconciles"] == 0
