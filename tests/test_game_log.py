@@ -85,6 +85,18 @@ def test_summary_and_batter_line():
     assert game_log.batter_line(df, "Poe, Al") == "0-for-0 · BB"
 
 
+def test_game_pitches_picks_up_newly_uploaded_angles(monkeypatch):
+    from app.data import cache
+    cache.clear_all()
+    monkeypatch.setattr(game_log, "query_df", lambda *a, **k: _raw())
+    uploaded = {"u2": {"HomeBehind": "/b"}}
+    monkeypatch.setattr(game_log.videodata, "clip_urls", lambda uids: uploaded)
+    assert game_log.game_pitches("G1").loc[1, "url_broadcast"] is None
+    uploaded["u2"]["Broadcast"] = "/cf"
+    assert game_log.game_pitches("G1").loc[1, "url_broadcast"] == "/cf"
+    cache.clear_all()
+
+
 def test_empty_frames_are_safe():
     assert game_log.label_pitches(pd.DataFrame()).empty
     assert game_log.summary(None)["PA"] == "—"

@@ -79,13 +79,19 @@ def lmu_games(start, end) -> pd.DataFrame:
 
 
 @cached
-def game_pitches(game_id) -> pd.DataFrame:
-    """Every pitch to an LMU hitter in the game, labeled (see `label_pitches`),
-    with the hitter-angle video urls attached."""
+def _labeled_pitches(game_id) -> pd.DataFrame:
     raw = query_df(
         f"SELECT {_COLS} FROM GAMES WHERE GameID = :g AND BatterTeam = :t ORDER BY PitchNo",
         {"g": str(game_id), "t": LMU_BATTER_TEAM})
-    df = label_pitches(raw)
+    return label_pitches(raw)
+
+
+def game_pitches(game_id) -> pd.DataFrame:
+    """Every pitch to an LMU hitter in the game, labeled (see `label_pitches`),
+    with the hitter-angle video urls attached."""
+    # Video urls are looked up fresh: clip uploads don't bump the data version, so
+    # caching them kept a game showing only the angles uploaded before its first view.
+    df = _labeled_pitches(game_id)
     if df.empty:
         return df
     try:
