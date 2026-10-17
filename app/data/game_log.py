@@ -48,6 +48,16 @@ SHOW_ONLY = [
 ]
 
 
+# Zones 1-13 on the catcher's view: 1-9 are the strike-zone grid numbered like
+# GAMES.Zone (1 = top row on the +PlateLocSide side), 10-13 the four out-of-zone
+# corners (10 up/+side, 11 up/-side, 12 down/+side, 13 down/-side).
+_SZ_X, _SZ_Y0, _SZ_Y1 = 0.83, 1.5, 3.5
+# Words follow the hitter: +PlateLocSide is away from a righty, in on a lefty.
+ZONE_WORDS = ["Up & In", "Up", "Up & Away", "In", "Middle", "Away", "Down & In", "Down",
+              "Down & Away", "Chase Up & In", "Chase Up & Away", "Chase Down & In",
+              "Chase Down & Away"]
+
+
 def _blank(v) -> bool:
     return v is None or (isinstance(v, float) and np.isnan(v)) or v is pd.NA \
         or (isinstance(v, str) and v in ("", "Undefined"))
@@ -103,6 +113,35 @@ def game_pitches(game_id) -> pd.DataFrame:
 
 # ------------------------------ transforms -------------------------------
 
+def zone13(side_ft, height_ft) -> int | None:
+    if _blank(side_ft) or _blank(height_ft) or pd.isna(side_ft) or pd.isna(height_ft):
+        return None
+    x, y = float(side_ft), float(height_ft)
+    if abs(x) <= _SZ_X and _SZ_Y0 <= y <= _SZ_Y1:
+        third_x, third_y = 2 * _SZ_X / 3, (_SZ_Y1 - _SZ_Y0) / 3
+        col = 0 if x > _SZ_X - third_x else (1 if x >= -_SZ_X + third_x else 2)
+        row = 0 if y > _SZ_Y1 - third_y else (1 if y >= _SZ_Y0 + third_y else 2)
+        return 1 + 3 * row + col
+    up = y >= (_SZ_Y0 + _SZ_Y1) / 2
+    return (10 if up else 12) + (0 if x >= 0 else 1)
+
+
+def zone_word(zone, batter_side) -> str:
+    """Hitter-relative name for a `zone13` number ('' when unknown)."""
+    if zone is None or pd.isna(zone):
+        return ""
+    z = int(zone)
+    righty = batter_side != "Left"
+    if z >= 10:
+        plus_side = z in (10, 12)
+        horiz = "Away" if plus_side == righty else "In"
+        return f"Chase {'Up' if z in (10, 11) else 'Down'} & {horiz}"
+    row, col = divmod(z - 1, 3)
+    horiz = "" if col == 1 else ("Away" if (col == 0) == righty else "In")
+    vert = ("Up", "", "Down")[row]
+    return " & ".join(p for p in (vert, horiz) if p) or "Middle"
+
+
 def pa_result(last: dict) -> str:
     """Scorebook-style code for a PA's final pitch ('LD-2B', 'K-Swing', 'BB')."""
     korbb, call, play = last.get("KorBB"), last.get("PitchCall"), last.get("PlayResult")
@@ -156,6 +195,9 @@ def label_pitches(raw: pd.DataFrame) -> pd.DataFrame:
     df["pa_code"] = df["pa_key"].map(codes).fillna("")
 
     df["Zone"] = [attack_zone(s, h) for s, h in zip(df["PlateLocSide"], df["PlateLocHeight"])]
+    df["Z"] = pd.array([zone13(s, h) for s, h in zip(df["PlateLocSide"], df["PlateLocHeight"])],
+                       dtype="Int64")
+    df["ZoneWord"] = [zone_word(z, b) for z, b in zip(df["Z"], df["BatterSide"])]
     df["is_swing"] = df["PitchCall"].isin(SWING_CALLS)
     df["is_take"] = df["PitchCall"].isin({"StrikeCalled", "BallCalled", "BallinDirt"})
     df["is_whiff"] = df["PitchCall"] == "StrikeSwinging"
@@ -187,11 +229,12 @@ def attach_video(df: pd.DataFrame, urls: dict) -> pd.DataFrame:
     df["has_video"] = df["PitchUID"].map(lambda u: bool(urls.get(u)))
     df["Vid"] = np.where(df["has_video"], "🎥", "")
     df["batter_side"] = df["BatterSide"]
+    df["pitcher_side"] = df["PitcherThrows"]
     return df
 
 
 def filter_pitches(df: pd.DataFrame, *, batter=None, pitcher=None, innings=None,
-                   types=None, show_only=None) -> pd.DataFrame:
+                   types=None, show_only=None, zones=None) -> pd.DataFrame:
     if df is None or df.empty:
         return df
     m = pd.Series(True, index=df.index)
@@ -203,6 +246,8 @@ def filter_pitches(df: pd.DataFrame, *, batter=None, pitcher=None, innings=None,
         m &= df["Inning"].isin([int(i) for i in innings])
     if types:
         m &= df["TaggedPitchType"].isin(types)
+    if zones:
+        m &= df["ZoneWord"].isin(zones)
     flag = {"pa_end": "is_pa_end", "swing": "is_swing", "take": "is_take",
             "whiff": "is_whiff", "chase": "is_chase", "bip": "is_bip",
             "hard": "is_hard", "video": "has_video"}

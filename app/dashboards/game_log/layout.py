@@ -138,6 +138,10 @@ def play_detail(df: pd.DataFrame | None, pitch_uid: str | None) -> html.Div:
     ], style=_PANEL)
 
 
+def zone_options() -> list[dict]:
+    return [{"label": w, "value": w} for w in game_log.ZONE_WORDS]
+
+
 def serve_layout() -> html.Div:
     if not current_user.is_authenticated:
         return html.Div("Please log in.")
@@ -165,6 +169,8 @@ def serve_layout() -> html.Div:
                                        placeholder="All", **multi), "110px"),
         _filter("Pitch type", dcc.Dropdown(id="gl-ptype", options=opts["ptype"],
                                            placeholder="All", **multi), "150px"),
+        _filter("Zone", dcc.Dropdown(id="gl-zone", placeholder="All zones",
+                                     options=zone_options(), **multi), "200px"),
         _filter("Show only", dcc.Dropdown(id="gl-show", placeholder="Every pitch",
                                           options=[{"label": lbl, "value": k}
                                                    for k, lbl in game_log.SHOW_ONLY], **multi),

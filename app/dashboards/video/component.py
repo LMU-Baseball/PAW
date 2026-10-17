@@ -79,18 +79,23 @@ def render(df: pd.DataFrame, *, prefix: str, default_angle: str,
 
 def _resolve_default(pitch: dict | None, default_angle: str,
                      angles: list[str] | None = None) -> str:
+    """CF, then Behind, then the side camera that matches the player
+    (`batter_side` -> RHH/LHH by batter side, `pitcher_side` -> RHP/LHP by
+    pitcher hand), then whatever else this dashboard shows."""
     urls = (pitch or {}).get("urls") or {}
-    side = (pitch or {}).get("side")
+    order = ["Broadcast", "HomeBehind"]
     if default_angle == "batter_side":
-        order = ["HomeRight" if side == "Right" else "HomeLeft", "HomeBehind", "Broadcast"]
-    else:
-        order = [default_angle, "HomeBehind"]
+        side = (pitch or {}).get("side")
+        order += {"Right": ["HomeRight"], "Left": ["HomeLeft"]}.get(side, ["HomeRight", "HomeLeft"])
+    elif default_angle == "pitcher_side":
+        throws = (pitch or {}).get("throws")
+        order += {"Right": ["RHP"], "Left": ["LHP"]}.get(throws, ["RHP", "LHP"])
     allowed = [k for k, _ in _angles(angles)]
     order = [k for k in order if k in allowed] + [k for k in allowed if k not in order]
     for k in order:
         if urls.get(k):
             return k
-    return "HomeBehind" if default_angle == "batter_side" else default_angle
+    return order[0] if order else "Broadcast"
 
 
 def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind",
@@ -110,7 +115,7 @@ def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind",
             return no_update
         row = rows[i]
         return {"urls": {k: row.get(URL_COL[k]) for k, _ in ANGLES},
-                "side": row.get("batter_side")}
+                "side": row.get("batter_side"), "throws": row.get("pitcher_side")}
 
     @dash_app.callback(
         Output(f"{prefix}-video-angle", "data"),
