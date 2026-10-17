@@ -31,7 +31,7 @@ def register_callbacks(dash_app) -> None:
         Input("gl-game", "value"), prevent_initial_call=True,
     )
     def _on_game(game):
-        opts = layout.filter_options(game_log.game_pitches(game) if game else None)
+        opts = layout.filter_options(game_log.game_pitches(game, with_video=False) if game else None)
         return (opts["batter"], None, opts["pitcher"], None, opts["inning"], None,
                 opts["ptype"], None, None, None)
 
@@ -63,7 +63,7 @@ def register_callbacks(dash_app) -> None:
         i = active.get("row")
         if i is None or i >= len(rows):
             return no_update
-        return layout.play_detail(game_log.game_pitches(game), rows[i].get("PitchUID"))
+        return layout.play_detail(game_log.game_pitches(game, with_video=False), rows[i].get("PitchUID"))
 
     videotab.register_callbacks(dash_app, "gl", default_angle="batter_side",
                                 angles=videodata.HITTER_ANGLES)
