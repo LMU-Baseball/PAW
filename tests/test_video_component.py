@@ -56,14 +56,28 @@ def test_render_shows_only_the_dashboards_angles():
 def test_resolve_default_stays_within_the_dashboards_angles():
     from app.dashboards.video import component as comp
     # pitcher with only an RHH clip and an RHP clip: never lands on RHH
-    p = {"urls": {"HomeRight": "http://x/r.mp4", "RHP": "http://x/p.mp4"}, "side": "Right"}
-    assert comp._resolve_default(p, "Broadcast", vdata.PITCHER_ANGLES) == "RHP"
+    p = {"urls": {"HomeRight": "http://x/r.mp4", "RHP": "http://x/p.mp4"}, "throws": "Right"}
+    assert comp._resolve_default(p, "pitcher_side", vdata.PITCHER_ANGLES) == "RHP"
     # Behind is the fallback when CF is missing
-    p2 = {"urls": {"HomeBehind": "http://x/b.mp4", "LHP": "http://x/l.mp4"}, "side": "Left"}
-    assert comp._resolve_default(p2, "Broadcast", vdata.PITCHER_ANGLES) == "HomeBehind"
-    # left-handed hitter defaults to the LHH camera
-    p3 = {"urls": {"HomeLeft": "http://x/l.mp4", "HomeBehind": "http://x/b.mp4"}, "side": "Left"}
-    assert comp._resolve_default(p3, "batter_side", vdata.HITTER_ANGLES) == "HomeLeft"
+    p2 = {"urls": {"HomeBehind": "http://x/b.mp4", "LHP": "http://x/l.mp4"}, "throws": "Left"}
+    assert comp._resolve_default(p2, "pitcher_side", vdata.PITCHER_ANGLES) == "HomeBehind"
+
+
+def test_resolve_default_cf_then_behind_then_matching_side():
+    from app.dashboards.video import component as comp
+    every = {"Broadcast": "c", "HomeBehind": "b", "HomeRight": "r", "HomeLeft": "l", "RHP": "rp", "LHP": "lp"}
+    assert comp._resolve_default({"urls": every, "side": "Left"}, "batter_side", vdata.HITTER_ANGLES) == "Broadcast"
+    no_cf = {k: v for k, v in every.items() if k != "Broadcast"}
+    assert comp._resolve_default({"urls": no_cf, "side": "Left"}, "batter_side", vdata.HITTER_ANGLES) == "HomeBehind"
+    sides = {k: v for k, v in no_cf.items() if k != "HomeBehind"}
+    assert comp._resolve_default({"urls": sides, "side": "Left"}, "batter_side", vdata.HITTER_ANGLES) == "HomeLeft"
+    assert comp._resolve_default({"urls": sides, "side": "Right"}, "batter_side", vdata.HITTER_ANGLES) == "HomeRight"
+    assert comp._resolve_default({"urls": sides, "throws": "Left"}, "pitcher_side", vdata.PITCHER_ANGLES) == "LHP"
+    assert comp._resolve_default({"urls": sides, "throws": "Right"}, "pitcher_side", vdata.PITCHER_ANGLES) == "RHP"
+    # only the off-hand camera exists: still shows it rather than nothing
+    assert comp._resolve_default({"urls": {"HomeLeft": "l"}, "side": "Right"}, "batter_side",
+                                 vdata.HITTER_ANGLES) == "HomeLeft"
+    assert comp._resolve_default({"urls": no_cf}, "HomeBehind", vdata.CATCHER_ANGLES) == "HomeBehind"
 
 
 def test_resolve_default_prefers_broadcast_then_falls_back():

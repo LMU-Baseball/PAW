@@ -46,7 +46,7 @@ _STEAL_LABEL = {"StolenBase": "SB", "CaughtStealing": "CS"}
 if set(_STEAL_LABEL) != CS_RESULTS:
     raise RuntimeError("_STEAL_LABEL must stay in sync with CS_RESULTS")
 
-_ALL_COLS = DISPLAY_COLS + ["Steal"] + list(URL_COL.values()) + ["batter_side", "pitch_uid"]
+_ALL_COLS = DISPLAY_COLS + ["Steal"] + list(URL_COL.values()) + ["batter_side", "pitcher_side", "pitch_uid"]
 
 _RESULT_MAP = {
     "StrikeCalled": "Called Strike", "StrikeSwinging": "Swing & Miss",
@@ -201,7 +201,7 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
                g.PlayResult AS play_result, COALESCE(v.game_date, g.Date) AS game_date,
                v.angle, v.s3_url,
                g.RelSpeed AS rel_speed, g.Zone AS izt_zone,
-               g.BatterSide AS batter_side
+               g.BatterSide AS batter_side, g.PitcherThrows AS pitcher_side
           FROM {_CLIP_SOURCE} v
           JOIN GAMES g ON g.PitchUID = v.pitch_uid
          WHERE g.GameID IN ({gph}) AND g.{subj_col} IN ({sph})
@@ -236,6 +236,7 @@ def pitch_video_df(game_id, *, batter_id=None, pitcher_id=None, catcher_id=None)
     for a in URL_COL.values():
         df[a] = [None if pd.isna(v) else v for v in out[a]]
     df["batter_side"] = out["batter_side"].values
+    df["pitcher_side"] = out["pitcher_side"].values
     df["pitch_uid"] = out.index.values
     df = df.sort_values(["Date", "Pitch"], ascending=[False, True]).reset_index(drop=True)
     return df[_ALL_COLS]

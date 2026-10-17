@@ -354,6 +354,9 @@ GAMES_COLS: list[str] = [
 ]
 
 
+_NAME_COLS = ("Pitcher", "Batter", "Catcher")
+
+
 def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
     """Rename a raw Trackman game-export CSV's columns to GAMES names and
     select the columns present in ``GAMES_COLS``.
@@ -374,6 +377,11 @@ def parse_game_csv(df: pd.DataFrame, *, source_file: str) -> pd.DataFrame:
     # one-time normalize_games_date backfill did for older rows.
     if "Date" in out.columns:
         out["Date"] = [iso_date(d) or d for d in out["Date"]]
+    # Trackman occasionally types a name with a trailing space ("Marucci, Luca "),
+    # which the name-keyed dropdowns then list as a second player.
+    for c in _NAME_COLS:
+        if c in out.columns:
+            out[c] = out[c].map(lambda v: v.strip() if isinstance(v, str) else v)
     return out
 
 

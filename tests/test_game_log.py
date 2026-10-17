@@ -97,6 +97,37 @@ def test_game_pitches_picks_up_newly_uploaded_angles(monkeypatch):
     cache.clear_all()
 
 
+def test_zone13_grid_and_chase_corners():
+    assert game_log.zone13(0.6, 3.3) == 1        # top row, +side
+    assert game_log.zone13(0.0, 2.5) == 5
+    assert game_log.zone13(-0.6, 1.7) == 9
+    assert game_log.zone13(1.5, 3.0) == 10       # out of zone: up, +side
+    assert game_log.zone13(-1.5, 3.0) == 11
+    assert game_log.zone13(1.5, 1.0) == 12
+    assert game_log.zone13(-0.2, 0.5) == 13
+    assert game_log.zone13(None, 2.0) is None
+
+
+def test_zone_words_follow_the_hitter():
+    # +PlateLocSide is away from a righty, in on a lefty
+    assert game_log.zone_word(1, "Right") == "Up & Away"
+    assert game_log.zone_word(1, "Left") == "Up & In"
+    assert game_log.zone_word(5, "Right") == "Middle"
+    assert game_log.zone_word(8, "Left") == "Down"
+    assert game_log.zone_word(6, "Right") == "In"
+    assert game_log.zone_word(10, "Right") == "Chase Up & Away"
+    assert game_log.zone_word(13, "Right") == "Chase Down & In"
+    assert game_log.zone_word(None, "Right") == ""
+    assert {game_log.zone_word(z, s) for z in range(1, 14) for s in ("Right", "Left")}         == set(game_log.ZONE_WORDS)
+
+
+def test_filter_by_zone_words():
+    df = game_log.label_pitches(_raw())
+    assert df["Z"].tolist() == [12, 5, 5, 10]
+    assert df["ZoneWord"].tolist() == ["Chase Down & Away", "Middle", "Middle", "Chase Up & Away"]
+    assert game_log.filter_pitches(df, zones=["Middle"])["PitchUID"].tolist() == ["u2", "u3"]
+
+
 def test_empty_frames_are_safe():
     assert game_log.label_pitches(pd.DataFrame()).empty
     assert game_log.summary(None)["PA"] == "—"
@@ -110,7 +141,8 @@ def test_play_detail_and_log_render():
     assert "K-Look" in out and "Roe, Ann" in out
     log = tables.pitch_log(df)
     assert log.id == tables.TABLE_ID and len(log.data) == 4
-    assert {"url_homeright", "batter_side", "PitchUID"} <= set(log.data[0])
+    assert {"url_homeright", "batter_side", "pitcher_side", "PitchUID"} <= set(log.data[0])
+    assert [c["id"] for c in log.columns][-1] == "Z"
 
 
 @pytest.fixture

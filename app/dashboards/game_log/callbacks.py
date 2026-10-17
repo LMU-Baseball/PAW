@@ -27,25 +27,26 @@ def register_callbacks(dash_app) -> None:
         Output("gl-pitcher", "options"), Output("gl-pitcher", "value"),
         Output("gl-inning", "options"), Output("gl-inning", "value"),
         Output("gl-ptype", "options"), Output("gl-ptype", "value"),
-        Output("gl-show", "value"),
+        Output("gl-show", "value"), Output("gl-zone", "value"),
         Input("gl-game", "value"), prevent_initial_call=True,
     )
     def _on_game(game):
         opts = layout.filter_options(game_log.game_pitches(game) if game else None)
         return (opts["batter"], None, opts["pitcher"], None, opts["inning"], None,
-                opts["ptype"], None, None)
+                opts["ptype"], None, None, None)
 
     @dash_app.callback(
         Output("gl-log", "children"), Output("gl-count", "children"),
         Output("gl-summary", "children"),
         Input("gl-game", "value"), Input("gl-batter", "value"), Input("gl-pitcher", "value"),
         Input("gl-inning", "value"), Input("gl-ptype", "value"), Input("gl-show", "value"),
+        Input("gl-zone", "value"),
         prevent_initial_call=True,
     )
-    def _on_filters(game, batter, pitcher, innings, ptypes, show):
+    def _on_filters(game, batter, pitcher, innings, ptypes, show, zones):
         df = game_log.game_pitches(game) if game else None
         shown = game_log.filter_pitches(df, batter=batter, pitcher=pitcher, innings=innings,
-                                        types=ptypes, show_only=show)
+                                        types=ptypes, show_only=show, zones=zones)
         who = df if not batter or df is None else df[df["Batter"] == batter]
         return (tables.pitch_log(shown), layout._count_text(shown, df),
                 layout.summary_strip(who, batter or "LMU hitters"))

@@ -223,3 +223,12 @@ def test_load_games_window_prune_and_lmu_filter(monkeypatch):
     # since_days=None: full walk reaches the pruned 09/05 folder too.
     r_all = games.load_games(engine=None, sftp=sftp, dry_run=True, since_days=None, lmu_only=True)
     assert r_all.files == 3
+
+
+def test_parse_game_csv_trims_player_names():
+    df = pd.read_csv(FIXTURE)
+    df.loc[0, "Catcher"] = "Marucci, Luca "
+    df.loc[1, "Batter"] = " Doe, Jon"
+    out = parse_game_csv(df, source_file="game_sample.csv")
+    assert out.loc[0, "Catcher"] == "Marucci, Luca"
+    assert out.loc[1, "Batter"] == "Doe, Jon"

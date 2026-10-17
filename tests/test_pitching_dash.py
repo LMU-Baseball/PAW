@@ -428,11 +428,12 @@ def test_pitching_tabs_include_counts_and_heatmaps():
 
 
 def test_pitching_video_defaults_to_broadcast():
-    """Coach wants the center-field (Broadcast) camera as the default angle."""
+    """Coach wants CF first, then Behind, then the pitcher's open-side camera
+    (`pitcher_side` resolves that order -- see test_video_component)."""
     import inspect
     from app.dashboards.pitching import callbacks
     src = inspect.getsource(callbacks.register_callbacks)
-    assert 'default_angle="Broadcast"' in src
+    assert 'default_angle="pitcher_side"' in src
     assert 'default_angle="HomeBehind"' not in src   # pitching no longer defaults to HomeBehind
 
 
