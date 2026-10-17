@@ -97,6 +97,19 @@ def test_game_pitches_picks_up_newly_uploaded_angles(monkeypatch):
     cache.clear_all()
 
 
+def test_game_pitches_without_video_skips_the_url_lookup(monkeypatch):
+    from app.data import cache
+    cache.clear_all()
+    monkeypatch.setattr(game_log, "query_df", lambda *a, **k: _raw())
+
+    def boom(uids):
+        raise AssertionError("clip_urls should not run")
+    monkeypatch.setattr(game_log.videodata, "clip_urls", boom)
+    df = game_log.game_pitches("G1", with_video=False)
+    assert len(df) == len(_raw()) and "url_broadcast" not in df
+    cache.clear_all()
+
+
 def test_zone13_grid_and_chase_corners():
     assert game_log.zone13(0.6, 3.3) == 1        # top row, +side
     assert game_log.zone13(0.0, 2.5) == 5

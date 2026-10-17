@@ -96,13 +96,13 @@ def _labeled_pitches(game_id) -> pd.DataFrame:
     return label_pitches(raw)
 
 
-def game_pitches(game_id) -> pd.DataFrame:
+def game_pitches(game_id, *, with_video: bool = True) -> pd.DataFrame:
     """Every pitch to an LMU hitter in the game, labeled (see `label_pitches`),
     with the hitter-angle video urls attached."""
     # Video urls are looked up fresh: clip uploads don't bump the data version, so
     # caching them kept a game showing only the angles uploaded before its first view.
     df = _labeled_pitches(game_id)
-    if df.empty:
+    if df.empty or not with_video:
         return df
     try:
         urls = videodata.clip_urls(df["PitchUID"].tolist())

@@ -35,6 +35,8 @@ def register_dashboards(server):
     build_game_log_dash(server)
     from app.dashboards.pitcher_game_log import build_pitcher_game_log_dash
     build_pitcher_game_log_dash(server)
+    from app.dashboards.catcher_game_log import build_catcher_game_log_dash
+    build_catcher_game_log_dash(server)
     from app.dashboards.bullpen.index import build_bullpen_dash
     build_bullpen_dash(server)
     from app.dashboards.velo_board.index import build_velo_board_dash

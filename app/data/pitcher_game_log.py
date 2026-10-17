@@ -68,11 +68,11 @@ def _labeled_pitches(game_id) -> pd.DataFrame:
     return df
 
 
-def game_pitches(game_id) -> pd.DataFrame:
+def game_pitches(game_id, *, with_video: bool = True) -> pd.DataFrame:
     """Every LMU pitch in the game, labeled, with video urls looked up fresh
     (see `app.data.game_log.game_pitches` for why they aren't cached)."""
     df = _labeled_pitches(game_id)
-    if df.empty:
+    if df.empty or not with_video:
         return df
     try:
         urls = videodata.clip_urls(df["PitchUID"].tolist())
