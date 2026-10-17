@@ -332,3 +332,67 @@ def test_reconcile_ids_does_not_self_migrate_its_own_unioned_placeholder(monkeyp
         with get_engine().begin() as c:
             c.execute(text("DELETE FROM cauldron_teams WHERE cycle_id=:cy AND player_id=:p"),
                       {"cy": cycle, "p": placeholder_id})
+
+
+def _splash_cleanup(ids):
+    from app.data import splash_report as SR
+    from app.db import get_engine
+    from sqlalchemy import bindparam, text
+    SR.ensure_tables()
+    with get_engine().begin() as c:
+        for t in LR._splash_tables():
+            c.execute(text(f"DELETE FROM {t} WHERE season_label = :s AND player_id IN :ids")
+                      .bindparams(bindparam("ids", expanding=True)),
+                      {"s": SEASON, "ids": list(ids)})
+
+
+def test_reconcile_ids_moves_built_on_the_bluff_rows(monkeypatch):
+    """2026-10-13 regression: pitchers who threw in the first fall scrimmage
+    got a real Trackman id and their Bluff strength numbers / Gas Station rows
+    vanished, because the splash tables weren't reconciled."""
+    from app.data import splash_report as SR
+    SR.ensure_tables()
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9501, "first_name": "Bluff", "last_name": "Mover",
+         "class_year": "FR", "position": "RHP"}]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777021], "Pitcher": ["Mover, Bluff"]}))
+    ph, real = -9501, 777021
+    try:
+        SR.replace_gas_station(ph, SEASON, "Fall", [
+            {"need": "Hip", "exercise": "Lunge", "sets_reps": "3x8", "notes": ""},
+            {"need": "Arm", "exercise": "Band", "sets_reps": "2x15", "notes": ""}])
+        assert LR.reconcile_ids(SEASON, dry_run=True) == 2
+        assert len(SR.read_gas_station(ph, SEASON, "Fall")) == 2   # dry run changed nothing
+        assert LR.reconcile_ids(SEASON) == 2
+        assert SR.read_gas_station(ph, SEASON, "Fall").empty
+        assert list(SR.read_gas_station(real, SEASON, "Fall")["exercise"]) == ["Lunge", "Band"]
+        assert LR.reconcile_ids(SEASON) == 0
+    finally:
+        _splash_cleanup([ph, real])
+
+
+def test_reconcile_ids_never_deletes_bluff_rows_on_collision(monkeypatch):
+    """If a coach already saved that cycle under the real id, the placeholder's
+    group is left in place (not merged, not deleted)."""
+    from app.data import splash_report as SR
+    SR.ensure_tables()
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9502, "first_name": "Bluff", "last_name": "Keeper",
+         "class_year": "FR", "position": "RHP"}]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777022], "Pitcher": ["Keeper, Bluff"]}))
+    ph, real = -9502, 777022
+    try:
+        SR.replace_gas_station(ph, SEASON, "Fall", [
+            {"need": "Old", "exercise": "Placeholder row", "sets_reps": "", "notes": ""}])
+        SR.replace_gas_station(ph, SEASON, "Winter", [
+            {"need": "W", "exercise": "Winter row", "sets_reps": "", "notes": ""}])
+        SR.replace_gas_station(real, SEASON, "Fall", [
+            {"need": "New", "exercise": "Real row", "sets_reps": "", "notes": ""}])
+        assert LR.reconcile_ids(SEASON) == 1   # only the Winter group moves
+        assert list(SR.read_gas_station(ph, SEASON, "Fall")["exercise"]) == ["Placeholder row"]
+        assert list(SR.read_gas_station(real, SEASON, "Fall")["exercise"]) == ["Real row"]
+        assert list(SR.read_gas_station(real, SEASON, "Winter")["exercise"]) == ["Winter row"]
+    finally:
+        _splash_cleanup([ph, real])

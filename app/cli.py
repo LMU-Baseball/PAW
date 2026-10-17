@@ -102,14 +102,16 @@ def register_cli(server):
     @server.cli.command("roster-reconcile")
     @click.option("--season", default=None,
                   help="Season label, e.g. 2026/2027 (default: today's calendar season).")
-    def roster_reconcile(season):
-        """Migrate Cauldron/Velo Board rows from placeholder roster ids to real
-        Trackman ids, for pitchers who now have real data."""
+    @click.option("--dry-run", is_flag=True, help="Report what would move, change nothing.")
+    def roster_reconcile(season, dry_run):
+        """Migrate Cauldron/Velo Board/Built on the Bluff rows from placeholder
+        roster ids to real Trackman ids, for pitchers who now have real data."""
         from datetime import date
         from app.data import lmu_roster, seasons
         season = season or seasons.season_label_for(date.today().isoformat())
-        n = lmu_roster.reconcile_ids(season)
-        click.echo(f"roster-reconcile ({season}): migrated {n} row(s)")
+        n = lmu_roster.reconcile_ids(season, dry_run=dry_run)
+        verb = "would migrate" if dry_run else "migrated"
+        click.echo(f"roster-reconcile ({season}): {verb} {n} row(s)")
 
     @server.cli.command("pipeline-load")
     @click.option("--dry-run/--no-dry-run", default=True,
