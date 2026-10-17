@@ -57,8 +57,12 @@ def _excluded_entries(path: Path) -> list[dict]:
 
 def excluded_game_ids(path: Path = EXCLUDED_GAMES_PATH) -> set[str]:
     """GameIDs to never (re)insert, from the committed exclude list. Empty set
-    if the file is absent (e.g. a fresh checkout before it's ever been needed)."""
-    return {str(e["game_id"]) for e in _excluded_entries(path)}
+    if the file is absent (e.g. a fresh checkout before it's ever been needed).
+    An entry with `"game_id": null` blocks only its `pitch_uids` -- for a game
+    whose Trackman file mixes good pitches with junk rows (2026-10-16: 166
+    duplicate copies of real pitches under new PitchUIDs), where blocking the
+    whole GameID would also block the corrected pitches."""
+    return {str(e["game_id"]) for e in _excluded_entries(path) if e.get("game_id")}
 
 
 def excluded_pitch_uids(path: Path = EXCLUDED_GAMES_PATH) -> set[str]:

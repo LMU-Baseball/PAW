@@ -263,6 +263,18 @@ def test_excluded_game_ids_reads_committed_list(tmp_path):
     assert games.excluded_game_ids(p) == {"gid1", "gid2"}
 
 
+def test_pitch_uid_only_entry_blocks_pitches_not_the_game(tmp_path):
+    p = tmp_path / "excluded_games.json"
+    p.write_text(
+        '[{"game_id": "gid1", "reason": "dup", "removed": "2026-10-15"}, '
+        '{"game_id": null, "source_game_id": "gid2", "reason": "junk rows", '
+        '"removed": "2026-10-16", "pitch_uids": ["u9"]}]',
+        encoding="utf-8",
+    )
+    assert games.excluded_game_ids(p) == {"gid1"}
+    assert games.excluded_pitch_uids(p) == {"u9"}
+
+
 def test_excluded_pitch_uids_empty_when_file_absent(tmp_path):
     assert games.excluded_pitch_uids(tmp_path / "nope.json") == set()
 
