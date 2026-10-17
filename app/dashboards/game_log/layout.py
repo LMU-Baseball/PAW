@@ -205,4 +205,4 @@ def _count_text(shown, full) -> str:
     if full is None or full.empty:
         return "No pitches to LMU hitters in this game."
     return (f"{len(shown)} of {len(full)} pitches · {shown['pa_key'].nunique()} PA · "
-            "bold row = PA result · 🎥 = video")
+            "bold row = PA result · hover a Zone number for its name")
