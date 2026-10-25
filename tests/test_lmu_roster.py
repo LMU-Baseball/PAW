@@ -372,6 +372,29 @@ def test_reconcile_ids_moves_built_on_the_bluff_rows(monkeypatch):
         _splash_cleanup([ph, real])
 
 
+def test_reconcile_ids_moves_strength_history_with_the_metrics(monkeypatch):
+    """The dated strength/ROM history follows the player to the real id, so
+    the Performance Council trend doesn't lose its earlier points."""
+    from app.data import splash_report as SR
+    SR.ensure_tables()
+    monkeypatch.setattr(LR, "load_roster", lambda season: pd.DataFrame([
+        {"roster_id": 9503, "first_name": "Bluff", "last_name": "Trend",
+         "class_year": "FR", "position": "RHP"}]))
+    monkeypatch.setattr(LR.pitching_caps, "lmu_pitchers", lambda season: pd.DataFrame(
+        {"PitcherId": [777023], "Pitcher": ["Trend, Bluff"]}))
+    ph, real = -9503, 777023
+    try:
+        SR.upsert_engine_metrics(ph, SEASON, "Fall",
+                                 [{"metric_key": "ER", "base_value": 28, "now_value": 30}])
+        SR.upsert_engine_metrics(ph, SEASON, "Fall",
+                                 [{"metric_key": "ER", "base_value": 28, "now_value": 31}])
+        assert LR.reconcile_ids(SEASON) == 3   # 1 metric row + 2 history rows
+        assert SR.read_engine_history(ph).empty
+        assert list(SR.read_engine_history(real)["now_value"]) == [30.0, 31.0]
+    finally:
+        _splash_cleanup([ph, real])
+
+
 def test_reconcile_ids_never_deletes_bluff_rows_on_collision(monkeypatch):
     """If a coach already saved that cycle under the real id, the placeholder's
     group is left in place (not merged, not deleted)."""

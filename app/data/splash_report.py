@@ -55,6 +55,15 @@ PLANS_TABLE = "splash_plans"
 # were migrated into READINGS_TABLE by scripts/migrate_splash_engine_history.py.
 ENGINE_TABLE = "splash_engine_metrics"
 READINGS_TABLE = "splash_engine_readings"
+# Dated, append-only log of every Building the Engine change (2026-10-24,
+# Brad: the Player Performance Council page charts strength/ROM over time off
+# Built on the Bluff's own entries). ENGINE_TABLE stays the page's one
+# editable Base/Now row per metric; each Save that changes a metric's Base or
+# Now also appends that metric's new pair here with recorded_at (UTC), so
+# nothing about how Built on the Bluff reads or saves changes. Kept separate
+# from READINGS_TABLE on purpose: that table's dates came partly from
+# scripts/migrate_splash_engine_history.py's 14-day guess, not real entries.
+HISTORY_TABLE = "splash_engine_history"
 GAS_TABLE = "splash_gas_station"
 SCRIPTS_TABLE = "splash_scripts"
 SCRIPT_ROWS_TABLE = "splash_script_rows"
@@ -329,6 +338,20 @@ _READINGS_DDL = f"""
         PRIMARY KEY (player_id, season_label, cycle, metric_key, reading_date)
     )"""
 
+_HISTORY_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {HISTORY_TABLE} (
+        id             BIGINT AUTO_INCREMENT PRIMARY KEY,
+        player_id      BIGINT NOT NULL,
+        season_label   VARCHAR(16) NOT NULL,
+        cycle          VARCHAR(16) NOT NULL,
+        metric_key     VARCHAR(32) NOT NULL,
+        base_value     FLOAT,
+        now_value      FLOAT,
+        recorded_at    DATETIME NOT NULL,
+        updated_by     INT,
+        KEY ix_splash_engine_history_player (player_id, metric_key, recorded_at)
+    )"""
+
 _GAS_DDL = f"""
     CREATE TABLE IF NOT EXISTS {GAS_TABLE} (
         player_id      BIGINT NOT NULL,
@@ -467,7 +490,7 @@ _VIDEOS_DDL = f"""
         created_at     DATETIME
     )"""
 
-_ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
+_ALL_DDL = (_PLANS_DDL, _ENGINE_DDL, _READINGS_DDL, _HISTORY_DDL, _GAS_DDL, _SCRIPTS_DDL, _SCRIPT_ROWS_DDL,
            _SCRIPT_TEMPLATES_DDL, _PEN_DDL, _MOVEMENT_DDL, _DRILL_CATALOG_DDL, _VIDEOS_DDL)
 
 
@@ -535,7 +558,37 @@ def ensure_tables(engine=None) -> None:
         # splash_scripts, not splash_script_rows.
         _ensure_column(conn, SCRIPTS_TABLE, "pitch_design_result",
                        "pitch_design_result VARCHAR(16)")
+        seed_engine_history(conn)
     _TABLES_ENSURED = True
+
+
+def seed_engine_history(conn) -> None:
+    """Add a point, dated at ENGINE_TABLE.updated_at, for any metric whose
+    current Base/Now isn't already its latest history point: every value
+    saved before HISTORY_TABLE existed (otherwise a value that never changes
+    again would never reach a trend, since only changes are logged), plus any
+    edit saved by an older deploy that predates the logging -- local dev and
+    Lightsail share this database, so the table can exist before the code
+    that writes it is live. Idempotent; an all-blank metric with no history
+    has nothing to chart and is skipped."""
+    key = ("{a}.player_id = m.player_id AND {a}.season_label = m.season_label "
+           "AND {a}.cycle = m.cycle AND {a}.metric_key = m.metric_key")
+    conn.execute(text(f"""
+        INSERT INTO {HISTORY_TABLE}
+            (player_id, season_label, cycle, metric_key, base_value, now_value,
+             recorded_at, updated_by)
+        SELECT m.player_id, m.season_label, m.cycle, m.metric_key, m.base_value,
+               m.now_value, m.updated_at, m.updated_by
+        FROM {ENGINE_TABLE} m
+        WHERE m.updated_at IS NOT NULL
+          AND (m.base_value IS NOT NULL OR m.now_value IS NOT NULL
+               OR EXISTS (SELECT 1 FROM {HISTORY_TABLE} h WHERE {key.format(a='h')}))
+          AND NOT EXISTS (
+              SELECT 1 FROM {HISTORY_TABLE} h
+              WHERE h.id = (SELECT l.id FROM {HISTORY_TABLE} l WHERE {key.format(a='l')}
+                            ORDER BY l.recorded_at DESC, l.id DESC LIMIT 1)
+                AND h.base_value <=> m.base_value AND h.now_value <=> m.now_value)
+    """))
 
 
 def cycle_for_date(d=None) -> str:
@@ -739,8 +792,82 @@ def upsert_engine_metrics(player_id, season_label, cycle, rows: list[dict],
          "base_value": row.get("base_value"), "now_value": row.get("now_value")}
         for row in rows if row.get("metric_key") in ENGINE_METRIC_KEYS
     ]
+    changed = _engine_changes(pid, sl, cycle, resolved)
     _multi_row_upsert(ENGINE_TABLE, ("player_id", "season_label", "cycle", "metric_key"),
                       ("base_value", "now_value"), resolved, updated_by)
+    _append_engine_history(changed, updated_by)
+
+
+def _same_value(a, b) -> bool:
+    a, b = _clean(a), _clean(b)
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(float(a) - float(b)) < 1e-6
+
+
+def _engine_changes(player_id, season_label, cycle, rows: list[dict]) -> list[dict]:
+    """The rows whose Base or Now differs from what ENGINE_TABLE holds now. A
+    metric with no stored row counts as blank, so a first entry is a change
+    and a never-filled blank cell is not."""
+    if not rows:
+        return []
+    stored = query_df(
+        f"SELECT metric_key, base_value, now_value FROM {ENGINE_TABLE} WHERE {_key_where()}",
+        {"player_id": player_id, "season_label": season_label, "cycle": cycle})
+    before = {r["metric_key"]: r for _, r in stored.iterrows()}
+    changed = []
+    for row in rows:
+        old = before.get(row["metric_key"])
+        old_base = None if old is None else old["base_value"]
+        old_now = None if old is None else old["now_value"]
+        if not (_same_value(row.get("base_value"), old_base)
+                and _same_value(row.get("now_value"), old_now)):
+            changed.append(row)
+    return changed
+
+
+def _append_engine_history(rows: list[dict], updated_by=None) -> None:
+    if not rows:
+        return
+    now = _now()
+    with get_engine().begin() as conn:
+        conn.execute(text(f"""
+            INSERT INTO {HISTORY_TABLE}
+                (player_id, season_label, cycle, metric_key, base_value, now_value,
+                 recorded_at, updated_by)
+            VALUES (:player_id, :season_label, :cycle, :metric_key, :base_value,
+                    :now_value, :recorded_at, :updated_by)
+        """), [{"player_id": r["player_id"], "season_label": r["season_label"],
+                "cycle": r["cycle"], "metric_key": r["metric_key"],
+                "base_value": _clean(r.get("base_value")),
+                "now_value": _clean(r.get("now_value")),
+                "recorded_at": now, "updated_by": _clean(updated_by)} for r in rows])
+
+
+def read_engine_history(player_id, metric_keys=None) -> pd.DataFrame:
+    """Every dated Base/Now change for one player across all seasons and
+    cycles, oldest first -- the strength/ROM time series for the Player
+    Performance Council page. `metric_keys` narrows it to some metrics
+    (ENGINE_METRIC_KEYS names); recorded_at is UTC."""
+    ensure_tables()
+    cols = ["recorded_at", "season_label", "cycle", "metric_key", "label",
+            "base_value", "now_value"]
+    params = {"player_id": int(player_id)}
+    where = "player_id = :player_id"
+    if metric_keys is not None:
+        keys = [k for k in metric_keys if k in ENGINE_METRIC_KEYS]
+        if not keys:
+            return pd.DataFrame(columns=cols)
+        where += " AND metric_key IN (" + ", ".join(f":k{i}" for i in range(len(keys))) + ")"
+        params.update({f"k{i}": k for i, k in enumerate(keys)})
+    df = query_df(
+        f"SELECT recorded_at, season_label, cycle, metric_key, base_value, now_value "
+        f"FROM {HISTORY_TABLE} WHERE {where} ORDER BY recorded_at, id", params)
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df["recorded_at"] = pd.to_datetime(df["recorded_at"])
+    df["label"] = df["metric_key"].map(ENGINE_METRIC_LABELS)
+    return df[cols].reset_index(drop=True)
 
 
 # ============================ VARIABLE-ROW TABLES ===========================
