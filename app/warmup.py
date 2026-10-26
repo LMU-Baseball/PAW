@@ -136,6 +136,12 @@ def warm_caches() -> None:
     _safe(lambda: velo_board.cycle_assessment(board_season, velo_cycle))
     _safe(lambda: velo_board.board_rows(board_season, velo_cycle))  # unified board rows
 
+    # All Things Process: default view = (today's season, velo cycle, every
+    # game type), matching process_board/layout.py's serve_layout.
+    from app.data import process_board
+    _safe(lambda: process_board.game_types(*process_board.cycle_bounds(board_season, velo_cycle)))
+    _safe(lambda: process_board.board(board_season, velo_cycle))
+
     cycle = f"{board_season}-c1"
     _safe(cauldron.read_scoring)
     _safe(lambda: cauldron.read_teams(cycle))
