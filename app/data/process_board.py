@@ -48,13 +48,11 @@ def cycle_bounds(season_label: str, cycle: str) -> tuple[str, str]:
     return velo_board.velo_cycle_bounds(season_label, cycle)
 
 
-def previous_cycle(season_label: str, cycle: str) -> tuple[str, str]:
-    """The cycle right before (season, cycle): Spring -> same season's Fall,
-    Fall -> the prior season's Spring."""
-    if cycle == "Spring":
-        return season_label, "Fall"
+def comparison_cycle(season_label: str, cycle: str) -> tuple[str, str]:
+    """The same cycle one season earlier (Fall 2026 -> Fall 2025), so the
+    comparison row is fall-vs-fall / spring-vs-spring (Brad, 2026-10-26)."""
     a, b = (int(x) for x in season_label.split("/"))
-    return f"{a - 1}/{b - 1}", "Spring"
+    return f"{a - 1}/{b - 1}", cycle
 
 
 def cycle_display(season_label: str, cycle: str) -> str:
@@ -83,9 +81,14 @@ def window_pitches(start: str, end: str, game_types=None) -> pd.DataFrame:
     return df
 
 
-def game_types(start: str, end: str) -> list[str]:
+@cached
+def _game_types_for(start: str, end: str) -> list[str]:
     df = _pitches(start, end)
     return sorted(df["game_type"].unique()) if not df.empty else []
+
+
+def game_types(start: str, end: str) -> list[str]:
+    return list(_game_types_for(start, end))
 
 
 def _velo(df: pd.DataFrame) -> tuple[float | None, float | None]:
@@ -162,10 +165,22 @@ def meets_baseline(key: str, value) -> bool | None:
 
 
 def board(season_label: str, cycle: str, game_types=None) -> dict:
-    """Everything the page renders: the three reference rows + pitcher rows."""
+    """Everything the page renders: the three reference rows + pitcher rows.
+    Selecting every game type is the same board as no filter, so both share
+    one cache entry (the one warmup.py pre-builds)."""
+    start, end = cycle_bounds(season_label, cycle)
+    types = sorted(game_types) if game_types else []
+    if not types or set(types) >= set(_game_types_for(start, end)):
+        types = []
+    return _board(season_label, cycle, tuple(types))
+
+
+@cached
+def _board(season_label: str, cycle: str, game_types: tuple) -> dict:
+    game_types = list(game_types) or None
     start, end = cycle_bounds(season_label, cycle)
     df = window_pitches(start, end, game_types)
-    prev_season, prev_cycle = previous_cycle(season_label, cycle)
+    prev_season, prev_cycle = comparison_cycle(season_label, cycle)
     ps, pe = cycle_bounds(prev_season, prev_cycle)
     prev_df = window_pitches(ps, pe, game_types)
 

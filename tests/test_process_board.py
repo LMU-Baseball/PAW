@@ -77,9 +77,9 @@ def test_meets_baseline_direction():
     assert PB.meets_baseline("k_pct", None) is None
 
 
-def test_previous_cycle_and_display():
-    assert PB.previous_cycle("2025/2026", "Spring") == ("2025/2026", "Fall")
-    assert PB.previous_cycle("2026/2027", "Fall") == ("2025/2026", "Spring")
+def test_comparison_cycle_is_same_cycle_last_season_and_display():
+    assert PB.comparison_cycle("2025/2026", "Spring") == ("2024/2025", "Spring")
+    assert PB.comparison_cycle("2026/2027", "Fall") == ("2025/2026", "Fall")
     assert PB.cycle_display("2025/2026", "Fall") == "Fall 2025"
     assert PB.cycle_display("2025/2026", "Spring") == "Spring 2026"
 
@@ -87,9 +87,11 @@ def test_previous_cycle_and_display():
 def test_board_rows_and_reference_labels(monkeypatch):
     frame = _frame()
     monkeypatch.setattr(PB, "window_pitches", lambda s, e, t=None: frame)
+    monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Scrimmage"])
+    PB._board.cache_clear()
     board = PB.board("2026/2027", "Fall")
     labels = [r["pitcher"] for r in board["summary"]]
-    assert labels == ["LMU Baseline", "LMU Spring 2026 Average", "LMU Team Average"]
+    assert labels == ["LMU Baseline", "LMU Fall 2025 Average", "LMU Team Average"]
     assert board["summary"][0]["strike_pct"] == 55.0
     assert board["summary"][2]["pitches"] == 8
     assert len(board["pitchers"]) == 2
@@ -136,3 +138,13 @@ def test_team_line_keeps_intrasquad_halves_apart():
     bottom = top.assign(top_bottom="Bottom", pitcher_name="C, Three")
     line = PB.metric_line(pd.concat([top, bottom]))
     assert line["bb_pct"] == 50.0 and line["k_pct"] == 50.0
+
+
+def test_board_all_types_shares_the_unfiltered_cache_entry(monkeypatch):
+    calls = []
+    monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Intrasquad", "Scrimmage"])
+    monkeypatch.setattr(PB, "_board", lambda season, cycle, types: calls.append(types))
+    PB.board("2026/2027", "Fall", ["Scrimmage", "Intrasquad"])
+    PB.board("2026/2027", "Fall", None)
+    PB.board("2026/2027", "Fall", ["Scrimmage"])
+    assert calls == [(), (), ("Scrimmage",)]
