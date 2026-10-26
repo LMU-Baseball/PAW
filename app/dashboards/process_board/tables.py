@@ -1,6 +1,6 @@
 """All Things Process leaderboard table.
 
-One DataTable: the three reference rows (LMU Baseline / previous cycle /
+One DataTable: the three reference rows (LMU Baseline / selected cycle /
 team average) pinned on top, then a row per pitcher. Pitcher cells are tinted
 by whether they meet the coaches' baseline, and each column's leader gets the
 Team Process sheet's gold highlight.
@@ -18,7 +18,7 @@ TABLE_ID = "process-grid"
 LEADER = "#FFD54A"
 MEETS = "#DCEFF7"
 MISSES = "#F8DDE2"
-_SUMMARY_BG = {"baseline": shell.CRIMSON, "previous": "#4A4A4A", "team": shell.BLUE}
+_SUMMARY_BG = {"baseline": shell.CRIMSON, "cycle": "#4A4A4A", "team": shell.BLUE}
 
 _PCT = Format(precision=1, scheme=Scheme.fixed).symbol(Symbol.yes).symbol_suffix("%")
 _VELO = Format(precision=1, scheme=Scheme.fixed)

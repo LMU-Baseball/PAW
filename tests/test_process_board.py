@@ -77,9 +77,7 @@ def test_meets_baseline_direction():
     assert PB.meets_baseline("k_pct", None) is None
 
 
-def test_comparison_cycle_is_same_cycle_last_season_and_display():
-    assert PB.comparison_cycle("2025/2026", "Spring") == ("2024/2025", "Spring")
-    assert PB.comparison_cycle("2026/2027", "Fall") == ("2025/2026", "Fall")
+def test_cycle_display():
     assert PB.cycle_display("2025/2026", "Fall") == "Fall 2025"
     assert PB.cycle_display("2025/2026", "Spring") == "Spring 2026"
 
@@ -91,7 +89,7 @@ def test_board_rows_and_reference_labels(monkeypatch):
     PB._board.cache_clear()
     board = PB.board("2026/2027", "Fall")
     labels = [r["pitcher"] for r in board["summary"]]
-    assert labels == ["LMU Baseline", "LMU Fall 2025 Average", "LMU Team Average"]
+    assert labels == ["LMU Baseline", "LMU Fall 2026 Average", "LMU Team Average"]
     assert board["summary"][0]["strike_pct"] == 55.0
     assert board["summary"][2]["pitches"] == 8
     assert len(board["pitchers"]) == 2
@@ -148,3 +146,14 @@ def test_board_all_types_shares_the_unfiltered_cache_entry(monkeypatch):
     PB.board("2026/2027", "Fall", None)
     PB.board("2026/2027", "Fall", ["Scrimmage"])
     assert calls == [(), (), ("Scrimmage",)]
+
+
+def test_cycle_row_ignores_game_type_filter(monkeypatch):
+    frame = _frame().assign(game_type=["Scrimmage"] * 7 + ["Intrasquad"])
+    monkeypatch.setattr(PB, "_pitches", lambda s, e: frame)
+    monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Intrasquad", "Scrimmage"])
+    PB._board.cache_clear()
+    board = PB.board("2026/2027", "Spring", ["Scrimmage"])
+    cycle_row, team = board["summary"][1], board["summary"][2]
+    assert cycle_row["pitcher"] == "LMU Spring 2027 Average"
+    assert cycle_row["pitches"] == 8 and team["pitches"] == 7

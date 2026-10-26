@@ -4,7 +4,8 @@ Rebuilds the coaches' "Team Process" Google Sheet (last used Spring 2026,
 e.g. "Team Process - Non-Conference Spring 3_3_2026"): one row per LMU
 pitcher with Strike% / FPS% / Pre2K% / E&A% / K% / Barrel% / BB% / 2K Kill%
 plus fastball velo, under three reference rows -- the coaches' fixed LMU
-Baseline, the previous cycle's team average, and the current team average.
+Baseline, the selected cycle's average (all game types), and the team
+average for the selected game types.
 
 "Throwing on the stadium field" = GAMES (games, scrimmages, intrasquads,
 live ABs loaded as games), never BULLPEN. Every metric is the same
@@ -46,13 +47,6 @@ CYCLES = velo_board.VELO_CYCLES
 
 def cycle_bounds(season_label: str, cycle: str) -> tuple[str, str]:
     return velo_board.velo_cycle_bounds(season_label, cycle)
-
-
-def comparison_cycle(season_label: str, cycle: str) -> tuple[str, str]:
-    """The same cycle one season earlier (Fall 2026 -> Fall 2025), so the
-    comparison row is fall-vs-fall / spring-vs-spring (Brad, 2026-10-26)."""
-    a, b = (int(x) for x in season_label.split("/"))
-    return f"{a - 1}/{b - 1}", cycle
 
 
 def cycle_display(season_label: str, cycle: str) -> str:
@@ -180,16 +174,16 @@ def _board(season_label: str, cycle: str, game_types: tuple) -> dict:
     game_types = list(game_types) or None
     start, end = cycle_bounds(season_label, cycle)
     df = window_pitches(start, end, game_types)
-    prev_season, prev_cycle = comparison_cycle(season_label, cycle)
-    ps, pe = cycle_bounds(prev_season, prev_cycle)
-    prev_df = window_pitches(ps, pe, game_types)
+    # The cycle row is the whole selected cycle (every game type), so it
+    # stays put while the Team Average follows the Game Type filter.
+    cycle_df = window_pitches(start, end) if game_types else df
 
     baseline = dict(BASELINE, pitcher="LMU Baseline", kind="baseline")
-    previous = dict(metric_line(prev_df) if not prev_df.empty else {},
-                    pitcher=f"LMU {cycle_display(prev_season, prev_cycle)} Average",
-                    kind="previous")
+    cycle_row = dict(metric_line(cycle_df) if not cycle_df.empty else {},
+                     pitcher=f"LMU {cycle_display(season_label, cycle)} Average",
+                     kind="cycle")
     team = dict(metric_line(df) if not df.empty else {},
                 pitcher="LMU Team Average", kind="team")
     pitchers = pitcher_rows(df)
-    return {"summary": [baseline, previous, team], "pitchers": pitchers,
+    return {"summary": [baseline, cycle_row, team], "pitchers": pitchers,
             "best": best_values(pitchers)}
