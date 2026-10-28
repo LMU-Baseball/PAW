@@ -45,8 +45,22 @@ cycle_bounds = PB.cycle_bounds
 cycle_display = PB.cycle_display
 
 
+def clean_names(names: pd.Series) -> pd.Series:
+    """Trim and collapse whitespace. Trackman loaded 'Marucci, Luca' and
+    'Marucci, Luca ' (same BatterId) and the board, which groups by name,
+    showed him as two hitters."""
+    return names.str.split().str.join(" ").replace("", pd.NA)
+
+
 @cached
 def _pitches(start: str, end: str) -> pd.DataFrame:
+    df = _query_pitches(start, end)
+    if not df.empty:
+        df["batter_name"] = clean_names(df["batter_name"])
+    return df
+
+
+def _query_pitches(start: str, end: str) -> pd.DataFrame:
     return query_df(
         "SELECT Batter AS batter_name, BatterSide AS batter_side, "
         "PlateLocSide AS plate_side, PlateLocHeight AS plate_height, "

@@ -58,6 +58,26 @@ def test_hitter_rows_alphabetical_with_side():
     assert [r["hitter"] for r in rows] == ["A, One (R)", "B, Two (S)"]
 
 
+def test_clean_names_merges_trailing_space_variants(monkeypatch):
+    # Real case (Oct 2026): same BatterId loaded as 'Marucci, Luca' and 'Marucci, Luca '
+    raw = pd.DataFrame([
+        _p("Marucci, Luca", "StrikeCalled"),
+        _p("Marucci, Luca ", "BallCalled"),
+        _p("  Marucci,  Luca", "InPlay", ev=90.0, hit="LineDrive"),
+        _p("Other, Guy", "BallCalled"),
+    ])
+    monkeypatch.setattr(HB, "_query_pitches", lambda s, e: raw.copy())
+    df = HB._pitches("1900-01-01", "1900-01-02")
+    rows = HB.hitter_rows(df)
+    assert [r["hitter"] for r in rows] == ["Marucci, Luca (R)", "Other, Guy (R)"]
+    assert rows[0]["pitches"] == 3
+
+
+def test_clean_names_keeps_missing_names_missing():
+    out = HB.clean_names(pd.Series(["A, One ", "   ", None]))
+    assert out[0] == "A, One" and pd.isna(out[1]) and pd.isna(out[2])
+
+
 def test_leader_needs_minimum_pitches_and_respects_direction():
     rows = [{"pitches": 100, "gb_pct": 40.0, "max_ev": 99.0},
             {"pitches": 100, "gb_pct": 30.0, "max_ev": 101.0},
