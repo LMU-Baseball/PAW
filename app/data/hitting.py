@@ -258,11 +258,10 @@ def plate_discipline(df: pd.DataFrame, by: str = "zone") -> pd.DataFrame:
         swing = g["PitchCall"].isin(SWING_CALLS).sum()
         whiff = (g["PitchCall"] == "StrikeSwinging").sum()
         take = g["PitchCall"].isin(TAKE_CALLS).sum()
-        # Contact% is per swing (fouls + balls in play), matching the Process board.
-        contact = g["PitchCall"].isin(SWING_CALLS).sum() - whiff
+        contact = (g["PitchCall"] == "InPlay").sum()
         rows.append({label: gval, "Total": n,
                      "Swing %": _pct(swing, n), "Whiff %": _pct(whiff, n),
-                     "Take %": _pct(take, n), "Contact %": _pct(contact, swing)})
+                     "Take %": _pct(take, n), "Contact %": _pct(contact, n)})
     out = pd.DataFrame(rows, columns=cols)
     if by == "zone":
         out = out.set_index(label).reindex(groups).reset_index()
