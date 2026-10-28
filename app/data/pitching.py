@@ -167,11 +167,28 @@ def count_work_pct(df: pd.DataFrame) -> tuple[float, int]:
     return _pct(ahead_even, len(df)), ahead_even
 
 
+BARREL_EV = 95.0
+BARREL_LA = (9.0, 35.0)
+
+
+def is_barrel(exit_speed, launch_angle) -> pd.Series:
+    """Barrel, coaches' definition (Brad, 2026-10-28): 95+ mph exit velocity
+    AND a 9-35 degree launch angle. A missing EV or angle is never a barrel."""
+    ev = pd.to_numeric(pd.Series(exit_speed), errors="coerce")
+    la = pd.to_numeric(pd.Series(launch_angle, index=ev.index), errors="coerce")
+    return (ev >= BARREL_EV) & la.between(*BARREL_LA)
+
+
+def launch_angle(df: pd.DataFrame) -> pd.Series:
+    if "launch_angle" in df.columns:
+        return df["launch_angle"]
+    return pd.Series(np.nan, index=df.index)
+
+
 def barrel_pct(df: pd.DataFrame) -> tuple[float, int]:
-    """Barrel %, coaches' definition (Brad, 2026-10-12): balls in play hit
-    95+ mph, ground balls included, over all balls in play."""
+    """Barrel % over all balls in play (barrel = `is_barrel`)."""
     bip = df[df["pitch_call"] == "InPlay"]
-    barrels = int((bip["exit_speed"] >= 95).sum())
+    barrels = int(is_barrel(bip["exit_speed"], launch_angle(bip)).sum())
     return _pct(barrels, len(bip)), barrels
 
 
@@ -182,8 +199,7 @@ def format_ip(outs: int) -> str:
 
 
 def barrel_pct_ev(df: pd.DataFrame) -> tuple[float, int]:
-    """Same as `barrel_pct` since the 2026-10-12 coaches' definition; kept
-    for the Cauldron / pitching-caps callers."""
+    """Same as `barrel_pct`; kept for the Cauldron / pitching-caps callers."""
     return barrel_pct(df)
 
 

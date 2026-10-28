@@ -7,9 +7,9 @@ from app.data import hitter_process_board as HB
 from app.dashboards.hitter_process_board import tables as T
 
 
-def _p(name, call, side=0.0, height=2.5, ev=None, hit=None, bats="Right"):
+def _p(name, call, side=0.0, height=2.5, ev=None, hit=None, bats="Right", la=None):
     return {"batter_name": name, "batter_side": bats, "plate_side": side,
-            "plate_height": height, "pitch_call": call, "exit_speed": ev,
+            "plate_height": height, "pitch_call": call, "exit_speed": ev, "launch_angle": la,
             "hit_type": hit, "game_type": "Scrimmage"}
 
 
@@ -22,7 +22,7 @@ def _frame():
         _p("A, One", "FoulBallNotFieldable"),
         _p("A, One", "StrikeSwinging", side=1.5),
         _p("A, One", "BallCalled", side=1.5),
-        _p("A, One", "InPlay", ev=100.0, hit="LineDrive"),
+        _p("A, One", "InPlay", ev=100.0, hit="LineDrive", la=15.0),
         _p("A, One", "InPlay", ev=60.0, hit="Popup"),
         # B (switch): one grounder
         _p("B, Two", "InPlay", ev=80.0, hit="GroundBall"),
@@ -38,7 +38,7 @@ def test_metric_line_definitions():
     assert a["whiff_pct"] == 40.0          # 2 of 5 swings
     assert a["iz_whiff_pct"] == 25.0       # 1 whiff / 4 in-zone swings
     assert a["chase_pct"] == 50.0          # 1 swing / 2 out-of-zone pitches
-    assert a["barrel_pct"] == 50.0         # 1 of 2 balls in play at 95+
+    assert a["barrel_pct"] == 50.0         # 1 of 2 balls in play at 95+ and 9-35 deg
     assert a["max_ev"] == 100.0 and a["avg_ev"] == 80.0
     assert a["gb_pct"] == 0.0 and a["ld_pct"] == 50.0
     assert a["fb_pct"] == 50.0             # popup counts as a fly ball

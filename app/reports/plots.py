@@ -16,7 +16,7 @@ import numpy as np
 from matplotlib.patches import Ellipse, Wedge
 from matplotlib.lines import Line2D
 
-from app.data.pitching import pitch_type
+from app.data.pitching import is_barrel, launch_angle, pitch_type
 
 # Strike zone (approx, feet)
 _SZ = dict(x0=-0.83, x1=0.83, y0=1.5, y1=3.5)
@@ -78,7 +78,7 @@ def _draw_zone(ax) -> None:
 
 
 # Contact-result shape key (color still encodes pitch type):
-#   Whiff = circle, Barrel (InPlay & 95+ EV) = X, In Play = square.
+#   Whiff = circle, Barrel (InPlay, 95+ EV at 9-35 deg LA) = X, In Play = square.
 _CONTACT_MARKERS = [("Whiff", "o"), ("Barrel", "X"), ("In Play", "s")]
 
 
@@ -91,8 +91,9 @@ def _contact_classes(df):
     cc = pd.Series(index=df.index, dtype=object)
     cc[call == "StrikeSwinging"] = "Whiff"
     inplay = call == "InPlay"
-    cc[inplay & (ev >= 95)] = "Barrel"
-    cc[inplay & ~(ev >= 95)] = "In Play"
+    barrel = is_barrel(ev, launch_angle(df))
+    cc[inplay & barrel] = "Barrel"
+    cc[inplay & ~barrel] = "In Play"
     return cc
 
 

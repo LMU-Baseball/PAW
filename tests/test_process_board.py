@@ -55,7 +55,7 @@ def test_metric_line_empty_frame_is_all_blank():
 def test_pitcher_rows_alphabetical_with_hand():
     rows = PB.pitcher_rows(_frame())
     assert [r["pitcher"] for r in rows] == ["A, One (R)", "B, Two (L)"]
-    assert rows[1]["barrel_pct"] == 100.0
+    assert rows[1]["barrel_pct"] == 0.0     # 96 mph grounder: no 9-35 deg launch angle
 
 
 def test_best_values_respects_lower_is_better():

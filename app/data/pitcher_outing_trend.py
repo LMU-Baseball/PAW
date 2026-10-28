@@ -63,7 +63,7 @@ _CAULDRON_KEY = {
 _TEAM_SELECT = """
     PitchCall AS pitch_call, PitchofPA AS pitch_of_pa, KorBB AS korbb,
     Balls AS balls, Strikes AS strikes, Inning AS inning,
-    PAofInning AS pa_of_inning, ExitSpeed AS exit_speed,
+    PAofInning AS pa_of_inning, ExitSpeed AS exit_speed, Angle AS launch_angle,
     TaggedHitType AS tagged_hit_type, GameID AS game_id, `Date` AS game_date
 """
 

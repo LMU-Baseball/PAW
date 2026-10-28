@@ -125,7 +125,7 @@ def _build_html(game_id, pitcher_id: int) -> str:
 # Bump this whenever the report's layout/content changes so previously cached
 # PDFs (keyed by DATA version) don't keep serving the old design. The data
 # version alone can't detect a code change — see MEMORY §3j.
-_CODE_VERSION = "2026-10-chip-colors-flipped"
+_CODE_VERSION = "2026-10-barrel-ev-launch-angle"
 
 
 def _cache_path(game_id, pitcher_id: int, version: str) -> Path:

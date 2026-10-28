@@ -351,3 +351,10 @@ def test_recent_games_current_season_includes_the_scrimmage():
     s_b, e_b = seasons.season_bounds(seasons.current_season())
     df = pitching_caps.recent_games(limit=500, start=s_b, end=e_b)
     assert "20261013-LoyolaMarymount-Private-3" in set(df["game_id"])
+
+
+def test_pitch_select_carries_launch_angle_for_barrels():
+    # pitching.barrel_pct needs launch_angle; without it every barrel reads 0.
+    from app.data import pitcher_outing_trend
+    assert "AS launch_angle" in pitching_caps._PITCH_SELECT
+    assert "AS launch_angle" in pitcher_outing_trend._TEAM_SELECT

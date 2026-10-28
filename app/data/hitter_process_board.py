@@ -10,6 +10,7 @@ from __future__ import annotations
 import pandas as pd
 
 from app.data import process_board as PB
+from app.data.pitching import is_barrel
 from app.data.cache import cached
 from app.data.hitting_caps import LMU_BATTER_TEAM
 from app.db import query_df
@@ -36,7 +37,6 @@ _FOUL_CALLS = ["FoulBall", "FoulBallNotFieldable", "FoulBallFieldable"]
 
 # Rulebook zone in feet (same box the bullpen/practice/game-log code uses).
 _SZ_X, _SZ_Y0, _SZ_Y1 = 0.83, 1.5, 3.5
-BARREL_EV = 95.0  # coaches' definition, shared with pitching.barrel_pct
 # A hitter needs this many pitches seen to be eligible for a gold leader cell.
 MIN_PITCHES_FOR_LEADER = 20
 
@@ -64,7 +64,7 @@ def _query_pitches(start: str, end: str) -> pd.DataFrame:
     return query_df(
         "SELECT Batter AS batter_name, BatterSide AS batter_side, "
         "PlateLocSide AS plate_side, PlateLocHeight AS plate_height, "
-        "PitchCall AS pitch_call, ExitSpeed AS exit_speed, "
+        "PitchCall AS pitch_call, ExitSpeed AS exit_speed, Angle AS launch_angle, "
         "TaggedHitType AS hit_type, "
         "COALESCE(GameType, 'Untyped') AS game_type "
         "FROM GAMES WHERE BatterTeam = :t AND Date BETWEEN :s AND :e",
@@ -115,7 +115,7 @@ def metric_line(df: pd.DataFrame) -> dict:
     out["whiff_pct"] = _rate(int(whiffs.sum()), int(swings.sum()))
     out["iz_whiff_pct"] = _rate(int((in_zone & whiffs).sum()), int((in_zone & swings).sum()))
     out["chase_pct"] = _rate(int((out_zone & swings).sum()), int(out_zone.sum()))
-    out["barrel_pct"] = _rate(int((ev >= BARREL_EV).sum()), len(bip))
+    out["barrel_pct"] = _rate(int(is_barrel(bip["exit_speed"], bip["launch_angle"]).sum()), len(bip))
     out["max_ev"] = round(float(ev.max()), 1) if len(ev) else None
     out["avg_ev"] = round(float(ev.mean()), 1) if len(ev) else None
     out["gb_pct"] = _rate(int((typed == "GroundBall").sum()), len(typed))
