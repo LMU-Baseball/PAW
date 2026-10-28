@@ -12,6 +12,7 @@ import pandas as pd
 from app.data import game_log, pitching
 from app.data import video as videodata
 from app.data.cache import cached
+from app.data.hitting import CHASE_ZONES
 from app.data.hitting_caps import LMU_TEAM_ID, _game_label
 from app.data.pitching_caps import LMU_PITCHER_TEAM
 from app.db import query_df
@@ -131,7 +132,7 @@ def summary(df: pd.DataFrame | None) -> dict:
         return {k: "—" for k in keys}
     k = _kpi_frame(df)
     line = pitching.header_stat_line(k)
-    out_zone = df["Zone"].isin(["Chase", "Waste"])
+    out_zone = df["Zone"].isin(CHASE_ZONES)
     swings = int(df["is_swing"].sum())
     return {
         "IP": pitching.format_ip(_outs(k)),

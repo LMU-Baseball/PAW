@@ -11,6 +11,7 @@ import pandas as pd
 
 from app.data import process_board as PB
 from app.data.cache import cached
+from app.data.hitting import CHASE_ZONES, attack_zone
 from app.data.hitting_caps import LMU_BATTER_TEAM
 from app.db import query_df
 
@@ -104,7 +105,9 @@ def metric_line(df: pd.DataFrame) -> dict:
     located = df["plate_side"].notna() & df["plate_height"].notna()
     in_zone = located & df["plate_side"].between(-_SZ_X, _SZ_X) \
         & df["plate_height"].between(_SZ_Y0, _SZ_Y1)
-    out_zone = located & ~in_zone
+    chase_zone = pd.Series([attack_zone(s, h) in CHASE_ZONES
+                           for s, h in zip(df["plate_side"], df["plate_height"])],
+                          index=df.index, dtype=bool)
 
     bip = df[df["pitch_call"] == "InPlay"]
     ev = bip["exit_speed"].dropna()
@@ -114,7 +117,7 @@ def metric_line(df: pd.DataFrame) -> dict:
     out["contact_pct"] = _rate(int((swings & contact).sum()), int(swings.sum()))
     out["whiff_pct"] = _rate(int(whiffs.sum()), int(swings.sum()))
     out["iz_whiff_pct"] = _rate(int((in_zone & whiffs).sum()), int((in_zone & swings).sum()))
-    out["chase_pct"] = _rate(int((out_zone & swings).sum()), int(out_zone.sum()))
+    out["chase_pct"] = _rate(int((chase_zone & swings).sum()), int(chase_zone.sum()))
     out["barrel_pct"] = _rate(int((ev >= BARREL_EV).sum()), len(bip))
     out["max_ev"] = round(float(ev.max()), 1) if len(ev) else None
     out["avg_ev"] = round(float(ev.mean()), 1) if len(ev) else None
