@@ -287,15 +287,17 @@ def test_format_ip():
     assert P.format_ip(8) == "2.2"
 
 
-def test_barrel_pct_ev_drops_la_qualifier():
-    # 3 balls in play: two at 95+ (one GroundBall — excluded by the report's
-    # LD/FB def but INCLUDED here), one under 95.
+def test_barrel_needs_95_ev_and_9_to_35_launch_angle():
+    """2026-10-28: barrel = 95+ mph AND 9-35 deg launch angle, over all BIP."""
     df = pd.DataFrame({
-        "pitch_call": ["InPlay", "InPlay", "InPlay", "StrikeCalled"],
-        "exit_speed": [98.0, 96.0, 80.0, None],
-        "tagged_hit_type": ["GroundBall", "LineDrive", "FlyBall", None]})
+        "pitch_call": ["InPlay"] * 7 + ["StrikeCalled"],
+        "exit_speed":   [98.0, 95.0, 101.0, 99.0, 94.9, 100.0, None, None],
+        "launch_angle": [20.0, 9.0, 35.0, 5.0, 20.0, 36.0, 20.0, None]})
+    # barrels: 98@20, 95@9, 101@35 (both ends inclusive); not 99@5 (grounder),
+    # 94.9@20 (soft), 100@36 (too high), or a missing EV.
     pct, n = P.barrel_pct_ev(df)
-    assert n == 2 and pct == round(100 * 2 / 3, 1)
+    assert n == 3 and pct == round(100 * 3 / 7, 1)
+    assert P.barrel_pct(df) == (pct, n)
 
 
 def test_header_stat_line_has_strike_and_maxvelo():
@@ -373,10 +375,6 @@ def test_pa_metrics_keep_games_apart():
     assert P.ea_pct(df) == (50.0, 1)
 
 
-def test_barrel_pct_counts_ground_balls():
-    """2026-10-12: Barrel% = any ball in play at 95+, ground balls included."""
-    df = pd.DataFrame({
-        "pitch_call": ["InPlay", "InPlay", "InPlay", "StrikeCalled"],
-        "exit_speed": [98.0, 96.0, 80.0, None],
-        "tagged_hit_type": ["GroundBall", "LineDrive", "FlyBall", None]})
-    assert P.barrel_pct(df) == P.barrel_pct_ev(df) == (round(100 * 2 / 3, 1), 2)
+def test_barrel_missing_launch_angle_is_not_a_barrel():
+    df = pd.DataFrame({"pitch_call": ["InPlay", "InPlay"], "exit_speed": [100.0, 100.0]})
+    assert P.barrel_pct(df) == (0.0, 0)

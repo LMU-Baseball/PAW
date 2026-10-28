@@ -61,13 +61,15 @@ def test_plots_empty_input_safe():
 def test_contact_classes_mapping():
     import pandas as pd
     df = pd.DataFrame({
-        "pitch_call": ["StrikeSwinging", "InPlay", "InPlay", "BallCalled"],
-        "exit_speed": [None, 97.0, 80.0, None]})
+        "pitch_call": ["StrikeSwinging", "InPlay", "InPlay", "InPlay", "BallCalled"],
+        "exit_speed": [None, 97.0, 80.0, 99.0, None],
+        "launch_angle": [None, 20.0, 20.0, -5.0, None]})
     cc = list(plots._contact_classes(df))
     assert cc[0] == "Whiff"
-    assert cc[1] == "Barrel"     # InPlay & 95+
+    assert cc[1] == "Barrel"     # InPlay, 95+ at 9-35 deg
     assert cc[2] == "In Play"    # InPlay & <95
-    assert pd.isna(cc[3])        # take -> plain dot
+    assert cc[3] == "In Play"    # 95+ grounder is not a barrel
+    assert pd.isna(cc[4])        # take -> plain dot
 
 
 def test_pitch_usage_donuts_returns_png():

@@ -177,7 +177,7 @@ def sidebar(pitcher_id, start=None, end=None, season=None) -> html.Div:
                   _tile("Barrel%", summ["barrel_pct"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),
-        html.Div("Stats reflect the selected date range · Barrel = 95+ mph EV (provisional).",
+        html.Div("Stats reflect the selected date range · Barrel = 95+ mph EV at a 9–35° launch angle.",
                  style={"fontSize": "12px", "color": "#555", "marginTop": "4px"}),
         development_callout(pitcher_id, season),
     ], style={"padding": "8px"})

@@ -47,7 +47,7 @@ _PITCH_SELECT = """
     PitchofPA AS pitch_of_pa, PitchNo AS pitch_no, OutsOnPlay AS outs_on_play,
     RunsScored AS runs_scored, BatterSide AS batter_side, SpinRate AS spin_rate,
     RelHeight AS rel_height, RelSide AS rel_side, Extension AS extension,
-    ExitSpeed AS exit_speed, Zone AS izt_zone, GameID AS game_id,
+    ExitSpeed AS exit_speed, Angle AS launch_angle, Zone AS izt_zone, GameID AS game_id,
     PitcherId AS pitcher_id, `Top.Bottom` AS top_bottom,
     PitcherTeam AS pitcher_team, PitcherThrows AS pitcher_throws
 """

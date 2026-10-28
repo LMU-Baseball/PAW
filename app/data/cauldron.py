@@ -439,10 +439,10 @@ def _metrics_from_df(df) -> dict:
     else:
         metrics["offspeed_zone"] = None
 
-    # barrel: barrels-allowed rate on balls in play (reuses pitching's
-    # coach-simplified barrel_pct_ev: exit_speed >= 95, no LineDrive/FlyBall
-    # qualifier). None (not 0) when there's no balls-in-play data to judge --
-    # either no InPlay pitches, or exit_speed wasn't captured for any of them.
+    # barrel: barrels-allowed rate on balls in play (pitching.barrel_pct_ev:
+    # 95+ EV at a 9-35 degree launch angle). None (not 0) when there's no
+    # balls-in-play data to judge -- either no InPlay pitches, or exit_speed
+    # wasn't captured for any of them.
     if "exit_speed" not in df.columns:
         metrics["barrel"] = None
     else:
