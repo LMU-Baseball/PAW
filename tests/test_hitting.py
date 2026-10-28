@@ -357,3 +357,5 @@ def test_trackman_foul_variants_count_as_swings():
                                      "FoulBallFieldable", "BallCalled"]})
     assert hitting.swing_decisions_by_zone(df).set_index("Zone").loc["Chase", "Swing"] == 3
     assert hitting.plate_discipline(df).set_index("Zone").loc["Chase", "Swing %"] == 75.0
+    # Contact% is per swing: 2 fouls of 3 swings
+    assert hitting.plate_discipline(df).set_index("Zone").loc["Chase", "Contact %"] == 66.7
