@@ -107,3 +107,15 @@ def test_records_pin_summary_rows_and_sort_missing_last():
                          {"hitter": "C", "avg_ev": 85.0}]}
     rows = T.records(board, [{"column_id": "avg_ev", "direction": "desc"}])
     assert [r["hitter"] for r in rows] == ["Team", "C", "A", "B"]
+
+
+def test_chase_is_chase_or_waste_zone_not_shadow():
+    # 1.0 ft off center is outside the rulebook plate but still Shadow: a swing
+    # there is NOT a chase; 1.5 ft (Chase) and 2.0 ft (Waste) are.
+    df = pd.DataFrame([
+        _p("D, Four", "StrikeSwinging", side=1.0),
+        _p("D, Four", "StrikeSwinging", side=1.5),
+        _p("D, Four", "BallCalled", side=2.0),
+        _p("D, Four", "FoulBallNotFieldable", side=2.0),
+    ])
+    assert HB.metric_line(df)["chase_pct"] == round(100 * 2 / 3, 1)
