@@ -347,3 +347,13 @@ def test_zone_pitch_frequency_grid_filters_and_empty():
     empty = hitting.zone_pitch_frequency_grid(pd.DataFrame())
     assert empty == [[{"value": None, "n": 0} for _ in range(3)] for _ in range(3)]
     assert hitting.zone_pitch_frequency_grid(None) == empty
+
+
+def test_trackman_foul_variants_count_as_swings():
+    # Real case (Oct 2026): a hitter with 3 whiffs + 3 fouls on 14 Chase/Waste
+    # pitches showed 3 swings on the player page because fouls were takes.
+    df = pd.DataFrame({"Zone": ["Chase"] * 4,
+                       "PitchCall": ["StrikeSwinging", "FoulBallNotFieldable",
+                                     "FoulBallFieldable", "BallCalled"]})
+    assert hitting.swing_decisions_by_zone(df).set_index("Zone").loc["Chase", "Swing"] == 3
+    assert hitting.plate_discipline(df).set_index("Zone").loc["Chase", "Swing %"] == 75.0
