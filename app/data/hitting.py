@@ -25,6 +25,10 @@ FASTBALLS = {
     "TwoSeamFastBall", "FourSeamFastBall", "OneSeamFastBall",
 }
 ZONE_LEVELS = ["Heart", "Shadow", "Chase", "Waste"]
+# Chase% everywhere = swings at pitches in these zones / pitches in them.
+# Shadow (borderline, just off the plate) is deliberately NOT a chase (Brad,
+# 2026-10-28) -- keep every page on this one definition.
+CHASE_ZONES = ("Chase", "Waste")
 SWING_CALLS = ["StrikeSwinging", "InPlay", "FoulBall"]
 TAKE_CALLS = ["StrikeCalled", "BallCalled"]
 HIT_TYPES = ["FlyBall", "GroundBall", "LineDrive", "Popup"]  # note R spelling 'Popup'

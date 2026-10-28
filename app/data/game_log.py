@@ -12,7 +12,7 @@ import pandas as pd
 
 from app.data import video as videodata
 from app.data.cache import cached
-from app.data.hitting import PITCH_ABBR, attack_zone, qab_frame
+from app.data.hitting import CHASE_ZONES, PITCH_ABBR, attack_zone, qab_frame
 from app.data.hitting_caps import LMU_BATTER_TEAM, LMU_TEAM_ID, _game_label
 from app.db import query_df
 
@@ -201,7 +201,7 @@ def label_pitches(raw: pd.DataFrame) -> pd.DataFrame:
     df["is_swing"] = df["PitchCall"].isin(SWING_CALLS)
     df["is_take"] = df["PitchCall"].isin({"StrikeCalled", "BallCalled", "BallinDirt"})
     df["is_whiff"] = df["PitchCall"] == "StrikeSwinging"
-    df["is_chase"] = df["is_swing"] & df["Zone"].isin(["Chase", "Waste"])
+    df["is_chase"] = df["is_swing"] & df["Zone"].isin(CHASE_ZONES)
     df["is_bip"] = df["PitchCall"] == "InPlay"
     df["is_hard"] = df["is_bip"] & (pd.to_numeric(df["ExitSpeed"], errors="coerce") >= HARD_HIT_EV)
     df["decision"] = [swing_decision(c, z) for c, z in zip(df["PitchCall"], df["Zone"])]
@@ -278,7 +278,7 @@ def summary(df: pd.DataFrame) -> dict:
         qab += int(q.loc[q.index.isin(ends.index), "QAB"].sum())
     bip = df[df["is_bip"]]
     ev = pd.to_numeric(bip["ExitSpeed"], errors="coerce").dropna()
-    out_zone = df["Zone"].isin(["Chase", "Waste"])
+    out_zone = df["Zone"].isin(CHASE_ZONES)
     return {
         "PA": str(len(ends)),
         "H": str(int(hits.sum())),
