@@ -22,7 +22,7 @@ _COLS = game_log._COLS + ", RelSide, RelHeight, Extension"
 SHOW_ONLY = [
     ("pa_end", "PA-ending pitch"), ("strike", "Strikes"), ("ball", "Balls"),
     ("swing", "Swings"), ("whiff", "Whiffs"), ("chase", "Chases"), ("bip", "Balls in play"),
-    ("hard", f"Hard hit ({game_log.HARD_HIT_EV:.0f}+)"), ("first", "First pitch of PA"),
+    ("barrel", "Barrels"), ("first", "First pitch of PA"),
     ("two_strike", "Two strikes"), ("video", "Has video"),
 ]
 _BALL_CALLS = {"BallCalled", "BallinDirt", "BallIntentional", "AutomaticBall", "HitByPitch"}

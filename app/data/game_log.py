@@ -13,6 +13,7 @@ import pandas as pd
 from app.data import video as videodata
 from app.data.cache import cached
 from app.data.hitting import CHASE_ZONES, PITCH_ABBR, attack_zone, qab_frame
+from app.data.pitching import is_barrel
 from app.data.hitting_caps import LMU_BATTER_TEAM, LMU_TEAM_ID, _game_label
 from app.db import query_df
 
@@ -29,7 +30,6 @@ _COLS = (
 # app.data.hitting.SWING_CALLS predates that split.
 SWING_CALLS = {"StrikeSwinging", "InPlay", "FoulBall", "FoulBallFieldable",
                "FoulBallNotFieldable"}
-HARD_HIT_EV = 95.0
 
 _HIT_ABBR = {"GroundBall": "GB", "LineDrive": "LD", "FlyBall": "FB",
              "Popup": "PU", "PopUp": "PU", "Bunt": "BU"}
@@ -43,7 +43,7 @@ _HITS = {"Single", "Double", "Triple", "HomeRun"}
 SHOW_ONLY = [
     ("pa_end", "PA-ending pitch"), ("swing", "Swings"), ("take", "Takes"),
     ("whiff", "Whiffs"), ("chase", "Chases"), ("bip", "Balls in play"),
-    ("hard", f"Hard hit ({HARD_HIT_EV:.0f}+)"), ("two_strike", "Two strikes"),
+    ("barrel", "Barrels"), ("two_strike", "Two strikes"),
     ("video", "Has video"),
 ]
 
@@ -203,7 +203,7 @@ def label_pitches(raw: pd.DataFrame) -> pd.DataFrame:
     df["is_whiff"] = df["PitchCall"] == "StrikeSwinging"
     df["is_chase"] = df["is_swing"] & df["Zone"].isin(CHASE_ZONES)
     df["is_bip"] = df["PitchCall"] == "InPlay"
-    df["is_hard"] = df["is_bip"] & (pd.to_numeric(df["ExitSpeed"], errors="coerce") >= HARD_HIT_EV)
+    df["is_barrel"] = df["is_bip"] & is_barrel(df["ExitSpeed"], df["Angle"])
     df["decision"] = [swing_decision(c, z) for c, z in zip(df["PitchCall"], df["Zone"])]
 
     df["InnLabel"] = [f"{int(i)}{'▲' if h == 'Top' else '▼' if h == 'Bottom' else ''}"
@@ -250,7 +250,7 @@ def filter_pitches(df: pd.DataFrame, *, batter=None, pitcher=None, innings=None,
         m &= df["ZoneWord"].isin(zones)
     flag = {"pa_end": "is_pa_end", "swing": "is_swing", "take": "is_take",
             "whiff": "is_whiff", "chase": "is_chase", "bip": "is_bip",
-            "hard": "is_hard", "video": "has_video"}
+            "barrel": "is_barrel", "video": "has_video"}
     for key in show_only or []:
         if key == "two_strike":
             m &= df["Strikes"] == 2
@@ -265,7 +265,7 @@ def _pct(n, d) -> str:
 
 def summary(df: pd.DataFrame) -> dict:
     """Game-at-a-glance line for the hitters in `df` (unfiltered pitch rows)."""
-    keys = ["PA", "H", "XBH", "BB", "K", "QAB%", "Hard-Hit%", "Avg EV", "Chase%", "Whiff%"]
+    keys = ["PA", "H", "XBH", "BB", "K", "QAB%", "Barrel%", "Avg EV", "Chase%", "Whiff%"]
     if df is None or df.empty:
         return {k: "—" for k in keys}
     ends = df[df["is_pa_end"] & (df["pa_code"] != "")]
@@ -286,7 +286,7 @@ def summary(df: pd.DataFrame) -> dict:
         "BB": str(int((ends["pa_code"] == "BB").sum())),
         "K": str(int(ends["pa_code"].isin({"K-Swing", "K-Look"}).sum())),
         "QAB%": _pct(qab, len(ends)),
-        "Hard-Hit%": _pct(int((ev >= HARD_HIT_EV).sum()), len(ev)),
+        "Barrel%": _pct(int(bip["is_barrel"].sum()), len(bip)),
         "Avg EV": "—" if ev.empty else f"{ev.mean():.1f}",
         "Chase%": _pct(int((df["is_swing"] & out_zone).sum()), int(out_zone.sum())),
         "Whiff%": _pct(int(df["is_whiff"].sum()), int(df["is_swing"].sum())),

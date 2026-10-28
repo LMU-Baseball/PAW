@@ -115,7 +115,7 @@ def play_detail(df: pd.DataFrame | None, pitch_uid: str | None) -> html.Div:
         _tile("Distance", _num(r["Distance"], "{:.0f} ft")),
         _tile("Hang Time", _num(r["HangTime"], "{:.1f}s")),
         _tile("xBA", _xba(r)),
-        _tile("Hard Hit", "Yes" if r["is_hard"] else ("No" if r["is_bip"] else "")),
+        _tile("Barrel", "Yes" if r["is_barrel"] else ("No" if r["is_bip"] else "")),
     ]
     grid = {"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(84px, 1fr))",
             "gap": "6px", "marginTop": "8px"}

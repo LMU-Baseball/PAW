@@ -15,7 +15,12 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from app.data.pitching import BARREL_EV, BARREL_LA, is_barrel
 from app.db import query_df
+
+# `pitching.is_barrel` as SQL over PRACTICE_PLAYS, for the aggregate queries.
+_BARREL_SQL = (f"exit_velocity >= {BARREL_EV} "
+               f"AND launch_angle BETWEEN {BARREL_LA[0]} AND {BARREL_LA[1]}")
 
 HIT_TYPE_MAP = {0: "Miss/Foul", 1: "Ground Ball", 2: "Line Drive", 3: "Fly Ball"}
 
@@ -157,7 +162,7 @@ def load_player_stats(exclude_test: bool = True, player: str | None = None) -> p
             COALESCE(ps.total_sessions, 0) AS total_sessions,
             pp.avg_exit_velocity, pp.max_exit_velocity,
             pp.avg_distance, pp.max_distance,
-            pp.hard_hit_rate, pp.fly_ball_rate, pp.line_drive_rate,
+            pp.barrel_rate, pp.fly_ball_rate, pp.line_drive_rate,
             ps.last_practice_date
           FROM (
                 SELECT player_id FROM PRACTICE_SESSIONS WHERE player_id IS NOT NULL
@@ -179,8 +184,9 @@ def load_player_stats(exclude_test: bool = True, player: str | None = None) -> p
                        MAX(exit_velocity) AS max_exit_velocity,
                        AVG(distance_feet) AS avg_distance,
                        MAX(distance_feet) AS max_distance,
-                       SUM(CASE WHEN exit_velocity >= 95 THEN 1 ELSE 0 END) * 100.0
-                           / NULLIF(COUNT(exit_velocity), 0) AS hard_hit_rate,
+                       SUM(CASE WHEN {_BARREL_SQL} THEN 1 ELSE 0 END) * 100.0
+                           / NULLIF(SUM(CASE WHEN hit_type IN (1, 2, 3) THEN 1 ELSE 0 END), 0)
+                           AS barrel_rate,
                        SUM(CASE WHEN hit_type = 3 THEN 1 ELSE 0 END) * 100.0
                            / NULLIF(COUNT(*), 0) AS fly_ball_rate,
                        SUM(CASE WHEN hit_type = 2 THEN 1 ELSE 0 END) * 100.0
@@ -194,7 +200,7 @@ def load_player_stats(exclude_test: bool = True, player: str | None = None) -> p
     """, params)
     for col in ("total_plays", "total_sessions", "avg_exit_velocity",
                 "max_exit_velocity", "avg_distance", "max_distance",
-                "hard_hit_rate", "fly_ball_rate", "line_drive_rate"):
+                "barrel_rate", "fly_ball_rate", "line_drive_rate"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
@@ -263,7 +269,10 @@ def load_sessions(exclude_test: bool = True, player=None,
                avg_exit_velocity, max_exit_velocity,
                avg_distance, max_distance,
                total_plays, at_bats, hit_count, batting_avg,
-               hard_hit_count, ground_ball_pct, fly_ball_pct, line_drive_pct,
+               (SELECT SUM(CASE WHEN {_BARREL_SQL} THEN 1 ELSE 0 END)
+                  FROM PRACTICE_PLAYS pp
+                 WHERE pp.session_id = PRACTICE_SESSIONS.session_id) AS barrel_count,
+               ground_ball_pct, fly_ball_pct, line_drive_pct,
                session_type, session_tag
           FROM PRACTICE_SESSIONS
           {where}
@@ -485,30 +494,28 @@ def contact_summary(df: pd.DataFrame) -> dict:
     }
 
 
-def contact_quality(df: pd.DataFrame, hard_hit_ev: float = 95.0,
-                    popup_la: float = 50.0) -> dict:
-    """HARD-HIT% and POP-UP% over batted balls (hit_type in {1, 2, 3}).
+def contact_quality(df: pd.DataFrame, popup_la: float = 50.0) -> dict:
+    """BARREL% and POP-UP% over batted balls (hit_type in {1, 2, 3}).
 
-    HARD-HIT% = share of EV-KNOWN batted balls with exit velocity >= 95 mph
-    (mirrors the game hitting dashboard's definition + the ingest
-    ``hard_hit_rate``). POP-UP% = share of ALL batted balls with launch angle
+    BARREL% = share of ALL batted balls that are barrels (`pitching.is_barrel`:
+    95+ EV at a 9-35 deg launch angle -- the same definition as the game
+    dashboards). POP-UP% = share of ALL batted balls with launch angle
     >= 50 deg -- HitTrax has no pop-up hit-type code (only GB/LD/FB), so
     pop-ups are derived from launch angle rather than a tag.
 
     Returns percentages in [0, 100] rounded to one decimal, or ``None`` for a
     metric when the input lacks its column or there are no batted balls."""
     if df is None or df.empty or "hit_type" not in df.columns:
-        return {"hard_hit_pct": None, "popup_pct": None}
+        return {"barrel_pct": None, "popup_pct": None}
     bb = df[df["hit_type"].isin([1, 2, 3])]
     n_bb = len(bb)
     if n_bb == 0:
-        return {"hard_hit_pct": None, "popup_pct": None}
+        return {"barrel_pct": None, "popup_pct": None}
 
-    hard = None
-    if "exit_velocity" in bb.columns:
-        ev = pd.to_numeric(bb["exit_velocity"], errors="coerce").dropna()
-        if len(ev):
-            hard = round(100.0 * float((ev >= hard_hit_ev).sum()) / len(ev), 1)
+    barrel = None
+    if "exit_velocity" in bb.columns and "launch_angle" in bb.columns:
+        barrel = round(100.0 * float(is_barrel(bb["exit_velocity"], bb["launch_angle"]).sum())
+                       / n_bb, 1)
 
     popup = None
     if "launch_angle" in bb.columns:
@@ -517,7 +524,7 @@ def contact_quality(df: pd.DataFrame, hard_hit_ev: float = 95.0,
         # denominator without counting as pop-ups.
         popup = round(100.0 * float((la >= popup_la).sum()) / n_bb, 1)
 
-    return {"hard_hit_pct": hard, "popup_pct": popup}
+    return {"barrel_pct": barrel, "popup_pct": popup}
 
 
 def swing_decision_score(df: pd.DataFrame, in_zones=range(1, 10)) -> dict:
