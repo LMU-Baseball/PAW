@@ -141,6 +141,9 @@ def warm_caches() -> None:
     from app.data import process_board
     _safe(lambda: process_board.game_types(*process_board.cycle_bounds(board_season, velo_cycle)))
     _safe(lambda: process_board.board(board_season, velo_cycle))
+    from app.data import hitter_process_board
+    _safe(lambda: hitter_process_board.game_types(*hitter_process_board.cycle_bounds(board_season, velo_cycle)))
+    _safe(lambda: hitter_process_board.board(board_season, velo_cycle))
 
     cycle = f"{board_season}-c1"
     _safe(cauldron.read_scoring)

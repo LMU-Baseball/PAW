@@ -43,6 +43,8 @@ def register_dashboards(server):
     build_velo_board_dash(server)
     from app.dashboards.process_board.index import build_process_board_dash
     build_process_board_dash(server)
+    from app.dashboards.hitter_process_board.index import build_hitter_process_board_dash
+    build_hitter_process_board_dash(server)
     from app.dashboards.cauldron.index import build_cauldron_dash
     build_cauldron_dash(server)
     from app.dashboards.splash_report.index import build_splash_report_dash
