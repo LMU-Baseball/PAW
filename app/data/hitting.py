@@ -29,7 +29,10 @@ ZONE_LEVELS = ["Heart", "Shadow", "Chase", "Waste"]
 # Shadow (borderline, just off the plate) is deliberately NOT a chase (Brad,
 # 2026-10-28) -- keep every page on this one definition.
 CHASE_ZONES = ("Chase", "Waste")
-SWING_CALLS = ["StrikeSwinging", "InPlay", "FoulBall"]
+# Trackman logs fouls as FoulBallNotFieldable/FoulBallFieldable, never plain
+# "FoulBall" -- leaving them out counted every foul as a take.
+SWING_CALLS = ["StrikeSwinging", "InPlay", "FoulBall", "FoulBallNotFieldable",
+               "FoulBallFieldable"]
 TAKE_CALLS = ["StrikeCalled", "BallCalled"]
 HIT_TYPES = ["FlyBall", "GroundBall", "LineDrive", "Popup"]  # note R spelling 'Popup'
 PITCH_ABBR = {
@@ -255,10 +258,11 @@ def plate_discipline(df: pd.DataFrame, by: str = "zone") -> pd.DataFrame:
         swing = g["PitchCall"].isin(SWING_CALLS).sum()
         whiff = (g["PitchCall"] == "StrikeSwinging").sum()
         take = g["PitchCall"].isin(TAKE_CALLS).sum()
-        contact = (g["PitchCall"] == "InPlay").sum()
+        # Contact% is per swing (fouls + balls in play), matching the Process board.
+        contact = g["PitchCall"].isin(SWING_CALLS).sum() - whiff
         rows.append({label: gval, "Total": n,
                      "Swing %": _pct(swing, n), "Whiff %": _pct(whiff, n),
-                     "Take %": _pct(take, n), "Contact %": _pct(contact, n)})
+                     "Take %": _pct(take, n), "Contact %": _pct(contact, swing)})
     out = pd.DataFrame(rows, columns=cols)
     if by == "zone":
         out = out.set_index(label).reindex(groups).reset_index()
