@@ -42,7 +42,7 @@ def test_label_pitches_pa_keys_codes_and_flags():
     assert df["PA"].tolist() == ["", "LD-2B", "K-Look", "BB"]
     assert df["Result"].tolist() == ["Swing & Miss", "LD-2B", "K-Look", "BB"]
     assert df["is_chase"].tolist() == [True, False, False, False]
-    assert df["is_hard"].tolist() == [False, True, False, False]
+    assert df["is_barrel"].tolist() == [False, True, False, False]   # 101 mph at 14 deg
     assert df["decision"].tolist()[:2] == ["Chase", "Heart swing"]
     assert df["InnLabel"].tolist() == ["1▲", "1▲", "1▲", "1▼"]
     assert df["Velo"].iloc[0] == 90.0

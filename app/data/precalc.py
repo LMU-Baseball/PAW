@@ -47,6 +47,7 @@ _DDL = {
             ba VARCHAR(8), obp VARCHAR(8), slg VARCHAR(8),
             pa INT, ab INT, h INT, doubles INT, triples INT, hr INT, bb INT, so INT,
             hard_hit_pct VARCHAR(8), popup_pct VARCHAR(8), xba VARCHAR(8),
+            barrel_pct VARCHAR(8),
             season_label VARCHAR(32) NOT NULL,
             built_at     DATETIME,
             PRIMARY KEY (batter_id, season_label)
@@ -140,6 +141,9 @@ _HITTING_NEW_COLUMNS = {
     "hard_hit_pct": "VARCHAR(8)",
     "popup_pct": "VARCHAR(8)",
     "xba": "VARCHAR(8)",
+    # 2026-10-28: the sidebar's HARD-HIT% became BARREL%. hard_hit_pct stays in
+    # the table (never drop a column) but is no longer written or read.
+    "barrel_pct": "VARCHAR(8)",
 }
 
 

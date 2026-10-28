@@ -14,6 +14,7 @@ from app.data.hitting import (
 from app.data.hitting import qab_frame, _slash_from_pas, _slash_counts, _fmt_avg
 from app.data.roster_media import player_media
 from app.data.cache import cached
+from app.data.pitching import is_barrel
 
 LMU_BATTER_TEAM = "LOY_LIO"
 LMU_TEAM_ID = 78
@@ -187,7 +188,7 @@ def _rollup_over(batter_id, start, end) -> dict:
 
 def _compute_season_rollup(batter_id, season=None) -> dict:
     """The hitting season rollup for one batter, computed from raw CAPS --
-    now including HARD-HIT%/POP-UP%/xBA so `rebuild_hitting` can persist
+    now including BARREL%/POP-UP%/xBA so `rebuild_hitting` can persist
     them to precalc. Thin wrapper over `_rollup_over` (slash/QAB) plus
     `_live_batted_ball_kpis` (the three batted-ball KPIs) with the season's
     date bounds -- the single source of truth for each stays where it
@@ -226,7 +227,7 @@ def _ab_qualifying_mask(play_result: pd.Series) -> pd.Series:
     (`_AB_OUTS`) counts; anything else (undefined/NaN PlayResult) is
     excluded, mirroring `_slash_counts`'s "undefined/incomplete PA — not
     counted" fallthrough. Used ONLY to align the xBA numerator's population
-    with the AB denominator -- hard_hit_pct/popup_pct correctly keep the
+    with the AB denominator -- barrel_pct/popup_pct correctly keep the
     full InPlay batted-ball set as their own denominator.
     """
     is_sac = play_result.astype(str).str.startswith("Sac")
@@ -234,7 +235,7 @@ def _ab_qualifying_mask(play_result: pd.Series) -> pd.Series:
 
 
 def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
-    """HARD-HIT%, POP-UP%, xBA computed FRESH (no precalc) over the batter's
+    """BARREL%, POP-UP%, xBA computed FRESH (no precalc) over the batter's
     InPlay batted balls in [start, end] -- the three new sidebar tiles (Task
     2 of the hitting-KPIs work). `ab` is the AB the caller already computed
     via its slash-count rollup (`_rollup_over`/`_season_rollup`, both of which
@@ -242,8 +243,8 @@ def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
     just one batted-ball pull (`bip_points`, via the range's game ids) plus
     the Task-1 xBA lookup.
 
-    hard_hit_pct = count(ExitSpeed >= 95) / count(ExitSpeed notna) among the
-    range's InPlay batted balls (null-EV rows excluded from the denominator).
+    barrel_pct = barrels (`pitching.is_barrel`: 95+ EV at a 9-35 deg launch
+    angle) / all of the range's InPlay batted balls.
     popup_pct = count(hit_type == 'Popup') / count(all InPlay batted balls).
     Both of these are batted-ball RATES, so their denominator is correctly
     the full InPlay batted-ball set (sacrifices and undefined PlayResults
@@ -263,36 +264,33 @@ def _live_batted_ball_kpis(batter_id, start, end, ab) -> dict:
     gids = games["game_id"].tolist() if not games.empty else []
     bb = bip_points(batter_id, gids) if gids else pd.DataFrame(columns=_BIP_COLS)
 
-    ev = bb["exit_speed"] if not bb.empty else pd.Series(dtype=float)
-    ev_known = ev.dropna()
-    hard_hit = (float((ev_known >= 95).sum()) / len(ev_known)) if len(ev_known) else None
-
     n_bip = len(bb)
+    barrel = (float(is_barrel(bb["exit_speed"], bb["la"]).sum()) / n_bip) if n_bip else None
     popup = (float((bb["hit_type"] == "Popup").sum()) / n_bip) if n_bip else None
 
     xba_bb = bb[_ab_qualifying_mask(bb["PlayResult"])] if n_bip else bb
     prob_sum = xba_model.xba_hit_prob_sum(xba_bb) if len(xba_bb) else 0.0
     xba_val = (prob_sum / ab) if ab else None
 
-    return {"hard_hit_pct": _fmt_pct(hard_hit), "popup_pct": _fmt_pct(popup),
+    return {"barrel_pct": _fmt_pct(barrel), "popup_pct": _fmt_pct(popup),
             "xba": _fmt_avg(xba_val)}
 
 
 def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
-    """QAB% + slash line + HARD-HIT%/POP-UP%/xBA, scoped to a date range.
+    """QAB% + slash line + BARREL%/POP-UP%/xBA, scoped to a date range.
 
     When `start`/`end` are omitted, or given but equal to `season`'s bounds
     (the default "This Season" view), read the precalc 1-row rollup as before
     (fixes the profiled 3.2s full-season double-load; compute fallback when the
     rollup row is absent) -- this fast path now covers all 7 tiles: `_season_
     rollup`'s compute fallback (`_compute_season_rollup`) already produces
-    hard_hit_pct/popup_pct/xba (Task 4), so a real precalc row carries them
+    barrel_pct/popup_pct/xba (Task 4), so a real precalc row carries them
     too and no second live batted-ball pull runs on this path. A genuine
     sub-range (the coach narrowed the calendar/preset) is the only path left
     that computes on the fly, via `_rollup_over` + `_live_batted_ball_kpis`,
     so the sidebar KPIs track the selected date range.
 
-    A precalc row being non-None doesn't guarantee hard_hit_pct/popup_pct/xba
+    A precalc row being non-None doesn't guarantee barrel_pct/popup_pct/xba
     are actually populated on it -- a DB restore, a fresh environment, or the
     in-flight window of a rebuild (columns added by `ensure_tables` but not
     yet repopulated by `_replace_rows`) can all leave a row that exists but is
@@ -309,14 +307,14 @@ def sidebar_stats(batter_id, season=None, start=None, end=None) -> dict:
             return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
                     **live}
     r = _season_rollup(batter_id, season)
-    kpi_keys = ("hard_hit_pct", "popup_pct", "xba")
+    kpi_keys = ("barrel_pct", "popup_pct", "xba")
     if any(pd.isna(r.get(k)) for k in kpi_keys):
         s_b, e_b = seasons.season_bounds(season or seasons.current_season())
         live = _live_batted_ball_kpis(batter_id, s_b, e_b, r["ab"])
         return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
                 **live}
     return {"qab": r["qab_pct"], "BA": r["ba"], "SLG": r["slg"], "OBP": r["obp"],
-            "hard_hit_pct": r["hard_hit_pct"], "popup_pct": r["popup_pct"], "xba": r["xba"]}
+            "barrel_pct": r["barrel_pct"], "popup_pct": r["popup_pct"], "xba": r["xba"]}
 
 
 @cached

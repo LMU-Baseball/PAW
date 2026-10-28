@@ -71,14 +71,14 @@ def test_session_tables_render():
     stats = pd.DataFrame([{
         "player_name": "Doe, John", "total_plays": 10, "total_sessions": 2,
         "avg_exit_velocity": 88.0, "max_exit_velocity": 95.0,
-        "avg_distance": 200.0, "hard_hit_rate": 0.3,
+        "avg_distance": 200.0, "barrel_rate": 0.3,
         "line_drive_rate": 0.2, "fly_ball_rate": 0.25,
         "last_practice_date": "2026-04-01",
     }])
     sessions = pd.DataFrame([{
         "session_date": "2026-04-01", "player_name": "Doe, John",
         "total_plays": 10, "avg_exit_velocity": 88.0, "max_exit_velocity": 95.0,
-        "avg_distance": 200.0, "batting_avg": 0.3, "hard_hit_count": 2,
+        "avg_distance": 200.0, "batting_avg": 0.3, "barrel_count": 2,
         "ground_ball_pct": 40.0, "line_drive_pct": 30.0, "fly_ball_pct": 30.0,
     }])
     assert session_tables.render(stats, sessions, player="All Players") is not None
@@ -295,9 +295,9 @@ def test_practice_sidebar_renders_player_and_all():
                         "player_name": "Andrew Mhoon", "play_date": "2026-04-01",
                         "session_id": 1, "play_timestamp": "2026-04-01 10:00:00"}])
     tree = str(layout.sidebar(df, "Andrew Mhoon"))
-    # the Contact Quality section (HARD-HIT% + POP-UP%) renders in the sidebar
+    # the Contact Quality section (BARREL% + POP-UP%) renders in the sidebar
     assert "Contact Quality" in tree
-    assert "HARD-HIT%" in tree and "POP-UP%" in tree
+    assert "BARREL%" in tree and "POP-UP%" in tree
     assert layout.sidebar(df, "All Players") is not None
     assert layout.sidebar(pd.DataFrame(), "All Players") is not None
 

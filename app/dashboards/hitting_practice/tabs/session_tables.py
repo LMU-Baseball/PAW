@@ -26,13 +26,13 @@ def render(stats: pd.DataFrame, sessions: pd.DataFrame, *, player: str) -> html.
         cols = [c for c in (
             "player_name", "total_sessions", "total_plays",
             "avg_exit_velocity", "max_exit_velocity", "avg_distance",
-            "hard_hit_rate", "line_drive_rate", "fly_ball_rate", "last_practice_date",
+            "barrel_rate", "line_drive_rate", "fly_ball_rate", "last_practice_date",
         ) if c in st.columns]
         player_tbl = st[cols].rename(columns={
             "player_name": "Player", "total_sessions": "Sessions",
             "total_plays": "Plays", "avg_exit_velocity": "Avg EV",
             "max_exit_velocity": "Max EV", "avg_distance": "Avg Dist",
-            "hard_hit_rate": "Hard Hit%", "line_drive_rate": "LD%",
+            "barrel_rate": "Barrel%", "line_drive_rate": "LD%",
             "fly_ball_rate": "FB%", "last_practice_date": "Last Practice",
         })
 
@@ -41,14 +41,14 @@ def render(stats: pd.DataFrame, sessions: pd.DataFrame, *, player: str) -> html.
         cols = [c for c in (
             "session_date", "player_name", "total_plays",
             "avg_exit_velocity", "max_exit_velocity", "avg_distance",
-            "batting_avg", "hard_hit_count", "ground_ball_pct",
+            "batting_avg", "barrel_count", "ground_ball_pct",
             "line_drive_pct", "fly_ball_pct",
         ) if c in sess.columns]
         sess_tbl = sess[cols].rename(columns={
             "session_date": "Date", "player_name": "Player",
             "total_plays": "Plays", "avg_exit_velocity": "Avg EV",
             "max_exit_velocity": "Max EV", "avg_distance": "Avg Dist",
-            "batting_avg": "AVG", "hard_hit_count": "Hard Hits",
+            "batting_avg": "AVG", "barrel_count": "Barrels",
             "ground_ball_pct": "GB%", "line_drive_pct": "LD%",
             "fly_ball_pct": "FB%",
         })

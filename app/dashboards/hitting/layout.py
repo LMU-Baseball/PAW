@@ -55,7 +55,7 @@ def sidebar(batter_id, season=None, start=None, end=None) -> html.Div:
         # POP-UP% lives on the HitTrax batting-practice dashboard, not here.
         html.Div([_tile("QAB%", qab_txt), _tile("BA", slash["BA"]),
                   _tile("SLG", slash["SLG"]), _tile("OBP", slash["OBP"]),
-                  _tile("HARD-HIT%", slash["hard_hit_pct"]),
+                  _tile("BARREL%", slash["barrel_pct"]),
                   _tile("xBA", slash["xba"])],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr",
                         "gap": "6px", "marginTop": "10px"}),

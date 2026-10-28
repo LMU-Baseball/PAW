@@ -58,7 +58,7 @@ def sidebar(pitch_df, player) -> html.Div:
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
         html.Div("Contact Quality", style={"fontSize": "14px", "color": "#9A0021",
                                            "fontWeight": "bold", "marginTop": "10px"}),
-        html.Div([_tile("HARD-HIT%", f(cq["hard_hit_pct"], "%")),
+        html.Div([_tile("BARREL%", f(cq["barrel_pct"], "%")),
                   _tile("POP-UP%", f(cq["popup_pct"], "%"))],
                  style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "6px"}),
     ], style={"padding": "8px"})
