@@ -9,12 +9,14 @@ from app.dashboards.process_board import tables as T
 
 
 def _pitch(name, game, inning, pa, pitch, call, balls=0, strikes=0, korbb="Undefined",
-           result="Undefined", outs=0, ev=None, speed=90.0, ptype="Fastball", throws="Right"):
+           result="Undefined", outs=0, ev=None, speed=90.0, ptype="Fastball", throws="Right",
+           side=0.0, height=2.5):
     return {"pitcher_name": name, "game_id": game, "inning": inning, "pa_of_inning": pa,
             "pitch_of_pa": pitch, "pitch_call": call, "balls": balls, "strikes": strikes,
             "korbb": korbb, "play_result": result, "outs_on_play": outs, "exit_speed": ev,
             "rel_speed": speed, "tagged_pitch_type": ptype, "auto_pitch_type": ptype,
-            "pitcher_throws": throws, "batter_side": "Right"}
+            "pitcher_throws": throws, "batter_side": "Right",
+            "plate_loc_side": side, "plate_loc_height": height}
 
 
 def _frame():
@@ -157,3 +159,35 @@ def test_cycle_row_ignores_game_type_filter(monkeypatch):
     cycle_row, team = board["summary"][1], board["summary"][2]
     assert cycle_row["pitcher"] == "LMU Spring 2027 Average"
     assert cycle_row["pitches"] == 8 and team["pitches"] == 7
+
+
+def test_two_strike_and_zone_swing_metrics():
+    # 2-strike pitches: whiff in Chase, foul in Chase, take in Waste, in-play
+    # in the Heart. Plus an 0-0 swing in the Heart and an 0-0 take in Shadow.
+    df = pd.DataFrame([
+        _pitch("C, Three", "g1", 1, 1, 1, "StrikeSwinging", side=0.0),
+        _pitch("C, Three", "g1", 1, 1, 2, "StrikeCalled", strikes=1, side=1.0),
+        _pitch("C, Three", "g1", 1, 1, 3, "StrikeSwinging", strikes=2, side=1.5),
+        _pitch("C, Three", "g1", 1, 2, 1, "FoulBallNotFieldable", strikes=2, side=1.5),
+        _pitch("C, Three", "g1", 1, 2, 2, "BallCalled", strikes=2, side=2.5),
+        _pitch("C, Three", "g1", 1, 2, 3, "InPlay", strikes=2, side=0.0, result="Out", outs=1),
+    ])
+    line = PB.metric_line(df)
+    assert line["contact_2k_pct"] == 66.7     # foul + in play of 3 two-strike swings
+    assert line["swstr_2k_pct"] == 25.0       # 1 whiff of 4 two-strike pitches
+    assert line["chase_2k_pct"] == 66.7       # whiff + foul of 3 two-strike Chase/Waste
+    assert line["zone_swing_pct"] == 66.7     # 2 swings of 3 Heart/Shadow pitches
+
+
+def test_new_metrics_blank_without_two_strike_pitches():
+    line = PB.metric_line(_frame()[lambda d: d["pitcher_name"] == "B, Two"])
+    assert line["contact_2k_pct"] is None and line["swstr_2k_pct"] is None
+    assert line["chase_2k_pct"] is None
+    assert line["zone_swing_pct"] == 100.0
+
+
+def test_zone_swing_has_no_leader_or_baseline_tint():
+    rows = PB.pitcher_rows(_frame())
+    assert "zone_swing_pct" not in PB.best_values(rows)
+    styles = T.cell_styles({"best": {}})
+    assert not any(s["if"].get("column_id") == "zone_swing_pct" for s in styles)
