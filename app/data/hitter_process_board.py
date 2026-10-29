@@ -17,6 +17,7 @@ from app.data.hitting_caps import LMU_BATTER_TEAM
 from app.db import query_df
 
 # (key, label, higher_is_better). Lower is better for whiffs, chase and GB%.
+# The "2K" columns only look at pitches seen in 2-strike counts.
 METRICS: tuple[tuple, ...] = (
     ("swing_pct", "Swing%", True),
     ("contact_pct", "Contact%", True),
@@ -29,6 +30,10 @@ METRICS: tuple[tuple, ...] = (
     ("chase_pct", "Chase%", False),
     ("whiff_pct", "Whiff%", False),
     ("iz_whiff_pct", "IZ Whiff%", False),
+    ("zone_swing_pct", "Zone Swing%", True),
+    ("contact_2k_pct", "Contact 2K%", True),
+    ("swstr_2k_pct", "SwStr 2K%", False),
+    ("chase_2k_pct", "Chase 2K%", False),
 )
 EV_KEYS = ("max_ev", "avg_ev")
 
@@ -36,6 +41,8 @@ EV_KEYS = ("max_ev", "avg_ev")
 # hitting.SWING_CALLS ("FoulBall") would silently drop them from swings.
 _FOUL_CALLS = ["FoulBall", "FoulBallNotFieldable", "FoulBallFieldable"]
 
+# Zone Swing% uses Heart + Shadow, the complement of Chase%'s Chase + Waste.
+_ZONE_AREAS = ("Heart", "Shadow")
 # Rulebook zone in feet (same box the bullpen/practice/game-log code uses).
 _SZ_X, _SZ_Y0, _SZ_Y1 = 0.83, 1.5, 3.5
 # A hitter needs this many pitches seen to be eligible for a gold leader cell.
@@ -65,7 +72,7 @@ def _query_pitches(start: str, end: str) -> pd.DataFrame:
     return query_df(
         "SELECT Batter AS batter_name, BatterSide AS batter_side, "
         "PlateLocSide AS plate_side, PlateLocHeight AS plate_height, "
-        "PitchCall AS pitch_call, ExitSpeed AS exit_speed, Angle AS launch_angle, "
+        "PitchCall AS pitch_call, Strikes AS strikes, ExitSpeed AS exit_speed, Angle AS launch_angle, "
         "TaggedHitType AS hit_type, "
         "COALESCE(GameType, 'Untyped') AS game_type "
         "FROM GAMES WHERE BatterTeam = :t AND Date BETWEEN :s AND :e",
@@ -105,9 +112,11 @@ def metric_line(df: pd.DataFrame) -> dict:
     located = df["plate_side"].notna() & df["plate_height"].notna()
     in_zone = located & df["plate_side"].between(-_SZ_X, _SZ_X) \
         & df["plate_height"].between(_SZ_Y0, _SZ_Y1)
-    chase_zone = pd.Series([attack_zone(s, h) in CHASE_ZONES
-                           for s, h in zip(df["plate_side"], df["plate_height"])],
-                          index=df.index, dtype=bool)
+    zones = pd.Series([attack_zone(s, h) for s, h in zip(df["plate_side"], df["plate_height"])],
+                      index=df.index, dtype=object)
+    chase_zone = zones.isin(CHASE_ZONES)
+    zone = zones.isin(_ZONE_AREAS)
+    two_k = df["strikes"] >= 2
 
     bip = df[df["pitch_call"] == "InPlay"]
     ev = bip["exit_speed"].dropna()
@@ -118,6 +127,11 @@ def metric_line(df: pd.DataFrame) -> dict:
     out["whiff_pct"] = _rate(int(whiffs.sum()), int(swings.sum()))
     out["iz_whiff_pct"] = _rate(int((in_zone & whiffs).sum()), int((in_zone & swings).sum()))
     out["chase_pct"] = _rate(int((chase_zone & swings).sum()), int(chase_zone.sum()))
+    out["zone_swing_pct"] = _rate(int((zone & swings).sum()), int(zone.sum()))
+    out["contact_2k_pct"] = _rate(int((two_k & contact).sum()), int((two_k & swings).sum()))
+    out["swstr_2k_pct"] = _rate(int((two_k & whiffs).sum()), int(two_k.sum()))
+    out["chase_2k_pct"] = _rate(int((two_k & chase_zone & swings).sum()),
+                                int((two_k & chase_zone).sum()))
     out["barrel_pct"] = _rate(int(is_barrel(bip["exit_speed"], bip["launch_angle"]).sum()), len(bip))
     out["max_ev"] = round(float(ev.max()), 1) if len(ev) else None
     out["avg_ev"] = round(float(ev.mean()), 1) if len(ev) else None
