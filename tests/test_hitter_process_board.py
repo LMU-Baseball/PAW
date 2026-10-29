@@ -7,8 +7,8 @@ from app.data import hitter_process_board as HB
 from app.dashboards.hitter_process_board import tables as T
 
 
-def _p(name, call, side=0.0, height=2.5, ev=None, hit=None, bats="Right", la=None):
-    return {"batter_name": name, "batter_side": bats, "plate_side": side,
+def _p(name, call, side=0.0, height=2.5, ev=None, hit=None, bats="Right", la=None, strikes=0):
+    return {"batter_name": name, "batter_side": bats, "plate_side": side, "strikes": strikes,
             "plate_height": height, "pitch_call": call, "exit_speed": ev, "launch_angle": la,
             "hit_type": hit, "game_type": "Scrimmage"}
 
@@ -119,3 +119,27 @@ def test_chase_is_chase_or_waste_zone_not_shadow():
         _p("D, Four", "FoulBallNotFieldable", side=2.0),
     ])
     assert HB.metric_line(df)["chase_pct"] == round(100 * 2 / 3, 1)
+
+
+def test_two_strike_and_zone_swing_metrics():
+    # 2-strike pitches: whiff in Chase, foul in Chase, take in Waste, in play
+    # in the Heart. Plus an 0-0 swing in the Heart and an 0-0 take in Shadow.
+    df = pd.DataFrame([
+        _p("E, Five", "StrikeSwinging", side=0.0),
+        _p("E, Five", "StrikeCalled", side=1.0),
+        _p("E, Five", "StrikeSwinging", side=1.5, strikes=2),
+        _p("E, Five", "FoulBallNotFieldable", side=1.5, strikes=2),
+        _p("E, Five", "BallCalled", side=2.5, strikes=2),
+        _p("E, Five", "InPlay", side=0.0, strikes=2, ev=80.0, hit="GroundBall"),
+    ])
+    line = HB.metric_line(df)
+    assert line["zone_swing_pct"] == 66.7     # 2 swings of 3 Heart/Shadow pitches
+    assert line["contact_2k_pct"] == 66.7     # foul + in play of 3 two-strike swings
+    assert line["swstr_2k_pct"] == 25.0       # 1 whiff of 4 two-strike pitches
+    assert line["chase_2k_pct"] == 66.7       # whiff + foul of 3 two-strike Chase/Waste
+
+
+def test_two_strike_metrics_blank_without_two_strike_pitches():
+    line = HB.metric_line(pd.DataFrame([_p("F, Six", "BallCalled")]))
+    assert line["contact_2k_pct"] is None and line["swstr_2k_pct"] is None
+    assert line["chase_2k_pct"] is None

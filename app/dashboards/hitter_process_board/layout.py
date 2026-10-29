@@ -45,7 +45,7 @@ def legend() -> html.Div:
         _swatch(tables.LEADER, "Team leader"),
         _swatch(tables.MEETS, "At or better than LMU Team Average"),
         _swatch(tables.MISSES, "Worse than LMU Team Average"),
-        html.Span("Lower is better for GB%, Chase%, Whiff% and IZ Whiff%. "
+        html.Span("Lower is better for GB%, Chase%, Whiff%, IZ Whiff%, SwStr 2K% and Chase 2K%. "
                   f"Leaders need {HB.MIN_PITCHES_FOR_LEADER}+ pitches. Click a column header to sort.",
                   style={"color": "#555"}),
     ], style={"display": "flex", "flexWrap": "wrap", "gap": "6px", "fontSize": "14px",
