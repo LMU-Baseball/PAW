@@ -19,10 +19,61 @@ import pandas as pd
 from app.data import pitching as P
 from app.data import velo_board
 from app.data.cache import cached
+from app.data.hitting import CHASE_ZONES, attack_zone
 from app.data.pitching_caps import LMU_PITCHER_TEAM, _PITCH_SELECT
 from app.db import query_df
 
-# (key, label, transform, higher_is_better)
+_CONTACT_CALLS = P._SWING_CALLS - P._WHIFF_CALLS
+# Zone = Heart + Shadow, the complement of Chase%'s Chase + Waste, so every
+# located pitch is one or the other.
+_ZONE_AREAS = ("Heart", "Shadow")
+
+
+def _zones(df: pd.DataFrame) -> pd.Series:
+    return pd.Series([attack_zone(s, h) for s, h in zip(df["plate_loc_side"], df["plate_loc_height"])],
+                     index=df.index, dtype=object)
+
+
+def _swings(df: pd.DataFrame) -> pd.Series:
+    return df["pitch_call"].isin(P._SWING_CALLS)
+
+
+def _two_k(df: pd.DataFrame) -> pd.DataFrame:
+    return df[df["strikes"] >= 2]
+
+
+def contact_2k_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Of hitters' swings in 2-strike counts, the share put in play or fouled."""
+    sub = _two_k(df)
+    contact = int(sub["pitch_call"].isin(_CONTACT_CALLS).sum())
+    return P._pct(contact, int(_swings(sub).sum())), contact
+
+
+def swstr_2k_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Swinging strikes on every pitch thrown in a 2-strike count."""
+    sub = _two_k(df)
+    whiffs = int(sub["pitch_call"].isin(P._WHIFF_CALLS).sum())
+    return P._pct(whiffs, len(sub)), whiffs
+
+
+def zone_swing_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Hitters' swings on pitches in the Heart/Shadow zones."""
+    sub = df[_zones(df).isin(_ZONE_AREAS)]
+    swings = int(_swings(sub).sum())
+    return P._pct(swings, len(sub)), swings
+
+
+def chase_2k_pct(df: pd.DataFrame) -> tuple[float, int]:
+    """Hitters' swings (whiffs + fouls + in play) on Chase/Waste pitches in
+    2-strike counts -- the same Chase% definition as every other page."""
+    sub = _two_k(df)
+    sub = sub[_zones(sub).isin(CHASE_ZONES)]
+    swings = int(_swings(sub).sum())
+    return P._pct(swings, len(sub)), swings
+
+
+# (key, label, transform, higher_is_better); None = no better direction, so
+# never tinted or given a leader.
 METRICS: tuple[tuple, ...] = (
     ("strike_pct", "Strike%", P.strike_pct, True),
     ("fps_pct", "FPS%", P.fps_pct, True),
@@ -32,11 +83,16 @@ METRICS: tuple[tuple, ...] = (
     ("barrel_pct", "Barrel%", P.barrel_pct, False),
     ("bb_pct", "BB%", P.bb_pct, False),
     ("twok_kill_pct", "2K Kill%", P.twok_kill_pct, True),
+    ("contact_2k_pct", "Contact 2K%", contact_2k_pct, False),
+    ("swstr_2k_pct", "SwStr 2K%", swstr_2k_pct, True),
+    ("zone_swing_pct", "Zone Swing%", zone_swing_pct, None),
+    ("chase_2k_pct", "Chase 2K%", chase_2k_pct, True),
 )
 VELO_COLS: tuple[tuple, ...] = (("velo_avg", "Velo Avg"), ("velo_max", "Velo Max"))
 
 # The coaches' standing targets, copied from the Team Process sheet. No velo
-# target was ever set on the sheet, so velo stays blank on this row.
+# target was ever set on the sheet, so velo stays blank on this row; the
+# 2-strike and zone-swing columns (added 2026-10-28) have no target yet either.
 BASELINE: dict[str, float] = {
     "strike_pct": 55.0, "fps_pct": 60.0, "pre2k_pct": 50.0, "ea_pct": 70.0,
     "k_pct": 25.0, "barrel_pct": 10.0, "bb_pct": 10.0, "twok_kill_pct": 75.0,
@@ -108,6 +164,10 @@ def metric_line(df: pd.DataFrame) -> dict:
         "pre2k_pct": lambda d: int((d["strikes"] < 2).sum()),
         "barrel_pct": lambda d: int((d["pitch_call"] == "InPlay").sum()),
         "twok_kill_pct": lambda d: int((d["strikes"] >= 2).sum()),
+        "contact_2k_pct": lambda d: int(_swings(_two_k(d)).sum()),
+        "swstr_2k_pct": lambda d: len(_two_k(d)),
+        "zone_swing_pct": lambda d: int(_zones(d).isin(_ZONE_AREAS).sum()),
+        "chase_2k_pct": lambda d: int(_zones(_two_k(d)).isin(CHASE_ZONES).sum()),
     }
     for key, _label, fn, _hib in METRICS:
         has_denominator = len(df) > 0 and denominators.get(key, len)(df) > 0
@@ -139,7 +199,7 @@ def best_values(rows: list[dict]) -> dict[str, float]:
     """The column leader per metric (max, or min where lower is better, e.g.
     BB%/Barrel%) -- ties all count as the leader."""
     best = {}
-    direction = {k: hib for k, _l, _f, hib in METRICS}
+    direction = {k: hib for k, _l, _f, hib in METRICS if hib is not None}
     direction.update({k: True for k, _l in VELO_COLS})
     for key, hib in direction.items():
         vals = [r[key] for r in rows if r.get(key) is not None]

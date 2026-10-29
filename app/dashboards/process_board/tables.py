@@ -69,7 +69,9 @@ def cell_styles(board: dict) -> list[dict]:
                "backgroundColor": bg, "color": "#fff", "fontWeight": "700"}
               for kind, bg in _SUMMARY_BG.items()]
     for key, _label, _fn, hib in PB.METRICS:
-        target = PB.BASELINE[key]
+        target = PB.BASELINE.get(key)
+        if target is None:
+            continue
         good, bad = (">=", "<") if hib else ("<=", ">")
         base = f"{{kind}} = 'pitcher' && {{{key}}} is num && {{{key}}}"
         styles.append({"if": {"filter_query": f"{base} {good} {_q(target)}", "column_id": key},
