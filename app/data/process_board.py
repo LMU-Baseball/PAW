@@ -182,8 +182,6 @@ def _board(season_label: str, cycle: str, game_types: tuple) -> dict:
     cycle_row = dict(metric_line(cycle_df) if not cycle_df.empty else {},
                      pitcher=f"LMU {cycle_display(season_label, cycle)} Average",
                      kind="cycle")
-    team = dict(metric_line(df) if not df.empty else {},
-                pitcher="LMU Team Average", kind="team")
     pitchers = pitcher_rows(df)
-    return {"summary": [baseline, cycle_row, team], "pitchers": pitchers,
+    return {"summary": [baseline, cycle_row], "pitchers": pitchers,
             "best": best_values(pitchers)}
