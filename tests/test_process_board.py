@@ -89,9 +89,9 @@ def test_board_rows_and_reference_labels(monkeypatch):
     PB._board.cache_clear()
     board = PB.board("2026/2027", "Fall")
     labels = [r["pitcher"] for r in board["summary"]]
-    assert labels == ["LMU Baseline", "LMU Fall 2026 Average", "LMU Team Average"]
+    assert labels == ["LMU Baseline", "LMU Fall 2026 Average"]
     assert board["summary"][0]["strike_pct"] == 55.0
-    assert board["summary"][2]["pitches"] == 8
+    assert board["summary"][1]["pitches"] == 8
     assert len(board["pitchers"]) == 2
 
 
@@ -154,6 +154,6 @@ def test_cycle_row_ignores_game_type_filter(monkeypatch):
     monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Intrasquad", "Scrimmage"])
     PB._board.cache_clear()
     board = PB.board("2026/2027", "Spring", ["Scrimmage"])
-    cycle_row, team = board["summary"][1], board["summary"][2]
+    cycle_row = board["summary"][1]
     assert cycle_row["pitcher"] == "LMU Spring 2027 Average"
-    assert cycle_row["pitches"] == 8 and team["pitches"] == 7
+    assert cycle_row["pitches"] == 8
