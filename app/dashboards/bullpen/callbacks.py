@@ -8,7 +8,7 @@ from flask_login import current_user
 from app.data import bullpen as B
 from app.dashboards import date_range as dr
 from app.dashboards.bullpen import layout, selectors
-from app.dashboards.bullpen.tabs import session_detail, trends, video
+from app.dashboards.bullpen.tabs import overlay, session_detail, trends, video
 
 
 def _resolve(pitcher_id):
@@ -92,6 +92,8 @@ def register_callbacks(dash_app) -> None:
             return trends.render(pid, sel.get("start"), sel.get("end"))
         if tab == "video":
             return video.render(pid, sel.get("session_date"))
+        if tab == "overlay":
+            return overlay.render(pid, sel.get("start"), sel.get("end"))
         return session_detail.render(pid, sel.get("session_date"),
                                      start=sel.get("start"), end=sel.get("end"))
 

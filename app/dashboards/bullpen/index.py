@@ -5,7 +5,7 @@ from dash import Dash
 
 from app.dashboards.shell import index_string
 from app.dashboards.bullpen import callbacks, layout
-from app.dashboards.bullpen.tabs import video
+from app.dashboards.bullpen.tabs import overlay, video
 
 
 def build_bullpen_dash(server) -> Dash:
@@ -15,4 +15,5 @@ def build_bullpen_dash(server) -> Dash:
     dash_app.layout = layout.serve_layout
     callbacks.register_callbacks(dash_app)
     video.register_callbacks(dash_app)
+    overlay.register_callbacks(dash_app)
     return dash_app

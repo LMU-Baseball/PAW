@@ -115,6 +115,7 @@ def serve_layout() -> html.Div:
         dcc.Tab(label="Session Detail", value="session"),
         dcc.Tab(label="Development Trends", value="trends"),
         dcc.Tab(label="Video", value="video"),
+        dcc.Tab(label="Overlay", value="overlay"),
     ])
 
     return html.Div([
