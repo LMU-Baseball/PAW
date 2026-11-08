@@ -119,6 +119,7 @@ def serve_layout() -> html.Div:
                                           options=[{"label": lbl, "value": k}
                                                    for k, lbl in pgl.SHOW_ONLY], **multi),
                 "200px"),
+        _filter("Video", videotab.playback_toggle("pgl"), "170px"),
     ], style={"display": "flex", "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap",
               "padding": "12px 16px", "backgroundColor": BANNER})
 

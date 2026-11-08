@@ -181,3 +181,25 @@ def test_render_default_columns_omit_steal():
     shown = [c["id"] for c in table.columns]
     assert shown == vdata.DISPLAY_COLS
     assert "Velo" in shown and "Steal" not in shown
+
+
+def test_next_cell_steps_down_one_row_and_stops_at_the_end():
+    from app.dashboards.video.component import next_cell
+    cell = {"row": 2, "column": 3, "column_id": "Type"}
+    assert next_cell(cell, 10) == {"row": 3, "column": 3, "column_id": "Type"}
+    assert next_cell({"row": 9, "column": 0, "column_id": "Inn"}, 10) is None
+    assert next_cell(None, 10) is None
+
+
+def test_playback_toggle_defaults_to_loop():
+    from app.dashboards.video.component import playback_toggle
+    toggle = playback_toggle("gl")
+    assert toggle.id == "gl-video-playback"
+    assert toggle.value == "loop"
+    assert [o["value"] for o in toggle.options] == ["loop", "progress"]
+
+
+def test_media_panel_has_the_ended_store():
+    from app.dashboards.video.component import media_panel
+    ids = [getattr(n, "id", None) for n in media_panel("gl")]
+    assert "gl-video-ended" in ids

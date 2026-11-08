@@ -22,6 +22,28 @@ def _angles(keys: list[str] | None) -> list[tuple[str, str]]:
     return list(ANGLES) if keys is None else [(k, lbl) for k, lbl in ANGLES if k in keys]
 
 
+PLAYBACK_OPTIONS = [{"label": " Loop", "value": "loop"},
+                    {"label": " Progress", "value": "progress"}]
+
+
+def playback_toggle(prefix: str) -> dcc.RadioItems:
+    """Loop the current clip, or roll on to the next pitch in the log when it
+    ends. Pair with `register_callbacks(..., playback=True)`."""
+    return dcc.RadioItems(
+        id=f"{prefix}-video-playback", options=PLAYBACK_OPTIONS, value="loop",
+        persistence=True, persistence_type="local",
+        inline=True, inputStyle={"marginRight": "4px"},
+        labelStyle={"marginRight": "14px", "fontSize": "17px", "cursor": "pointer"},
+        style={"padding": "6px 0"})
+
+
+def next_cell(active: dict | None, n_rows: int) -> dict | None:
+    """The log row after `active`, same column; None at the end of the log."""
+    if not active or active.get("row") is None or active["row"] + 1 >= n_rows:
+        return None
+    return {**active, "row": active["row"] + 1}
+
+
 def media_panel(prefix: str, angles: list[str] | None = None) -> list:
     """Angle pills + player + the stores `register_callbacks` drives. A page
     that lays out its own `{prefix}-video-table` (with url_* + batter_side
@@ -37,11 +59,14 @@ def media_panel(prefix: str, angles: list[str] | None = None) -> list:
     return [
         dcc.Store(id=f"{prefix}-video-pitch"),
         dcc.Store(id=f"{prefix}-video-angle"),
+        dcc.Store(id=f"{prefix}-video-ended", data=0),
         html.Div(buttons, style={"marginBottom": "8px"}),
         html.Div("Click a pitch row to load video.", id=f"{prefix}-video-hint",
                  style={"color": "#555", "marginBottom": "6px"}),
         player,
         html.Div(id=f"{prefix}-video-reload", style={"display": "none"}),
+        html.Div(id=f"{prefix}-video-playback-fx", style={"display": "none"}),
+        html.Div(id=f"{prefix}-video-scroll-fx", style={"display": "none"}),
     ]
 
 
@@ -99,7 +124,7 @@ def _resolve_default(pitch: dict | None, default_angle: str,
 
 
 def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind",
-                       angles: list[str] | None = None) -> None:
+                       angles: list[str] | None = None, playback: bool = False) -> None:
 
     @dash_app.callback(
         Output(f"{prefix}-video-pitch", "data"),
@@ -171,4 +196,63 @@ def register_callbacks(dash_app, prefix: str, default_angle: str = "HomeBehind",
         """,
         Output(f"{prefix}-video-reload", "children"),
         Input(f"{prefix}-video-source", "src"),
+    )
+
+    if playback:
+        _register_playback(dash_app, prefix)
+
+
+def _register_playback(dash_app, prefix: str) -> None:
+    # The player has no Dash "ended" prop, so the browser bumps the
+    # `-video-ended` store itself; advancing `active_cell` then runs the same
+    # row-click callbacks (video + play detail) a coach's click would.
+    dash_app.clientside_callback(
+        f"""
+        function(mode) {{
+            var v = document.getElementById('{prefix}-video-player');
+            if (v) {{
+                v.loop = mode !== 'progress';
+                v.onended = function() {{
+                    if (v.loop) {{ return; }}
+                    window._pawEnded = (window._pawEnded || 0) + 1;
+                    dash_clientside.set_props('{prefix}-video-ended', {{data: window._pawEnded}});
+                }};
+            }}
+            return dash_clientside.no_update;
+        }}
+        """,
+        Output(f"{prefix}-video-playback-fx", "children"),
+        Input(f"{prefix}-video-playback", "value"),
+    )
+
+    @dash_app.callback(
+        Output(f"{prefix}-video-table", "active_cell"),
+        Output(f"{prefix}-video-table", "selected_cells"),
+        Output(f"{prefix}-video-table", "start_cell"),
+        Output(f"{prefix}-video-table", "end_cell"),
+        Input(f"{prefix}-video-ended", "data"),
+        State(f"{prefix}-video-table", "active_cell"),
+        State(f"{prefix}-video-table", "derived_viewport_data"),
+        State(f"{prefix}-video-playback", "value"),
+        prevent_initial_call=True,
+    )
+    def _advance(_ended, active, rows, mode):
+        nxt = next_cell(active, len(rows or [])) if mode == "progress" else None
+        if nxt is None:
+            return no_update, no_update, no_update, no_update
+        return nxt, [nxt], nxt, nxt
+
+    dash_app.clientside_callback(
+        f"""
+        function(active) {{
+            setTimeout(function() {{
+                var c = document.querySelector('#{prefix}-video-table td.focused, #{prefix}-video-table td.cell--selected');
+                if (c && c.scrollIntoView) {{ c.scrollIntoView({{block: 'nearest'}}); }}
+            }}, 50);
+            return dash_clientside.no_update;
+        }}
+        """,
+        Output(f"{prefix}-video-scroll-fx", "children"),
+        Input(f"{prefix}-video-table", "active_cell"),
+        prevent_initial_call=True,
     )

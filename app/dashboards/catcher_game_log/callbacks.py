@@ -71,4 +71,4 @@ def register_callbacks(dash_app) -> None:
         return layout.play_detail(cgl.game_pitches(game, with_video=False), rows[i].get("PitchUID"))
 
     videotab.register_callbacks(dash_app, "cgl", default_angle="HomeBehind",
-                                angles=videodata.CATCHER_ANGLES)
+                                angles=videodata.CATCHER_ANGLES, playback=True)
