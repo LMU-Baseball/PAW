@@ -1,6 +1,8 @@
 """Home / landing page (the app shell that links to the dashboards)."""
 import io
 import re
+import threading
+from collections import OrderedDict
 
 from flask import Blueprint, abort, render_template, request, send_file
 from flask_login import current_user, login_required
@@ -142,3 +144,73 @@ def bullpen_video_download(play_id: str):
     download_name = f"{safe_name}_{pitch.get('pitch_type') or 'pitch'}_{pitch['date']}.mp4"
     return send_file(io.BytesIO(composited), mimetype="video/mp4",
                      as_attachment=True, download_name=download_name)
+
+
+# Last few rendered overlays, so the preview <video> and the Download button
+# (two requests for the same render) and re-watching don't re-encode. Each is
+# well under 1 MB.
+_OVERLAY_CACHE: OrderedDict = OrderedDict()
+_OVERLAY_CACHE_MAX = 6
+_OVERLAY_CACHE_LOCK = threading.Lock()
+
+
+def _overlay_params(args) -> tuple[list[str], list[int], str]:
+    from app.reports.bullpen_pitch_overlay import MAX_PITCHES, MODES
+    ids = [p for p in args.get("ids", "").split(",") if p][:MAX_PITCHES]
+    raw = [n for n in args.get("nudge", "").split(",")]
+    nudges = []
+    for i in range(len(ids)):
+        try:
+            nudges.append(max(-60, min(60, int(raw[i]))))
+        except (IndexError, ValueError):
+            nudges.append(0)
+    mode = args.get("mode", "overlay")
+    if not ids or mode not in MODES:
+        abort(400)
+    return ids, nudges, mode
+
+
+@main_bp.route("/bullpen-overlay.mp4")
+@login_required
+def bullpen_overlay():
+    """Pitch Overlay tab's video: up to 3 bullpen pitches' Edgertronic clips
+    lined up at release next to their Trackman flight paths
+    (app.reports.bullpen_pitch_overlay). `?ids=` PlayIDs in color order,
+    `?nudge=` per-clip release correction in 240 fps frames, `?mode=`
+    overlay|side, `?dl=1` to download instead of play. Rendered on demand
+    (tens of seconds) under the same one-encode-at-a-time lock as the
+    single-pitch download."""
+    from app.data import bullpen_video as BV
+    from app.reports import bullpen_pitch_overlay as PO
+
+    ids, nudges, mode = _overlay_params(request.args)
+    rows = BV.overlay_pitches(ids)
+    if len(rows) != len(ids):
+        abort(404)
+    key = (tuple(ids), tuple(nudges), mode)
+    with _OVERLAY_CACHE_LOCK:
+        video = _OVERLAY_CACHE.get(key)
+    if video is None:
+        clips = []
+        for row, nudge in zip(rows, nudges):
+            clip = BV.get_clip(row["play_id"])
+            if clip is None or clip.get("data") is None:
+                abort(404)
+            clips.append(PO.OverlayClip(row, clip["data"], nudge))
+        try:
+            video = PO.render(clips, mode)
+        except PO.OverlayError:
+            abort(500)
+        with _OVERLAY_CACHE_LOCK:
+            _OVERLAY_CACHE[key] = video
+            while len(_OVERLAY_CACHE) > _OVERLAY_CACHE_MAX:
+                _OVERLAY_CACHE.popitem(last=False)
+    names = {r.get("pitcher") or "" for r in rows}
+    who = names.pop() if len(names) == 1 else "Pitch"
+    safe = re.sub(r"_+", "_", re.sub(r"[^A-Za-z0-9]", "_", who)).strip("_") or "Pitch"
+    download = request.args.get("dl") == "1"
+    resp = send_file(io.BytesIO(video), mimetype="video/mp4", as_attachment=download,
+                     download_name=f"{safe}_overlay.mp4")
+    resp.cache_control.private = True
+    resp.cache_control.max_age = 3600
+    return resp

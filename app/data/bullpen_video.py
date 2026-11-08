@@ -274,3 +274,52 @@ def pitch_row_by_play_id(play_id: str) -> dict | None:
     row["pitcher_id"] = int(row["pitcher_id"])
     row["play_id"] = play_id
     return row
+
+
+_OVERLAY_COLS = """
+    b.PlayID AS play_id, b.Pitcher AS pitcher, DATE(b.`Date`) AS date,
+    b.PitchNo AS pitch_no, b.TaggedPitchType AS pitch_type, b.RelSpeed AS velo,
+    b.InducedVertBreak AS ind_vert_break, b.HorzBreak AS horz_break,
+    b.SpinRate AS spin, b.Extension AS extension,
+    b.x0, b.y0, b.z0, b.vx0, b.vy0, b.vz0, b.ax0, b.ay0, b.az0"""
+
+
+def overlay_pitch_options(pitcher_id, start, end) -> pd.DataFrame:
+    """Every pitch in [start, end] for the Overlay tab's picker, across all of
+    this pitcher's BULLPEN ids (see `bullpen.pitcher_ids_for`), limited to
+    pitches with an Edgertronic clip. `session_pitch` is the pitch's position
+    within its session counting every pitch thrown, so it matches what the
+    pitcher remembers ("pitch 12 of Monday's pen") even when some pitches
+    have no clip."""
+    clause, params = B._in_clause("b.PitcherId", B.pitcher_ids_for(int(pitcher_id)), "pid")
+    params["start"], params["end"] = str(start), str(end)
+    df = query_df(
+        f"""
+        SELECT {_OVERLAY_COLS}, v.play_id IS NOT NULL AS has_clip
+          FROM BULLPEN b
+          LEFT JOIN {TABLE} v ON v.play_id = b.PlayID
+         WHERE {clause} AND b.`Date` BETWEEN :start AND :end
+         ORDER BY b.`Date` DESC, b.PitchNo
+        """,
+        params,
+    )
+    if df.empty:
+        return df
+    df["date"] = df["date"].astype(str)
+    df["session_pitch"] = df.groupby("date").cumcount() + 1
+    df = df[df["has_clip"].astype(bool)].drop(columns="has_clip")
+    return df.reset_index(drop=True)
+
+
+def overlay_pitches(play_ids: list[str]) -> list[dict]:
+    """Trackman rows for the chosen pitches, in the order given. Ids not in
+    BULLPEN are dropped."""
+    if not play_ids:
+        return []
+    placeholders, params = _in_clause(play_ids)
+    df = query_df(f"SELECT {_OVERLAY_COLS} FROM BULLPEN b WHERE b.PlayID IN ({placeholders})",
+                  params)
+    rows = {r["play_id"]: r for r in df.to_dict("records")}
+    for r in rows.values():
+        r["date"] = str(r["date"])
+    return [rows[p] for p in play_ids if p in rows]
