@@ -124,6 +124,7 @@ def serve_layout() -> html.Div:
                                           options=[{"label": lbl, "value": k}
                                                    for k, lbl in cgl.SHOW_ONLY], **multi),
                 "200px"),
+        _filter("Video", videotab.playback_toggle("cgl"), "170px"),
     ], style={"display": "flex", "gap": "12px", "alignItems": "flex-end", "flexWrap": "wrap",
               "padding": "12px 16px", "backgroundColor": BANNER})
 
