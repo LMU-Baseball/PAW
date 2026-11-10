@@ -198,6 +198,12 @@ default only, not a view restriction), `flask set-role` (fix a mis-assigned
 role), `flask set-active --inactive` (cut off a graduated player without
 deleting their account).
 
+Coaches can do most of this from the **Accounts** page (`/accounts`, linked in
+the header for coach accounts) without server access: turn an account off or
+back on, switch player/coach, sign an account out of every device, and (once
+email is set up, 5b) email someone a password-reset link. Turning an account
+off ends its existing logins on the very next click.
+
 ### 5b. Account email (verify address + forgot password) via AWS SES
 
 With `PAW_MAIL_BACKEND` unset, email is off and PAW behaves as before:

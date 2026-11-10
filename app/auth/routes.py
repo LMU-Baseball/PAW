@@ -10,6 +10,7 @@ from wtforms import PasswordField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 
 from app.auth import tokens
+from app.auth.access import role_required
 from app.auth.mail import mail_enabled, send_mail
 from app.auth.models import User, is_coach_email
 from app.extensions import db, limiter
@@ -153,6 +154,8 @@ def login():
                 flash("Confirm your email first -- check your inbox for the link, "
                       "or send a new one below.", "error")
                 return redirect(url_for("auth.resend_verification", email=user.email))
+            user.record_login()
+            db.session.commit()
             login_user(user)
             return redirect(_safe_next(request.args.get("next")) or url_for("main.index"))
         flash("Invalid email or password.", "error")
@@ -210,9 +213,14 @@ def change_password():
         if not current_user.check_password(form.current_password.data):
             flash("Current password is incorrect.", "error")
         else:
-            current_user.set_password(form.new_password.data)
+            user = current_user._get_current_object()
+            user.set_password(form.new_password.data)
+            # Logs out every other device (e.g. someone who learned the old
+            # password); re-login keeps this browser signed in under the new epoch.
+            user.sign_out_everywhere()
             db.session.commit()
-            flash("Password changed.", "info")
+            login_user(user)
+            flash("Password changed. Any other devices were signed out.", "info")
             return redirect(url_for("main.index"))
     return render_template("auth/change_password.html", form=form)
 
@@ -232,6 +240,7 @@ def verify_email(token):
         flash("That confirmation link is invalid or has expired. Send a new one below.", "error")
         return redirect(url_for("auth.resend_verification"))
     user.mark_email_verified()
+    user.record_login()
     db.session.commit()
     if not user.is_active:
         flash("Email confirmed, but this account is turned off. Ask a coach.", "error")
@@ -296,8 +305,68 @@ def reset_password(token):
         user.set_password(form.new_password.data)
         # Receiving the link proves they own the address.
         user.mark_email_verified()
+        user.sign_out_everywhere()
         db.session.commit()
         logout_user()
         flash("Password updated -- sign in with your new password.", "info")
         return redirect(url_for("auth.login"))
     return render_template("auth/reset_password.html", form=form, token=token)
+
+
+class AccountActionForm(FlaskForm):
+    """Empty form -- exists only to carry the CSRF token on the per-row
+    action buttons of the accounts page."""
+
+
+_ACCOUNT_ACTIONS = ("deactivate", "activate", "make-coach", "make-player",
+                    "sign-out", "send-reset")
+_SELF_BLOCKED = {"deactivate", "make-player", "sign-out"}
+
+
+@auth_bp.route("/accounts")
+@login_required
+@role_required("coach")
+def accounts():
+    users = User.query.order_by(User.is_active.desc(), User.role, User.name).all()
+    return render_template("auth/accounts.html", users=users, form=AccountActionForm(),
+                           mail_on=mail_enabled())
+
+
+@auth_bp.route("/accounts/<int:user_id>/<action>", methods=["POST"])
+@login_required
+@role_required("coach")
+def account_action(user_id, action):
+    form = AccountActionForm()
+    user = db.session.get(User, user_id)
+    if action not in _ACCOUNT_ACTIONS or user is None or not form.validate_on_submit():
+        flash("That action couldn't be completed.", "error")
+        return redirect(url_for("auth.accounts"))
+    if user.id == current_user.id and action in _SELF_BLOCKED:
+        # A coach turning off or demoting their own account would lock them
+        # out of this page with no way back in except the server CLI.
+        flash("You can't do that to your own account.", "error")
+        return redirect(url_for("auth.accounts"))
+
+    if action == "deactivate":
+        user.is_active = False
+        msg = f"Turned off {user.email}. They're signed out everywhere."
+    elif action == "activate":
+        user.is_active = True
+        msg = f"Turned {user.email} back on."
+    elif action == "make-coach":
+        user.role = "coach"
+        msg = f"{user.email} is now a coach."
+    elif action == "make-player":
+        user.role = "player"
+        msg = f"{user.email} is now a player."
+    elif action == "sign-out":
+        user.sign_out_everywhere()
+        msg = f"Signed {user.email} out of every device."
+    else:
+        if not (mail_enabled() and user.is_active and _send_reset_email(user)):
+            flash(f"Couldn't send a reset email to {user.email}.", "error")
+            return redirect(url_for("auth.accounts"))
+        msg = f"Sent a password reset link to {user.email}."
+    db.session.commit()
+    flash(msg, "info")
+    return redirect(url_for("auth.accounts"))

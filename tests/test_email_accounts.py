@@ -9,7 +9,7 @@ from sqlalchemy import inspect, text
 
 from app import create_app
 from app.auth import mail
-from app.auth.models import User, ensure_user_columns
+from app.auth.models import _USER_COLUMNS, User, ensure_user_columns
 from app.extensions import db
 from config import Config
 
@@ -183,13 +183,17 @@ def test_send_mail_failure_returns_false(monkeypatch):
 
 def test_ensure_user_columns_grandfathers_existing_accounts_and_is_idempotent(app):
     with app.app_context():
+        added = [col for col, _, _ in _USER_COLUMNS]
         with db.engine.begin() as conn:
-            conn.execute(text("ALTER TABLE users DROP COLUMN email_verified_at"))
-        assert "email_verified_at" not in {
-            c["name"] for c in inspect(db.engine).get_columns("users")}
+            for col in added:
+                conn.execute(text(f"ALTER TABLE users DROP COLUMN {col}"))
+        assert not set(added) & {c["name"] for c in inspect(db.engine).get_columns("users")}
 
         ensure_user_columns()
         ensure_user_columns()
 
+        assert set(added) <= {c["name"] for c in inspect(db.engine).get_columns("users")}
         db.session.expire_all()
-        assert User.query.filter_by(email="verified@lmu.edu").one().email_verified
+        u = User.query.filter_by(email="verified@lmu.edu").one()
+        assert u.email_verified
+        assert u.session_epoch == 0

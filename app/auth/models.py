@@ -52,6 +52,19 @@ class User(UserMixin, db.Model):
     # NULL = address not yet confirmed. Only enforced at login while account
     # email is turned on (see app.auth.mail.mail_enabled).
     email_verified_at = db.Column(db.DateTime, nullable=True)
+    # Part of every session's stored id (see get_id); bumping it invalidates
+    # every existing login for this account on its next request.
+    session_epoch = db.Column(db.Integer, nullable=False, default=0)
+    last_login_at = db.Column(db.DateTime, nullable=True)
+
+    def get_id(self) -> str:
+        return f"{self.id}:{self.session_epoch or 0}"
+
+    def sign_out_everywhere(self) -> None:
+        self.session_epoch = (self.session_epoch or 0) + 1
+
+    def record_login(self) -> None:
+        self.last_login_at = _utcnow()
 
     @property
     def email_verified(self) -> bool:
@@ -89,6 +102,20 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+# (column, DDL type, backfill run once right after the column is added).
+_USER_COLUMNS = (
+    # Grandfather every account that existed before verification did --
+    # otherwise the whole roster is locked out the day email turns on.
+    ("email_verified_at", "DATETIME NULL", "UPDATE users SET email_verified_at = :now"),
+    ("session_epoch", "INTEGER NOT NULL DEFAULT 0", None),
+    ("last_login_at", "DATETIME NULL", None),
+)
+
+
+def _user_column_names() -> set[str]:
+    return {c["name"] for c in inspect(db.engine).get_columns("users")}
+
+
 def ensure_user_columns() -> None:
     """Additive, idempotent migration for columns added to `users` after it
     already existed on Lightsail (db.create_all never alters an existing table).
@@ -97,18 +124,19 @@ def ensure_user_columns() -> None:
     can race here; the loser's ALTER fails on a duplicate column, which is fine
     as long as the column now exists.
     """
-    if "email_verified_at" in {c["name"] for c in inspect(db.engine).get_columns("users")}:
-        return
-    try:
-        with db.engine.begin() as conn:
-            conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at DATETIME NULL"))
-            # Grandfather every account that existed before verification did --
-            # otherwise the whole roster is locked out the day email turns on.
-            conn.execute(text("UPDATE users SET email_verified_at = :now"), {"now": _utcnow()})
-    except Exception:
-        if "email_verified_at" not in {c["name"] for c in inspect(db.engine).get_columns("users")}:
-            raise
-        log.info("users.email_verified_at added concurrently by another worker")
+    existing = _user_column_names()
+    for col, ddl, backfill in _USER_COLUMNS:
+        if col in existing:
+            continue
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
+                if backfill:
+                    conn.execute(text(backfill), {"now": _utcnow()})
+        except Exception:
+            if col not in _user_column_names():
+                raise
+            log.info("users.%s added concurrently by another worker", col)
 
 
 def seed_users_from_env() -> int:
@@ -143,4 +171,14 @@ def seed_users_from_env() -> int:
 
 @login_manager.user_loader
 def load_user(user_id: str):
-    return db.session.get(User, int(user_id))
+    # Sessions issued before session_epoch existed store a bare "<id>"; treat
+    # those as epoch 0 so the deploy doesn't log everyone out.
+    raw_id, _, raw_epoch = user_id.partition(":")
+    try:
+        user = db.session.get(User, int(raw_id))
+        epoch = int(raw_epoch or 0)
+    except ValueError:
+        return None
+    if user is None or not user.is_active or epoch != (user.session_epoch or 0):
+        return None
+    return user

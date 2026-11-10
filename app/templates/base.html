@@ -122,7 +122,8 @@
     </div>
     {% if current_user.is_authenticated %}
       <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
-        {% if current_user.is_coach %}<a href="{{ url_for('auth.change_password') }}">Change password</a> ·{% endif %}
+        {% if current_user.is_coach %}<a href="{{ url_for('auth.accounts') }}">Accounts</a> ·{% endif %}
+        <a href="{{ url_for('auth.change_password') }}">Change password</a> ·
         <form method="post" action="{{ url_for('auth.logout') }}" class="logout-form">
           <button type="submit" class="logout-btn">Log out</button>
         </form></span>
