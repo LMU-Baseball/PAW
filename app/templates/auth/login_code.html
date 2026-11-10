@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Enter your code — The PAW{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 380px; margin: 40px auto;">
+  <h2 style="margin-top: 0;">Check your email</h2>
+  <p style="font-size: 14px; color: #555;">
+    We sent a 6-digit code to <strong>{{ email }}</strong>. PAW asks for this about once a
+    month to make sure only current team members can get in.
+  </p>
+  <form method="post" action="{{ url_for('auth.login_code') }}">
+    {{ form.hidden_tag() }}
+    <label for="code">Code</label>
+    {{ form.code(id="code", type="text", autofocus=true, inputmode="numeric",
+                 autocomplete="one-time-code", maxlength="7") }}
+    <div style="margin-top: 20px;">{{ form.submit(class="btn") }}</div>
+  </form>
+  <p style="margin-top: 16px; font-size: 14px;">Didn't get it? Check spam, or
+    <a href="{{ url_for('auth.login') }}">sign in again</a> to send a new code.</p>
+</div>
+{% endblock %}

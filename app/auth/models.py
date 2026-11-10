@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask_login import UserMixin
 from sqlalchemy import inspect, text
@@ -56,6 +56,9 @@ class User(UserMixin, db.Model):
     # every existing login for this account on its next request.
     session_epoch = db.Column(db.Integer, nullable=False, default=0)
     last_login_at = db.Column(db.DateTime, nullable=True)
+    # Last time this person proved they still read this inbox (verify link,
+    # reset link, or emailed sign-in code). Drives reverify_due().
+    email_checked_at = db.Column(db.DateTime, nullable=True)
 
     def get_id(self) -> str:
         return f"{self.id}:{self.session_epoch or 0}"
@@ -73,6 +76,22 @@ class User(UserMixin, db.Model):
     def mark_email_verified(self) -> None:
         if self.email_verified_at is None:
             self.email_verified_at = _utcnow()
+        self.mark_email_checked()
+
+    def mark_email_checked(self) -> None:
+        self.email_checked_at = _utcnow()
+
+    @property
+    def reverify_due(self) -> bool:
+        """True when this account must prove inbox access again before using
+        the PAW -- the check that locks out someone whose LMU email has been
+        shut off after they leave. Off while account email is off."""
+        from app.auth.mail import mail_enabled
+        days = reverify_days()
+        if not days or not mail_enabled() or self.email in _reverify_exempt():
+            return False
+        return (self.email_checked_at is None
+                or _utcnow() - self.email_checked_at > timedelta(days=days))
 
     # --- password ---
     def set_password(self, password: str) -> None:
@@ -102,6 +121,20 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def reverify_days() -> int:
+    try:
+        return max(0, int(os.getenv("PAW_REVERIFY_DAYS", "30")))
+    except ValueError:
+        return 30
+
+
+def _reverify_exempt() -> set[str]:
+    # For shared accounts with no real inbox behind them (coaches@lmu.edu-style
+    # fallbacks), which could otherwise never pass the emailed code.
+    return {e.strip().lower() for e in os.getenv("PAW_REVERIFY_EXEMPT_EMAILS", "").split(",")
+            if e.strip()}
+
+
 # (column, DDL type, backfill run once right after the column is added).
 _USER_COLUMNS = (
     # Grandfather every account that existed before verification did --
@@ -109,6 +142,8 @@ _USER_COLUMNS = (
     ("email_verified_at", "DATETIME NULL", "UPDATE users SET email_verified_at = :now"),
     ("session_epoch", "INTEGER NOT NULL DEFAULT 0", None),
     ("last_login_at", "DATETIME NULL", None),
+    # Start every existing account's 30-day clock at deploy, not "overdue".
+    ("email_checked_at", "DATETIME NULL", "UPDATE users SET email_checked_at = :now"),
 )
 
 
@@ -180,5 +215,9 @@ def load_user(user_id: str):
     except ValueError:
         return None
     if user is None or not user.is_active or epoch != (user.session_epoch or 0):
+        return None
+    # Ends a long-running session once the periodic check comes due, so the
+    # next sign-in goes through the emailed code.
+    if user.reverify_due:
         return None
     return user
