@@ -9,9 +9,12 @@ convenience default now, no longer a view restriction).
 """
 from __future__ import annotations
 
+import logging
 import os
+from datetime import datetime, timezone
 
 from flask_login import UserMixin
+from sqlalchemy import inspect, text
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
@@ -46,6 +49,17 @@ class User(UserMixin, db.Model):
     trackman_id = db.Column(db.Integer, nullable=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    # NULL = address not yet confirmed. Only enforced at login while account
+    # email is turned on (see app.auth.mail.mail_enabled).
+    email_verified_at = db.Column(db.DateTime, nullable=True)
+
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
+
+    def mark_email_verified(self) -> None:
+        if self.email_verified_at is None:
+            self.email_verified_at = _utcnow()
 
     # --- password ---
     def set_password(self, password: str) -> None:
@@ -66,6 +80,35 @@ class User(UserMixin, db.Model):
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"
+
+
+log = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def ensure_user_columns() -> None:
+    """Additive, idempotent migration for columns added to `users` after it
+    already existed on Lightsail (db.create_all never alters an existing table).
+
+    Every gunicorn worker runs create_app at boot (no --preload), so two workers
+    can race here; the loser's ALTER fails on a duplicate column, which is fine
+    as long as the column now exists.
+    """
+    if "email_verified_at" in {c["name"] for c in inspect(db.engine).get_columns("users")}:
+        return
+    try:
+        with db.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN email_verified_at DATETIME NULL"))
+            # Grandfather every account that existed before verification did --
+            # otherwise the whole roster is locked out the day email turns on.
+            conn.execute(text("UPDATE users SET email_verified_at = :now"), {"now": _utcnow()})
+    except Exception:
+        if "email_verified_at" not in {c["name"] for c in inspect(db.engine).get_columns("users")}:
+            raise
+        log.info("users.email_verified_at added concurrently by another worker")
 
 
 def seed_users_from_env() -> int:
@@ -90,6 +133,7 @@ def seed_users_from_env() -> int:
         user = User(email=email, name=(os.getenv(name_var) or email).strip(),
                     role=role)
         user.set_password(password)
+        user.mark_email_verified()
         db.session.add(user)
         created += 1
     if created:
