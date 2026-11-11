@@ -1,9 +1,14 @@
 """Login / logout / registration / password change, plus the email-driven
-verify-address and forgot-password flows."""
+verify-address, forgot-password and periodic sign-in-code flows."""
+import hashlib
+import hmac
 import os
+import secrets
+import time
 from urllib.parse import urlparse
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (Blueprint, current_app, flash, redirect, render_template, request,
+                   session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf import FlaskForm
 from wtforms import PasswordField, StringField, SubmitField
@@ -120,6 +125,41 @@ def _send_reset_email(user: User) -> bool:
                      f"your password hasn't changed.{_SIGNATURE}")
 
 
+class CodeForm(FlaskForm):
+    code = StringField("Code", validators=[DataRequired()])
+    submit = SubmitField("Sign in")
+
+
+_CODE_TTL_SECONDS = 15 * 60
+_CODE_MAX_TRIES = 5
+_PENDING_KEY = "pending_code_login"
+
+
+def _code_digest(uid: int, code: str) -> str:
+    # The Flask session cookie is signed but NOT encrypted -- the browser can
+    # read it -- so the code itself must never be stored there, only a keyed
+    # hash the browser can't reverse without SECRET_KEY.
+    key = current_app.config["SECRET_KEY"].encode()
+    return hmac.new(key, f"{uid}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
+def _start_code_check(user: User, next_url: str | None):
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    sent = send_mail(user.email, f"Your PAW sign-in code: {code}",
+                     f"Hi {user.name},\n\nYour PAW sign-in code is:\n\n    {code}\n\n"
+                     f"It expires in 15 minutes. PAW asks for this about once a month to "
+                     f"confirm you're still on the team. If you didn't just try to sign in, "
+                     f"change your password.{_SIGNATURE}")
+    if not sent:
+        flash("We couldn't send your sign-in code. Try again in a few minutes.", "error")
+        return redirect(url_for("auth.login"))
+    session[_PENDING_KEY] = {"uid": user.id, "epoch": user.session_epoch or 0,
+                             "digest": _code_digest(user.id, code),
+                             "exp": time.time() + _CODE_TTL_SECONDS, "tries": 0,
+                             "next": next_url}
+    return redirect(url_for("auth.login_code"))
+
+
 def _lookup(email: str | None) -> User | None:
     return User.query.filter_by(email=(email or "").strip().lower()).first()
 
@@ -154,6 +194,8 @@ def login():
                 flash("Confirm your email first -- check your inbox for the link, "
                       "or send a new one below.", "error")
                 return redirect(url_for("auth.resend_verification", email=user.email))
+            if user.reverify_due:
+                return _start_code_check(user, _safe_next(request.args.get("next")))
             user.record_login()
             db.session.commit()
             login_user(user)
@@ -370,3 +412,38 @@ def account_action(user_id, action):
     db.session.commit()
     flash(msg, "info")
     return redirect(url_for("auth.accounts"))
+
+
+# The tries counter lives in the client's cookie, so a replayed cookie could
+# reset it -- this per-IP limit is the real brute-force bound (10 guesses an
+# hour against a 1-in-a-million code that expires in 15 minutes).
+@auth_bp.route("/login/code", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def login_code():
+    pending = session.get(_PENDING_KEY)
+    if not pending or time.time() > pending.get("exp", 0):
+        session.pop(_PENDING_KEY, None)
+        flash("That sign-in code expired. Sign in again to get a new one.", "error")
+        return redirect(url_for("auth.login"))
+    user = db.session.get(User, pending["uid"])
+    if user is None or not user.is_active or (user.session_epoch or 0) != pending["epoch"]:
+        session.pop(_PENDING_KEY, None)
+        return redirect(url_for("auth.login"))
+    form = CodeForm()
+    if form.validate_on_submit():
+        entered = "".join(ch for ch in form.code.data if ch.isdigit())
+        if hmac.compare_digest(_code_digest(user.id, entered), pending["digest"]):
+            session.pop(_PENDING_KEY, None)
+            user.mark_email_checked()
+            user.record_login()
+            db.session.commit()
+            login_user(user)
+            return redirect(pending.get("next") or url_for("main.index"))
+        pending["tries"] += 1
+        if pending["tries"] >= _CODE_MAX_TRIES:
+            session.pop(_PENDING_KEY, None)
+            flash("Too many wrong codes. Sign in again to get a new one.", "error")
+            return redirect(url_for("auth.login"))
+        session[_PENDING_KEY] = pending
+        flash("That code didn't match. Check the most recent email.", "error")
+    return render_template("auth/login_code.html", form=form, email=user.email)

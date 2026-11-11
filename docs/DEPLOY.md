@@ -240,6 +240,21 @@ PAW_MAIL_REPLY_TO=<a coach/program address, optional>
 For local dev, `PAW_MAIL_BACKEND=console` skips sending and logs each email
 (with its link) to the terminal so the flows can be clicked through.
 
+**Monthly sign-in code.** Once email is on, every account has to prove it can
+still read its inbox every `PAW_REVERIFY_DAYS` days (default 30, `0` turns it
+off). When that's due, the next sign-in emails a 6-digit code, and a session
+that's already open ends so the person signs in again. Clicking a verify or
+reset link also counts as a check. This is what locks out a player who has
+left: once LMU shuts off their email, they can't get the code. To cut someone
+off right away, turn their account off on the Accounts page. Existing accounts
+start their 30 days on the day this ships.
+
+The shared fallback accounts (`coaches@lmu.edu`/`team@lmu.edu`) have no inbox
+anyone reads, so they'd fail the code check after 30 days. To keep them, list
+them in `PAW_REVERIFY_EXEMPT_EMAILS` (comma-separated). They then skip the
+check, so **change their passwords every season.** Anyone who has ever known
+the shared password can otherwise still get in after they leave.
+
 ---
 
 ## 6. Run gunicorn under systemd
