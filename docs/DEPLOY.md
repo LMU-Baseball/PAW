@@ -198,6 +198,42 @@ default only, not a view restriction), `flask set-role` (fix a mis-assigned
 role), `flask set-active --inactive` (cut off a graduated player without
 deleting their account).
 
+### 5b. Account email (verify address + forgot password) via AWS SES
+
+With `PAW_MAIL_BACKEND` unset, email is off and PAW behaves as before:
+registration signs people straight in, and `/forgot-password` tells them to
+ask a coach. Turning it on makes new accounts confirm their address before
+they can sign in and lets anyone reset their own password from a link.
+Accounts that existed before this shipped are grandfathered as confirmed.
+
+One-time setup (AWS console, same account as RDS, region `us-east-2`):
+
+1. **SES → Identities → Create identity → Domain → `lmubaseball.com`**, with
+   Easy DKIM on. Add the 3 CNAME records SES shows you at the DNS host for
+   `lmubaseball.com` (same place the `paw` A record lives). Wait for
+   "Verified". No mailbox is needed; mail goes out as
+   `noreply@lmubaseball.com`.
+2. **SES → Account dashboard → Request production access.** New SES accounts
+   are sandboxed and can only email addresses you have verified one by one.
+   Describe it as "transactional account email (verification, password
+   reset) for ~60 team members, no marketing." Approval usually takes about a day.
+3. **SES → SMTP settings → Create SMTP credentials.** This makes an IAM user
+   that can only send email. Copy the username/password it shows once.
+4. Add to `/opt/paw/.env`, then `sudo systemctl restart paw`:
+
+```bash
+PAW_MAIL_BACKEND=smtp
+PAW_SMTP_HOST=email-smtp.us-east-2.amazonaws.com
+PAW_SMTP_PORT=587
+PAW_SMTP_USER=<SMTP username from step 3>
+PAW_SMTP_PASSWORD=<SMTP password from step 3>
+PAW_MAIL_FROM=LMU Baseball PAW <noreply@lmubaseball.com>
+PAW_MAIL_REPLY_TO=<a coach/program address, optional>
+```
+
+For local dev, `PAW_MAIL_BACKEND=console` skips sending and logs each email
+(with its link) to the terminal so the flows can be clicked through.
+
 ---
 
 ## 6. Run gunicorn under systemd
