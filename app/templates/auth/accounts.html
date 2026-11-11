@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Accounts — The PAW{% endblock %}
+{% macro action(uid, name, label, cls='') -%}
+  <form method="post" action="{{ url_for('auth.account_action', user_id=uid, action=name) }}">
+    {{ form.hidden_tag() }}<button type="submit" class="{{ cls }}">{{ label }}</button>
+  </form>
+{%- endmacro %}
+{% block content %}
+<style>
+  .acct-wrap { overflow-x: auto; }
+  .acct { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .acct th { text-align: left; font-family: var(--font-display); font-weight: 600;
+    letter-spacing: .5px; text-transform: uppercase; font-size: 15px;
+    border-bottom: 2px solid var(--crimson); padding: 6px 8px; white-space: nowrap; }
+  .acct td { padding: 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+  .acct tr.off td { color: #999; }
+  .acct .tag { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px;
+    background: #eee; color: #555; margin-right: 4px; white-space: nowrap; }
+  .acct .tag.coach { background: var(--crimson); color: #fff; }
+  .acct .tag.off { background: #fdecea; color: #a3271f; }
+  .acct .tag.unconfirmed { background: #fff4e0; color: #8a5a00; }
+  .acct .actions { white-space: nowrap; }
+  .acct .actions form { display: inline; }
+  .acct .actions button { font-size: 12px; padding: 4px 8px; margin: 2px 0;
+    border: 1px solid #ccc; border-radius: var(--radius); background: #fff; cursor: pointer; }
+  .acct .actions button:hover { border-color: var(--crimson); color: var(--crimson); }
+  .acct .actions button.danger { color: #a3271f; }
+</style>
+<div class="card">
+  <h2 style="margin-top: 0;">Accounts</h2>
+  <p style="font-size: 14px; color: #555; margin-top: 0;">
+    Turn off anyone who's left the team -- they're signed out on their next click.
+    "Sign out" ends every login for that account without turning it off.
+  </p>
+  <div class="acct-wrap">
+  <table class="acct">
+    <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr class="{{ '' if u.is_active else 'off' }}">
+        <td>{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td>
+          <span class="tag {{ 'coach' if u.is_coach else '' }}">{{ u.role }}</span>
+          {% if not u.is_active %}<span class="tag off">off</span>{% endif %}
+          {% if not u.email_verified %}<span class="tag unconfirmed">unconfirmed</span>{% endif %}
+        </td>
+        <td>{{ (u.last_login_at.strftime('%b ') ~ u.last_login_at.day ~ u.last_login_at.strftime(', %Y')) if u.last_login_at else '—' }}</td>
+        <td class="actions">
+          {% if u.id != current_user.id %}
+            {% if u.is_active %}{{ action(u.id, 'deactivate', 'Turn off', 'danger') }}
+            {% else %}{{ action(u.id, 'activate', 'Turn on') }}{% endif %}
+            {% if u.is_coach %}{{ action(u.id, 'make-player', 'Make player') }}
+            {% else %}{{ action(u.id, 'make-coach', 'Make coach') }}{% endif %}
+            {{ action(u.id, 'sign-out', 'Sign out') }}
+          {% endif %}
+          {% if mail_on and u.is_active %}{{ action(u.id, 'send-reset', 'Email reset link') }}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
