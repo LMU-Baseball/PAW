@@ -48,7 +48,10 @@ def send_mail(to: str, subject: str, body: str) -> bool:
 
     if backend == "console":
         outbox.append(msg)
-        log.warning("PAW_MAIL_BACKEND=console -- email not sent:\n%s", msg)
+        # Log the decoded body, not str(msg): long links get quoted-printable
+        # line-wrapped in the raw message and can't be clicked from the log.
+        log.warning("PAW_MAIL_BACKEND=console -- email not sent:\nTo: %s\nSubject: %s\n\n%s",
+                    to, subject, body)
         return True
     if backend != "smtp":
         return False
