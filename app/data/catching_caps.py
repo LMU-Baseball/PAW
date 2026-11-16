@@ -78,8 +78,9 @@ def game_pitches_for(game_id, catcher_id) -> pd.DataFrame:
 def range_pitches_for(catcher_id, start, end) -> pd.DataFrame:
     """All of a catcher's pitches across in-range games (sibling-id union).
 
-    Guarded by `_NUMERIC_GAME_ID_CLAUSE` so a custom pre-2025 range can't pull
-    in pre-CAPS-migration composite-GameID scrimmage rows, mirroring
+    GameID is an opaque string (no numeric-only guard): every cron-loaded game
+    since fall 2026 has a composite GameID, so the old guard left the sidebar
+    tiles and tabs empty. Scoped by `Date BETWEEN` only, mirroring
     pitching_caps.range_pitches_for.
     """
     ph, idp = _in_clause(_sibling_catcher_ids(catcher_id))
@@ -87,7 +88,7 @@ def range_pitches_for(catcher_id, start, end) -> pd.DataFrame:
     idp["end"] = str(end)
     return query_df(
         f"SELECT {_CATCHER_SELECT} FROM GAMES WHERE CatcherId IN ({ph}) "
-        f"AND Date BETWEEN :start AND :end AND {_NUMERIC_GAME_ID_CLAUSE} "
+        f"AND Date BETWEEN :start AND :end "
         f"ORDER BY GameID, PitchNo",
         idp,
     )

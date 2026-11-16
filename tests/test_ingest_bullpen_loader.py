@@ -178,3 +178,20 @@ def test_load_bullpen_limit_caps_files_processed(monkeypatch):
     assert result.files == 0
     assert result.inserted == 0
     assert result.skipped == 0
+
+
+def test_load_bullpen_skips_excluded_play_ids(monkeypatch, fixture_df):
+    blocked = set(fixture_df["PlayID"].astype(str).head(5))
+    monkeypatch.setattr(bullpen, "existing_keys", lambda engine, table, col: set())
+    monkeypatch.setattr(bullpen, "excluded_play_ids", lambda: blocked)
+
+    result = load_bullpen(engine=object(), sftp=object(), dry_run=True)
+
+    assert result.inserted == 13
+    assert result.skipped == 5
+
+
+def test_committed_bullpen_exclude_list_parses():
+    ids = bullpen.excluded_play_ids()
+    assert len(ids) == 179
+    assert all(ids)
