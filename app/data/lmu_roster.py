@@ -73,8 +73,9 @@ _RECONCILE_TABLES = (
 # so their strength numbers and Gas Station rows disappeared from the page.
 def _splash_tables() -> tuple[str, ...]:
     from app.data import splash_report as SR
-    return (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
-            SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE)
+    return (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.HISTORY_TABLE,
+            SR.GAS_TABLE, SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE,
+            SR.MOVEMENT_TABLE)
 
 
 def ensure_table(engine=None) -> None:

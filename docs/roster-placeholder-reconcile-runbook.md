@@ -26,7 +26,8 @@ were still in the database, saved under the wrong player id.
 1. `reconcile_ids` now also moves every Built on the Bluff table
    (`splash_plans`, `splash_engine_readings`, `splash_gas_station`,
    `splash_scripts`, `splash_script_rows`, `splash_pen_results`,
-   `splash_movement`, legacy `splash_engine_metrics`).
+   `splash_movement`, legacy `splash_engine_metrics`, and its dated
+   `splash_engine_history`).
 2. It runs **automatically after every GAMES load**, both the cron pipeline
    (`flask pipeline-load`) and `scripts/load_game_csv.py`, via
    `lmu_roster.reconcile_after_load`.

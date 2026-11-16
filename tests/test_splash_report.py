@@ -28,7 +28,8 @@ def _clean_sandbox():
     yield
     with get_engine().begin() as conn:
         for t in (SR.PLANS_TABLE, SR.ENGINE_TABLE, SR.READINGS_TABLE, SR.GAS_TABLE,
-                 SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE):
+                 SR.SCRIPTS_TABLE, SR.SCRIPT_ROWS_TABLE, SR.PEN_TABLE, SR.MOVEMENT_TABLE,
+                 SR.HISTORY_TABLE):
             conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": TEST_PID})
             for pid in (ISO_PID_A, ISO_PID_B):
                 conn.execute(text(f"DELETE FROM {t} WHERE player_id = :p"), {"p": pid})
@@ -155,6 +156,117 @@ def test_upsert_engine_metrics_blank_cell_clears_stored_value():
                              updated_by=1)
     er = SR.read_engine_metrics(TEST_PID, SEASON, CYCLE).set_index("metric_key").loc["ER"]
     assert er["base_value"] == 20.0 and pd.isna(er["now_value"])
+
+
+def _history(pid=TEST_PID):
+    return SR.read_engine_history(pid)
+
+
+def test_upsert_engine_metrics_logs_a_dated_history_row_per_change():
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": 22}],
+                             updated_by=1)
+    h = _history()
+    assert len(h) == 1
+    row = h.iloc[0]
+    assert (row["metric_key"], row["base_value"], row["now_value"]) == ("ER", 20.0, 22.0)
+    assert row["season_label"] == SEASON and row["cycle"] == CYCLE and row["label"] == "ER"
+    assert pd.notna(row["recorded_at"])
+
+    # Save re-submits every metric; an unchanged value must not add a point.
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": 22}],
+                             updated_by=1)
+    assert len(_history()) == 1
+
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": 24.5}],
+                             updated_by=1)
+    h = _history()
+    assert list(h["now_value"]) == [22.0, 24.5]
+    assert h["recorded_at"].is_monotonic_increasing
+
+
+def test_engine_history_logs_only_the_metrics_that_changed():
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [
+        {"metric_key": "ER", "base_value": 20, "now_value": 22},
+        {"metric_key": "IR", "base_value": 40, "now_value": 41}], updated_by=1)
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE, [
+        {"metric_key": "ER", "base_value": 20, "now_value": 22},
+        {"metric_key": "IR", "base_value": 40, "now_value": 43},
+        {"metric_key": "Grip", "base_value": None, "now_value": None}], updated_by=1)
+    h = _history()
+    assert sorted(h["metric_key"]) == ["ER", "IR", "IR"]  # blank-never-filled Grip logs nothing
+    assert list(h[h["metric_key"] == "IR"]["now_value"]) == [41.0, 43.0]
+
+
+def test_engine_history_logs_a_cleared_value():
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": 22}])
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 20, "now_value": None}])
+    h = _history()
+    assert len(h) == 2 and pd.isna(h.iloc[-1]["now_value"])
+
+
+def test_read_engine_history_spans_cycles_and_filters_metrics():
+    SR.upsert_engine_metrics(TEST_PID, SEASON, "Fall",
+                             [{"metric_key": "EROM", "base_value": 100, "now_value": 104}])
+    SR.upsert_engine_metrics(TEST_PID, SEASON, "Winter",
+                             [{"metric_key": "EROM", "base_value": 104, "now_value": 110},
+                              {"metric_key": "IR", "base_value": 40, "now_value": 44}])
+    h = SR.read_engine_history(TEST_PID, metric_keys=["EROM"])
+    assert list(h["cycle"]) == ["Fall", "Winter"]
+    assert list(h["now_value"]) == [104.0, 110.0]
+    assert set(h["label"]) == {"EROM"}
+    assert list(h.columns) == ["recorded_at", "season_label", "cycle", "metric_key", "label",
+                               "base_value", "now_value"]
+    assert SR.read_engine_history(TEST_PID, metric_keys=[]).empty
+    assert SR.read_engine_history(-999199).empty  # a player with nothing saved
+
+
+def test_seed_engine_history_backfills_existing_rows_once():
+    """Values saved before history existed get one point dated at their
+    updated_at (when they were last entered), and re-seeding is a no-op."""
+    with get_engine().begin() as conn:
+        conn.execute(text(
+            f"INSERT INTO {SR.ENGINE_TABLE} (player_id, season_label, cycle, metric_key, "
+            "base_value, now_value, updated_by, updated_at) VALUES "
+            "(:p, :s, :c, 'IROM', 50, 53, 7, '2026-09-20 18:00:00'), "
+            "(:p, :s, :c, 'Grip', NULL, NULL, 7, '2026-09-20 18:00:00')"),
+            {"p": TEST_PID, "s": SEASON, "c": CYCLE})
+        SR.seed_engine_history(conn)
+        SR.seed_engine_history(conn)
+    h = _history()
+    assert list(h["metric_key"]) == ["IROM"]  # an all-blank row has nothing to chart
+    assert str(h.iloc[0]["recorded_at"]) == "2026-09-20 18:00:00"
+    assert (h.iloc[0]["base_value"], h.iloc[0]["now_value"]) == (50.0, 53.0)
+
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "IROM", "base_value": 50, "now_value": 56}])
+    with get_engine().begin() as conn:
+        SR.seed_engine_history(conn)
+    assert list(_history()["now_value"]) == [53.0, 56.0]
+
+
+def test_seed_engine_history_catches_up_an_edit_saved_without_logging():
+    """An older deploy (local dev and Lightsail share the DB) can save a new
+    value without logging it; the next seed adds it, dated at updated_at. A
+    re-save that only bumps updated_at adds nothing."""
+    SR.upsert_engine_metrics(TEST_PID, SEASON, CYCLE,
+                             [{"metric_key": "ER", "base_value": 28, "now_value": 30}])
+    with get_engine().begin() as conn:
+        conn.execute(text(
+            f"UPDATE {SR.ENGINE_TABLE} SET now_value = 33, updated_at = '2099-01-05 12:00:00' "
+            "WHERE player_id = :p AND metric_key = 'ER'"), {"p": TEST_PID})
+        SR.seed_engine_history(conn)
+        conn.execute(text(
+            f"UPDATE {SR.ENGINE_TABLE} SET updated_at = '2099-01-06 12:00:00' "
+            "WHERE player_id = :p AND metric_key = 'ER'"), {"p": TEST_PID})
+        SR.seed_engine_history(conn)
+    h = _history()
+    assert list(h["now_value"]) == [30.0, 33.0]
+    assert str(h.iloc[-1]["recorded_at"]) == "2099-01-05 12:00:00"
 
 
 def test_engine_flag_thresholds():
