@@ -260,6 +260,15 @@ def safe_filename_part(s) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(s))
 
 
+def clip_filename(r) -> str:
+    result = (r["PlayResult"] if r["PlayResult"] and r["PlayResult"] != "Undefined"
+              else r["PitchCall"])
+    return (f"{int(r['PitchNo']):03d}_Inn{int(r['Inning'])}_"
+            f"{safe_filename_part(r['Pitcher'])}_vs_{safe_filename_part(r['Batter'])}_"
+            f"{r['Balls']:.0f}-{r['Strikes']:.0f}_{safe_filename_part(r['TaggedPitchType'])}_"
+            f"{safe_filename_part(result)}.mp4")
+
+
 def cut_clip(video_path: str, center: float, pad_before: float, pad_after: float,
             out_path: str) -> None:
     """Cut [center-pad_before, center+pad_after] from `video_path` to
@@ -341,19 +350,182 @@ def generate_clips(video_dir: str, angle_prefix: str, csv_path: str, game_id: st
         center = correctors[seg.filename](nominal) if seg.filename in correctors else nominal
         pb, pa = (gap_pad_before, gap_pad_after) if reason else (pad_before, pad_after)
 
-        result = (r["PlayResult"] if r["PlayResult"] and r["PlayResult"] != "Undefined"
-                 else r["PitchCall"])
-        fname = (f"{int(r['PitchNo']):03d}_Inn{int(r['Inning'])}_"
-                 f"{safe_filename_part(r['Pitcher'])}_vs_{safe_filename_part(r['Batter'])}_"
-                 f"{r['Balls']:.0f}-{r['Strikes']:.0f}_{safe_filename_part(r['TaggedPitchType'])}_"
-                 f"{safe_filename_part(result)}.mp4")
         cut_clip(os.path.join(video_dir, seg.filename), center, pb, pa,
-                os.path.join(out_dir, fname))
+                os.path.join(out_dir, clip_filename(r)))
         made += 1
         if reason:
             flagged.append({"pitch_no": int(r["PitchNo"]), "reason": reason})
 
     return {"made": made, "flagged": flagged, "skipped_out_of_range": skipped_out_of_range}
+
+
+# ---------------------------------------------------------------------------
+# Continuous mode: one anchor for a whole camera angle
+# ---------------------------------------------------------------------------
+#
+# 2026-09-27, tested on the 5/15 HomeBehind (GameID 315) and 5/16 Home Left
+# (GameID 319) cards: those cameras hand off between segment files with no
+# lost time -- each file's duration matches the spacing of the files'
+# mtimes to within FAT32's 2-second mtime resolution. Treating the files as
+# one continuous recording and anchoring ONLY the first pitch put every
+# spot-checked pitch within ~0.5s of its predicted spot, including the last
+# pitch 3-4 hours later. So when the rollovers are seamless, no per-segment
+# anchors are needed at all; `continuous_timeline` measures that per card
+# and `predict_continuous` flags anything after a rollover that isn't.
+
+# FAT32 stores mtimes at 2-second resolution, so a measured gap smaller than
+# this is indistinguishable from a seamless handoff. Only a POSITIVE gap
+# means lost footage: the last file of a recording closes out when the
+# camera stops, and on both test cards its mtime came out 1.4-3.3s EARLIER
+# than its length implies -- an overlap that can't be real, and pitches in
+# that file were confirmed on-target by eye.
+SEAMLESS_GAP_SECONDS = 2.5
+
+
+@dataclass
+class TimelineSegment:
+    filename: str
+    start: float          # seconds into the angle's continuous recording
+    duration: float
+    rollover_gap: float   # mtime-implied lost time before this file (0 for the first)
+
+
+def continuous_timeline(video_dir: str, angle_prefix: str,
+                        duration_fn=ffprobe_duration) -> list[TimelineSegment]:
+    """One camera angle's segment files (sorted by mtime) laid end to end
+    by their real durations. `rollover_gap` is how much real time passed
+    between the previous file's close and this file's first frame,
+    according to the mtimes (mtime_i - mtime_{i-1} - duration_i) -- the
+    measurement that says whether continuous mode is trustworthy past
+    that point."""
+    files = sorted(
+        (f for f in os.listdir(video_dir) if f.startswith(angle_prefix) and f.endswith(".mp4")),
+        key=lambda f: os.path.getmtime(os.path.join(video_dir, f)),
+    )
+    if not files:
+        raise FileNotFoundError(f"no files matching '{angle_prefix}*.mp4' in {video_dir}")
+    timeline: list[TimelineSegment] = []
+    start, prev_mtime = 0.0, None
+    for f in files:
+        path = os.path.join(video_dir, f)
+        dur, mtime = duration_fn(path), os.path.getmtime(path)
+        gap = 0.0 if prev_mtime is None else mtime - prev_mtime - dur
+        timeline.append(TimelineSegment(f, start, dur, gap))
+        start += dur
+        prev_mtime = mtime
+    return timeline
+
+
+def locate_on_timeline(position: float,
+                       timeline: list[TimelineSegment]) -> tuple[TimelineSegment | None, float | None]:
+    for seg in timeline:
+        if seg.start <= position < seg.start + seg.duration:
+            return seg, position - seg.start
+    return None, None
+
+
+def parse_video_time(s: str) -> float:
+    """"12:48.8", "1:02:03", or plain seconds "768.8" -> seconds."""
+    parts = [float(p) for p in str(s).strip().split(":")]
+    total = 0.0
+    for p in parts:
+        total = total * 60 + p
+    return total
+
+
+def _game_pitches(csv_path: str, game_id: str) -> pd.DataFrame:
+    """GAMES metadata for `game_id` joined to the raw CSV's real per-pitch
+    timestamps (`ts`, epoch seconds), ordered by PitchNo."""
+    from app.db import query_df
+
+    raw = pd.read_csv(csv_path, usecols=["PitchUID", "LocalDateTime"])
+    raw["ts"] = pd.to_datetime(raw["LocalDateTime"]).map(lambda t: t.timestamp())
+    meta = query_df(
+        "SELECT PitchUID, PitchNo, Inning, Pitcher, Batter, Balls, Strikes, "
+        "TaggedPitchType, PitchCall, PlayResult FROM GAMES WHERE GameID=:g ORDER BY PitchNo",
+        {"g": game_id},
+    )
+    return meta.merge(raw[["PitchUID", "ts"]], on="PitchUID", how="inner")
+
+
+def predict_continuous(pitches: pd.DataFrame, timeline: list[TimelineSegment],
+                       anchor_file: str, anchor_time: float, anchor_pitch_no: int,
+                       pad_before: float, pad_after: float) -> pd.DataFrame:
+    """Adds `filename`, `offset` (seconds into that file) and `flag` (why
+    to double-check it, or None) to `pitches`. A pitch's position is the
+    anchor's position plus the real time elapsed since the anchor pitch.
+
+    Flags: a pitch past a rollover that wasn't seamless (continuous mode's
+    one assumption breaks there -- add a second anchor after it, or fall
+    back to `clip`'s per-segment anchors), or a clip window that runs off
+    the end/start of its file (the clip gets cut short)."""
+    anchor_seg = next((s for s in timeline if s.filename == anchor_file), None)
+    if anchor_seg is None:
+        raise ValueError(f"anchor file {anchor_file} is not one of this angle's segments")
+    anchor_rows = pitches[pitches["PitchNo"] == anchor_pitch_no]
+    if anchor_rows.empty:
+        raise ValueError(f"pitch {anchor_pitch_no} is not in this game's CSV")
+    anchor_pos = anchor_seg.start + anchor_time
+    anchor_ts = float(anchor_rows["ts"].iloc[0])
+
+    rows = []
+    for _, r in pitches.iterrows():
+        pos = anchor_pos + (float(r["ts"]) - anchor_ts)
+        seg, offset = locate_on_timeline(pos, timeline)
+        flag = None
+        if seg is not None:
+            lo, hi = sorted((anchor_seg.start, seg.start))
+            bad = [s.filename for s in timeline
+                   if lo < s.start <= hi and s.rollover_gap > SEAMLESS_GAP_SECONDS]
+            if bad:
+                flag = f"past a non-seamless rollover ({', '.join(bad)})"
+            elif offset < pad_before or offset + pad_after > seg.duration:
+                flag = "clip window crosses a file boundary (clip is cut short)"
+        rows.append({"filename": seg.filename if seg else None,
+                     "offset": offset, "flag": flag})
+    return pd.concat([pitches.reset_index(drop=True), pd.DataFrame(rows)], axis=1)
+
+
+def generate_clips_continuous(video_dir: str, angle_prefix: str, csv_path: str, game_id: str,
+                              anchor_file: str, anchor_time: float, anchor_pitch_no: int,
+                              out_dir: str, pad_before: float = 3.0,
+                              pad_after: float = 4.0) -> dict:
+    """Cut one clip per pitch from a single anchor for the whole angle. The
+    default window (3s before release, 4s after) covers the windup through
+    contact and the first steps out of the box. Same return shape as
+    `generate_clips`."""
+    timeline = continuous_timeline(video_dir, angle_prefix)
+    df = predict_continuous(_game_pitches(csv_path, game_id), timeline, anchor_file,
+                            anchor_time, anchor_pitch_no, pad_before, pad_after)
+    os.makedirs(out_dir, exist_ok=True)
+    made, flagged, skipped = 0, [], []
+    for _, r in df.iterrows():
+        if r["filename"] is None:
+            skipped.append(int(r["PitchNo"]))
+            continue
+        cut_clip(os.path.join(video_dir, r["filename"]), float(r["offset"]),
+                 pad_before, pad_after, os.path.join(out_dir, clip_filename(r)))
+        made += 1
+        if r["flag"]:
+            flagged.append({"pitch_no": int(r["PitchNo"]), "reason": r["flag"]})
+    return {"made": made, "flagged": flagged, "skipped_out_of_range": skipped,
+            "rollover_gaps": {s.filename: round(s.rollover_gap, 2) for s in timeline}}
+
+
+def contact_sheet(video_path: str, center: float, out_path: str,
+                  before: float = 3.0, after: float = 3.0, crop: str | None = None) -> None:
+    """A 4-frames-per-second grid of [center-before, center+after], each
+    frame labeled with hundredths of a second relative to `center` -- the
+    quick visual check that a predicted position really is a pitch."""
+    vf = ["fps=4"] + ([f"crop={crop}"] if crop else []) + [
+        "scale=320:180",
+        f"drawtext=text='%{{eif\\:t*100-{int(before * 100)}\\:d}}':x=4:y=4:"
+        "fontsize=20:fontcolor=yellow:box=1:boxcolor=black",
+        "tile=6x4",
+    ]
+    subprocess.run([_ffmpeg_path(), "-v", "error", "-y", "-ss", f"{max(0.0, center - before):.2f}",
+                    "-i", video_path, "-t", f"{before + after:.2f}", "-vf", ",".join(vf),
+                    "-frames:v", "1", out_path], check=True, capture_output=True)
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +586,83 @@ def clip_cmd(video_dir, angle_prefix, csv_path, game_id, anchors_path, out_dir,
         with open(flagged_out, "w") as fh:
             json.dump(result["flagged"], fh, indent=2)
         click.echo(f"flagged list written to {flagged_out}")
+
+
+def _continuous_options(f):
+    for opt in reversed([
+        click.option("--video-dir", required=True, help="Folder containing this angle's segment .mp4 files"),
+        click.option("--angle-prefix", required=True,
+                     help="Filename prefix identifying this camera angle's segment files"),
+        click.option("--csv", "csv_path", required=True, help="Path to the CSV from fetch-csv"),
+        click.option("--game-id", required=True, help="GAMES.GameID for this game"),
+        click.option("--anchor-file", required=True,
+                     help="Segment file the anchor pitch is in, e.g. NORMAL00002.mp4"),
+        click.option("--anchor-time", required=True,
+                     help="Where the anchor pitch is released in that file: 12:48.8 or 768.8"),
+        click.option("--anchor-pitch", default=1, show_default=True,
+                     help="PitchNo of the anchor pitch"),
+    ]):
+        f = opt(f)
+    return f
+
+
+@cli.command("check")
+@_continuous_options
+@click.option("--out-dir", required=True, help="Where to write the contact-sheet JPGs")
+@click.option("--sample", default=6, show_default=True,
+              help="How many in-play pitches (spread evenly through the game) to check")
+@click.option("--crop", default=None,
+              help="ffmpeg crop (w:h:x:y) to zoom on the plate, e.g. 1200:675:360:200")
+def check_cmd(video_dir, angle_prefix, csv_path, game_id, anchor_file, anchor_time,
+              anchor_pitch, out_dir, sample, crop):
+    """Before cutting a whole game: contact sheets for a few in-play pitches
+    spread from first inning to last. Frame "0" is the predicted release; a
+    correct anchor shows the swing about 0.5s later in every sheet. Takes
+    about a minute."""
+    timeline = continuous_timeline(video_dir, angle_prefix)
+    for s in timeline[1:]:
+        ok = "seamless" if s.rollover_gap <= SEAMLESS_GAP_SECONDS else "GAP -- check"
+        click.echo(f"  rollover into {s.filename}: {s.rollover_gap:+.2f}s ({ok})")
+    df = predict_continuous(_game_pitches(csv_path, game_id), timeline, anchor_file,
+                            parse_video_time(anchor_time), anchor_pitch, 3.0, 4.0)
+    in_play = df[(df["PitchCall"] == "InPlay") & df["filename"].notna()]
+    if in_play.empty:
+        in_play = df[df["filename"].notna()]
+    picks = in_play.iloc[np.linspace(0, len(in_play) - 1, min(sample, len(in_play))).astype(int)]
+    os.makedirs(out_dir, exist_ok=True)
+    for _, r in picks.iterrows():
+        out = os.path.join(out_dir, f"check_{int(r['PitchNo']):03d}_Inn{int(r['Inning'])}.jpg")
+        contact_sheet(os.path.join(video_dir, r["filename"]), float(r["offset"]), out, crop=crop)
+        click.echo(f"  pitch {int(r['PitchNo']):>3} (inning {int(r['Inning'])}, "
+                   f"{r['Batter']}): {r['filename']} @ {r['offset']:.1f}s -> {out}")
+
+
+@cli.command("clip-continuous")
+@_continuous_options
+@click.option("--out-dir", required=True)
+@click.option("--pad-before", default=3.0, show_default=True)
+@click.option("--pad-after", default=4.0, show_default=True)
+@click.option("--flagged-out", default=None,
+              help="Optional path to also write the flagged-pitch list as JSON")
+def clip_continuous_cmd(video_dir, angle_prefix, csv_path, game_id, anchor_file, anchor_time,
+                        anchor_pitch, out_dir, pad_before, pad_after, flagged_out):
+    """Cut every pitch from ONE anchor (usually the first pitch) for the
+    whole angle -- for cameras whose segment files hand off seamlessly.
+    Run `check` first."""
+    result = generate_clips_continuous(video_dir, angle_prefix, csv_path, game_id,
+                                       anchor_file, parse_video_time(anchor_time),
+                                       anchor_pitch, out_dir, pad_before, pad_after)
+    click.echo(f"made {result['made']} clips in {out_dir}")
+    if result["flagged"]:
+        click.echo(f"{len(result['flagged'])} flagged for review:")
+        for item in result["flagged"]:
+            click.echo(f"  pitch {item['pitch_no']:>3}: {item['reason']}")
+    if result["skipped_out_of_range"]:
+        click.echo(f"skipped {len(result['skipped_out_of_range'])} pitches (outside the "
+                   f"recording): {result['skipped_out_of_range']}")
+    if flagged_out:
+        with open(flagged_out, "w") as fh:
+            json.dump(result["flagged"], fh, indent=2)
 
 
 if __name__ == "__main__":
