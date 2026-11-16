@@ -101,6 +101,25 @@ def test_games_for_catcher_has_no_numeric_game_id_guard():
     assert "GameID REGEXP" not in src
 
 
+def test_range_pitches_for_includes_composite_game_ids():
+    # Fall 2026 cron games all have composite GameIDs ("20261113-LoyolaMarymount-
+    # Private-1"); the numeric guard here left every catcher KPI tile blank.
+    import inspect
+    src = inspect.getsource(catching_caps.range_pitches_for)
+    assert "_NUMERIC_GAME_ID_CLAUSE" not in src
+    assert "GameID REGEXP" not in src
+    from app.db import query_df
+    row = query_df(
+        "SELECT CatcherId, Date FROM GAMES WHERE PitcherTeam = :t AND CatcherId IS NOT NULL "
+        "AND GameID NOT REGEXP '^[0-9]+$' LIMIT 1",
+        {"t": catching_caps.LMU_PITCHER_TEAM},
+    )
+    if row.empty:
+        pytest.skip("no composite-GameID catcher rows in GAMES")
+    cid, d = int(row.iloc[0]["CatcherId"]), str(row.iloc[0]["Date"])
+    assert not catching_caps.range_pitches_for(cid, d, d).empty
+
+
 def test_lmu_catchers_scopes_by_date():
     # Task 5: the Catcher dropdown on the game dashboards must narrow to
     # players with data in the selected date range (nested inside the season).

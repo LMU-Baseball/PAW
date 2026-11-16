@@ -12,12 +12,27 @@ attributes (not called via ``common.``) so tests can monkeypatch them.
 """
 from __future__ import annotations
 
+import json
 import posixpath
 import stat
+from pathlib import Path
 
 import pandas as pd
 
 from app.ingest.common import LoadResult, chunked_insert, existing_keys
+
+# Committed list of bullpen PlayIDs to never (re)insert. `load_bullpen` walks the
+# WHOLE /practice tree every run and dedups only against rows currently in
+# BULLPEN, so a deleted session (e.g. 2026-11-01/-08 high-school lesson pitchers
+# a coach recorded on LMU's Trackman) would come straight back without this.
+EXCLUDED_BULLPEN_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "excluded_bullpen.json"
+
+
+def excluded_play_ids(path: Path = EXCLUDED_BULLPEN_PATH) -> set[str]:
+    if not path.exists():
+        return set()
+    with open(path, encoding="utf-8") as fh:
+        return {str(u) for e in json.load(fh) for u in e.get("play_ids", [])}
 
 # The 68 CSV columns that map 1:1 (identical names) into the 79-column
 # BULLPEN DB table. The remaining 11 BULLPEN columns are derived/loader-set
@@ -110,7 +125,7 @@ def load_bullpen(engine, sftp, *, dry_run: bool = True, limit: int | None = None
     if limit is not None:
         files = files[:limit]
 
-    already_loaded = existing_keys(engine, "BULLPEN", "PlayID")
+    already_loaded = existing_keys(engine, "BULLPEN", "PlayID") | excluded_play_ids()
     seen: set[str] = set()
     rows_to_insert: list[dict] = []
     skipped = 0
