@@ -11,6 +11,7 @@ from flask_login import current_user
 
 from app.data import process_board as PB
 from app.data import seasons, velo_board
+from app.dashboards import date_range as dr
 from app.dashboards import shell
 from app.dashboards.process_board import tables
 from app.dashboards.velo_board.visual import MARQUEE_FONT
@@ -48,29 +49,77 @@ def process_header() -> html.Div:
     return html.Div(box, style={"padding": "0 20px"})
 
 
-def filters(season: str, cycle: str, types: list[str]) -> html.Div:
+DATE_PRESETS = [
+    {"label": "Whole Cycle", "value": "cycle"},
+    {"label": "Past Day", "value": "day"},
+    {"label": "Past Week", "value": "week"},
+    {"label": "Past Month", "value": "month"},
+    {"label": "Custom Range", "value": "custom"},
+]
+
+
+def game_options(games_df) -> list[dict]:
+    return [{"label": r.GameLabel, "value": r.game_id} for r in games_df.itertuples()]
+
+
+def games_placeholder(games_df) -> str:
+    return f"All {len(games_df)} games in range"
+
+
+def filters(prefix: str, data, season: str, cycle: str) -> html.Div:
+    """Season / Cycle / Game Type / Date / Games, shared by the pitcher and
+    hitter boards (`data` is the board's app.data module; ids are
+    f"{prefix}-season" etc.). Games starts empty = every game in range."""
+    c_start, c_end = data.cycle_bounds(season, cycle)
+    types = data.game_types(c_start, c_end)
+    games_df = data.games(season, cycle)
+    kinds = data.pitch_types(season, cycle)
     return html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
-            dcc.Dropdown(id="process-season",
+            dcc.Dropdown(id=f"{prefix}-season",
                          options=[{"label": s, "value": s} for s in seasons.available_seasons()],
                          value=season, clearable=False, style={"minWidth": "150px"}),
         ]),
         html.Div([
             html.Label("Cycle", style=_LABEL_STYLE),
-            dcc.Dropdown(id="process-cycle",
-                         options=[{"label": c, "value": c} for c in PB.CYCLES],
+            dcc.Dropdown(id=f"{prefix}-cycle",
+                         options=[{"label": c, "value": c} for c in data.CYCLES],
                          value=cycle, clearable=False, style={"minWidth": "130px"}),
         ]),
         html.Div([
             html.Label("Game Type", style=_LABEL_STYLE),
-            dcc.Dropdown(id="process-game-types",
+            dcc.Dropdown(id=f"{prefix}-game-types",
                          options=[{"label": t, "value": t} for t in types],
                          value=types, multi=True, placeholder="All game types",
                          style={"minWidth": "260px"}),
         ]),
+        html.Div([
+            html.Label("Dates", style=_LABEL_STYLE),
+            dr.date_control(prefix, c_end, min_date=c_start, max_date=c_end, preset="cycle",
+                            options=DATE_PRESETS),
+        ]),
+        html.Div([
+            html.Label("Games", style=_LABEL_STYLE),
+            dcc.Dropdown(id=f"{prefix}-games", options=game_options(games_df), value=[],
+                         multi=True, placeholder=games_placeholder(games_df),
+                         style={"minWidth": "320px", "maxWidth": "520px"}),
+        ]),
+        html.Div([
+            html.Label(data.HAND_LABEL, style=_LABEL_STYLE),
+            dcc.Dropdown(id=f"{prefix}-hand",
+                         options=[{"label": lbl, "value": v} for v, lbl in data.HAND_OPTIONS],
+                         value="all", clearable=False, style={"minWidth": "150px"}),
+        ]),
+        html.Div([
+            html.Label("Pitch Type", style=_LABEL_STYLE),
+            dcc.Dropdown(id=f"{prefix}-pitch-types",
+                         options=[{"label": k, "value": k} for k in kinds], value=[],
+                         multi=True, placeholder="All pitch types",
+                         style={"minWidth": "220px", "maxWidth": "420px"}),
+        ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
-              "alignItems": "flex-end", "flexWrap": "wrap", "padding": "12px 16px"})
+              "alignItems": "flex-start", "flexWrap": "wrap", "padding": "12px 16px"})
 
 
 def _swatch(color: str, label: str) -> html.Span:
@@ -98,12 +147,11 @@ def serve_layout() -> html.Div:
         return html.Div("Please log in.")
     season = seasons.season_label_for(date.today().isoformat())
     cycle = velo_board.velo_cycle_for_date(date.today())
-    types = PB.game_types(*PB.cycle_bounds(season, cycle))
     board = PB.board(season, cycle)
     return html.Div([
         shell.header(back_href="/pitching", back_label="← Pitching"),
         process_header(),
-        html.Div(filters(season, cycle, types),
+        html.Div(filters("process", PB, season, cycle),
                  style={"borderBottom": f"2px solid {shell.CRIMSON}",
                         "backgroundColor": "rgba(255,255,255,0.55)"}),
         legend(),

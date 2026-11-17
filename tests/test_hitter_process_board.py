@@ -143,3 +143,32 @@ def test_two_strike_metrics_blank_without_two_strike_pitches():
     line = HB.metric_line(pd.DataFrame([_p("F, Six", "BallCalled")]))
     assert line["contact_2k_pct"] is None and line["swstr_2k_pct"] is None
     assert line["chase_2k_pct"] is None
+
+
+def test_board_date_filter_moves_team_average(monkeypatch):
+    early = _frame().assign(game_id="g1", game_date="2026-10-01")
+    late = _frame().iloc[:3].assign(game_id="g2", game_date="2026-11-14")
+    df = pd.concat([early, late], ignore_index=True).assign(
+        game_type="Scrimmage", home_team="LOY_LIO", away_team="Opp")
+    monkeypatch.setattr(HB, "_pitches", lambda s, e: df)
+    monkeypatch.setattr(HB, "_game_types_for", lambda s, e: ["Scrimmage"])
+    HB._board.cache_clear()
+    board = HB.board("2026/2027", "Fall", start="2026-11-01", end="2026-11-30")
+    assert sum(r["pitches"] for r in board["hitters"]) == 3
+    assert board["summary"][0]["pitches"] == len(df)
+    assert list(HB.games("2026/2027", "Fall")["game_id"]) == ["g2", "g1"]
+
+
+def test_board_pitcher_hand_and_pitch_type_filters(monkeypatch):
+    df = _frame().assign(game_id="g1", game_date="2026-10-01", game_type="Scrimmage",
+                         home_team="LOY_LIO", away_team="Opp", pitcher_throws="Right",
+                         tagged_pitch_type="Fastball", auto_pitch_type="Fastball")
+    df.loc[df.index[:2], "pitcher_throws"] = "Left"
+    df.loc[df.index[:3], "tagged_pitch_type"] = "Slider"
+    monkeypatch.setattr(HB, "_pitches", lambda s, e: df)
+    monkeypatch.setattr(HB, "_game_types_for", lambda s, e: ["Scrimmage"])
+    HB._board.cache_clear()
+    assert sum(r["pitches"] for r in HB.board("2026/2027", "Fall", hand="Left")["hitters"]) == 2
+    sliders = HB.board("2026/2027", "Fall", pitch_types=["Slider"])
+    assert sum(r["pitches"] for r in sliders["hitters"]) == 3
+    assert HB.pitch_types("2026/2027", "Fall") == ["Fastball", "Slider"]

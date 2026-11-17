@@ -141,7 +141,7 @@ def test_team_line_keeps_intrasquad_halves_apart():
 def test_board_all_types_shares_the_unfiltered_cache_entry(monkeypatch):
     calls = []
     monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Intrasquad", "Scrimmage"])
-    monkeypatch.setattr(PB, "_board", lambda season, cycle, types: calls.append(types))
+    monkeypatch.setattr(PB, "_board", lambda season, cycle, types, *rest: calls.append(types))
     PB.board("2026/2027", "Fall", ["Scrimmage", "Intrasquad"])
     PB.board("2026/2027", "Fall", None)
     PB.board("2026/2027", "Fall", ["Scrimmage"])
@@ -157,3 +157,94 @@ def test_cycle_row_ignores_game_type_filter(monkeypatch):
     cycle_row = board["summary"][1]
     assert cycle_row["pitcher"] == "LMU Spring 2027 Average"
     assert cycle_row["pitches"] == 8
+
+
+def _dated():
+    """Three games: g1 (10-01 home scrimmage), g2 (10-20 untyped intrasquad),
+    g3 (11-14 untyped, on the road)."""
+    f = _frame()
+    g2 = f.assign(game_id="g2")
+    g3 = f.assign(game_id="g3")
+    df = pd.concat([f, g2, g3], ignore_index=True)
+    n = len(f)
+    df["game_date"] = ["2026-10-01"] * n + ["2026-10-20"] * n + ["2026-11-14"] * n
+    df["game_type"] = ["Scrimmage"] * n + ["Untyped"] * (2 * n)
+    df["home_team"] = ["LOY_LIO"] * (2 * n) + ["UCLA"] * n
+    df["away_team"] = ["Gol_W"] * n + ["LOY_LIO"] * (2 * n)
+    return df
+
+
+def test_narrow_by_dates_and_games():
+    df = _dated()
+    assert set(PB.narrow(df, "2026-10-15", "2026-11-30")["game_id"]) == {"g2", "g3"}
+    assert set(PB.narrow(df, None, None, ["g1"])["game_id"]) == {"g1"}
+    assert len(PB.narrow(df)) == len(df)
+
+
+def test_games_in_newest_first_with_labels():
+    g = PB.games_in(_dated())
+    assert list(g["game_id"]) == ["g3", "g2", "g1"]
+    assert list(g["GameLabel"]) == ["2026-11-14 @ UCLA", "2026-10-20 Intrasquad",
+                                    "2026-10-01 vs Gol_W · Scrimmage"]
+
+
+def test_window_bounds_whole_cycle_is_unfiltered():
+    c_start, c_end = PB.cycle_bounds("2026/2027", "Fall")
+    assert PB.window_bounds("2026/2027", "Fall", c_start, c_end) == (None, None)
+    assert PB.window_bounds("2026/2027", "Fall", None, None) == (None, None)
+    assert PB.window_bounds("2026/2027", "Fall", "2000-01-01", "2026-11-01") == (str(c_start), "2026-11-01")
+
+
+def test_filter_key_all_games_collapses(monkeypatch):
+    df = _dated()
+    key = PB.filter_key(lambda s, e: df, lambda s, e: ["Scrimmage", "Untyped"],
+                        "2026/2027", "Fall", None, "2026-10-15", "2026-11-30", ["g3", "g2"])
+    assert key[3:6] == ("2026-10-15", "2026-11-30", ())
+    key = PB.filter_key(lambda s, e: df, lambda s, e: ["Scrimmage", "Untyped"],
+                        "2026/2027", "Fall", None, None, None, ["g2"])
+    assert key[3:6] == (None, None, ("g2",))
+
+
+def test_board_games_filter_moves_pitchers_not_cycle_row(monkeypatch):
+    df = _dated()
+    monkeypatch.setattr(PB, "_pitches", lambda s, e: df)
+    monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Scrimmage", "Untyped"])
+    PB._board.cache_clear()
+    board = PB.board("2026/2027", "Fall", game_ids=["g1"])
+    assert board["summary"][1]["pitches"] == 24
+    assert sum(r["pitches"] for r in board["pitchers"]) == 8
+    board = PB.board("2026/2027", "Fall", start="2026-10-15", end="2026-10-31")
+    assert sum(r["pitches"] for r in board["pitchers"]) == 8
+
+
+def test_latest_day_anchor():
+    df = _dated()
+    assert PB.latest_day(lambda s, e: df, "2026/2027", "Fall") == "2026-11-14"
+    assert PB.latest_day(lambda s, e: df.iloc[0:0], "2026/2027", "Fall") == str(
+        PB.cycle_bounds("2026/2027", "Fall")[1])
+
+
+def test_hand_filter_splits_on_batter_side(monkeypatch):
+    df = _dated().reset_index(drop=True)
+    df.loc[df["pitch_call"] == "InPlay", "batter_side"] = "Left"
+    monkeypatch.setattr(PB, "_pitches", lambda s, e: df)
+    monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Scrimmage", "Untyped"])
+    PB._board.cache_clear()
+    lefties = PB.board("2026/2027", "Fall", hand="Left")
+    assert [r["pitcher"] for r in lefties["pitchers"]] == ["B, Two (L)"]
+    assert lefties["summary"][1]["pitches"] == 24
+    assert PB.filter_key(lambda s, e: df, lambda s, e: [], "2026/2027", "Fall",
+                         hand="all")[6] is None
+
+
+def test_pitch_type_filter_pitch_and_pa_metrics():
+    f = _frame()[lambda d: d["pitcher_name"] == "A, One"].copy()
+    # the strikeout PA ends on a slider; the walk PA stays all fastballs
+    f.loc[f.index[1:3], ["tagged_pitch_type", "auto_pitch_type"]] = "Slider"
+    line = PB.metric_line(f, ["Slider"])
+    assert line["pitches"] == 2 and line["strike_pct"] == 100.0
+    assert line["k_pct"] == 100.0 and line["bb_pct"] == 0.0
+    assert line["velo_max"] == 94.0
+    assert PB.pitch_types_in(f) == ["Fastball", "Slider"]
+    assert [r["pitcher"] for r in PB.pitcher_rows(_frame().assign(
+        tagged_pitch_type=["Slider"] * 7 + ["Fastball"]), ["Slider"])] == ["A, One (R)"]
