@@ -43,6 +43,8 @@ def preset_range(preset, anchor):
     if preset == "yesterday":
         y = a - timedelta(days=1)
         return y, y
+    if preset == "day":
+        return a, a
     days = _PRESET_DAYS.get(preset)
     if days is None:
         return None
@@ -64,18 +66,20 @@ def date_picker(id_prefix: str, start, end, min_date=None, max_date=None):
 
 
 def date_control(id_prefix, anchor, *, min_date=None, max_date=None, preset="season",
-                 start=None, end=None):
+                 start=None, end=None, options=None):
     """Preset dropdown + a calendar (shown only for 'custom'). The calendar keeps
     id f'{id_prefix}-daterange' so existing downstream callbacks are unchanged.
     Explicit `start`/`end` override the preset's default range (used to open on a
-    specific day while keeping the full min/max bounds for widening)."""
+    specific day while keeping the full min/max bounds for widening). `options`
+    replaces the default preset list; a preset preset_range doesn't know spans
+    min_date..max_date."""
     from dash import html
     rng = preset_range(preset, anchor) or (min_date, max_date)
     s0, e0 = rng
     start = start if start is not None else s0
     end = end if end is not None else e0
     return html.Div([
-        dcc.Dropdown(id=f"{id_prefix}-date-preset", options=preset_options(),
+        dcc.Dropdown(id=f"{id_prefix}-date-preset", options=options or preset_options(),
                      value=preset, clearable=False, style={"minWidth": "175px"}),
         html.Div(
             date_picker(id_prefix, str(start) if start else None,

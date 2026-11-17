@@ -49,6 +49,9 @@ _SZ_X, _SZ_Y0, _SZ_Y1 = 0.83, 1.5, 3.5
 MIN_PITCHES_FOR_LEADER = 20
 
 CYCLES = PB.CYCLES
+HAND_COL = "pitcher_throws"
+HAND_LABEL = "Pitchers"
+HAND_OPTIONS = (("all", "All Pitchers"), ("Right", "vs RHP"), ("Left", "vs LHP"))
 cycle_bounds = PB.cycle_bounds
 cycle_display = PB.cycle_display
 
@@ -73,7 +76,9 @@ def _query_pitches(start: str, end: str) -> pd.DataFrame:
         "SELECT Batter AS batter_name, BatterSide AS batter_side, "
         "PlateLocSide AS plate_side, PlateLocHeight AS plate_height, "
         "PitchCall AS pitch_call, Strikes AS strikes, ExitSpeed AS exit_speed, Angle AS launch_angle, "
-        "TaggedHitType AS hit_type, "
+        "TaggedHitType AS hit_type, GameID AS game_id, " + PB.GAME_SELECT + ", "
+        "PitcherThrows AS pitcher_throws, TaggedPitchType AS tagged_pitch_type, "
+        "AutoPitchType AS auto_pitch_type, "
         "COALESCE(GameType, 'Untyped') AS game_type "
         "FROM GAMES WHERE BatterTeam = :t AND Date BETWEEN :s AND :e",
         {"t": LMU_BATTER_TEAM, "s": str(start), "e": str(end)},
@@ -95,6 +100,21 @@ def _game_types_for(start: str, end: str) -> list[str]:
 
 def game_types(start: str, end: str) -> list[str]:
     return list(_game_types_for(start, end))
+
+
+def games(season_label: str, cycle: str, game_types=None, start=None, end=None) -> pd.DataFrame:
+    """Games in the cycle under the Game Type + Date filters, newest first."""
+    c_start, c_end = cycle_bounds(season_label, cycle)
+    start, end = PB.window_bounds(season_label, cycle, start, end)
+    return PB.games_in(PB.narrow(window_pitches(c_start, c_end, game_types), start, end))
+
+
+def pitch_types(season_label: str, cycle: str) -> list[str]:
+    return PB.pitch_types_in(_pitches(*cycle_bounds(season_label, cycle)))
+
+
+def latest_game_date(season_label: str, cycle: str) -> str:
+    return PB.latest_day(_pitches, season_label, cycle)
 
 
 def _rate(numer: int, denom: int) -> float | None:
@@ -174,22 +194,24 @@ def best_values(rows: list[dict]) -> dict[str, float]:
     return best
 
 
-def board(season_label: str, cycle: str, game_types=None) -> dict:
-    """Everything the page renders: cycle + team-average rows and hitter rows.
-    Selecting every game type is the same board as no filter (one cache entry)."""
-    start, end = cycle_bounds(season_label, cycle)
-    types = sorted(game_types) if game_types else []
-    if not types or set(types) >= set(_game_types_for(start, end)):
-        types = []
-    return _board(season_label, cycle, tuple(types))
+def board(season_label: str, cycle: str, game_types=None, start=None, end=None,
+          game_ids=None, hand=None, pitch_types=None) -> dict:
+    """Everything the page renders: cycle + team-average rows and hitter rows,
+    under the Game Type / Date / Games filters (empty Games = every game in
+    range). Selecting everything shares the unfiltered cache entry."""
+    return _board(*PB.filter_key(_pitches, _game_types_for, season_label, cycle,
+                                 game_types, start, end, game_ids, hand, pitch_types))
 
 
 @cached
-def _board(season_label: str, cycle: str, game_types: tuple) -> dict:
+def _board(season_label: str, cycle: str, game_types: tuple, start=None, end=None,
+           game_ids: tuple = (), hand=None, pitch_types: tuple = ()) -> dict:
     game_types = list(game_types) or None
-    start, end = cycle_bounds(season_label, cycle)
-    df = window_pitches(start, end, game_types)
-    cycle_df = window_pitches(start, end) if game_types else df
+    c_start, c_end = cycle_bounds(season_label, cycle)
+    df = PB.narrow(window_pitches(c_start, c_end, game_types), start, end, game_ids)
+    df = PB.by_pitch_type(PB.by_hand(df, HAND_COL, hand), pitch_types)
+    filtered = bool(game_types or start or game_ids or hand or pitch_types)
+    cycle_df = window_pitches(c_start, c_end) if filtered else df
 
     cycle_row = dict(metric_line(cycle_df) if not cycle_df.empty else {},
                      hitter=f"LMU {cycle_display(season_label, cycle)} Average", kind="cycle")
