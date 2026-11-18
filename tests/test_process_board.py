@@ -148,15 +148,18 @@ def test_board_all_types_shares_the_unfiltered_cache_entry(monkeypatch):
     assert calls == [(), (), ("Scrimmage",)]
 
 
-def test_cycle_row_ignores_game_type_filter(monkeypatch):
+def test_average_row_follows_game_type_filter(monkeypatch):
     frame = _frame().assign(game_type=["Scrimmage"] * 7 + ["Intrasquad"])
     monkeypatch.setattr(PB, "_pitches", lambda s, e: frame)
     monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Intrasquad", "Scrimmage"])
     PB._board.cache_clear()
     board = PB.board("2026/2027", "Spring", ["Scrimmage"])
     cycle_row = board["summary"][1]
-    assert cycle_row["pitcher"] == "LMU Spring 2027 Average"
-    assert cycle_row["pitches"] == 8
+    assert cycle_row["pitcher"] == "LMU Filtered Average"
+    assert cycle_row["pitches"] == 7
+    whole = PB.board("2026/2027", "Spring")["summary"][1]
+    assert whole["pitcher"] == "LMU Spring 2027 Average"
+    assert whole["pitches"] == 8
 
 
 def _dated():
@@ -205,13 +208,14 @@ def test_filter_key_all_games_collapses(monkeypatch):
     assert key[3:6] == (None, None, ("g2",))
 
 
-def test_board_games_filter_moves_pitchers_not_cycle_row(monkeypatch):
+def test_board_games_filter_moves_pitchers_and_average_row(monkeypatch):
     df = _dated()
     monkeypatch.setattr(PB, "_pitches", lambda s, e: df)
     monkeypatch.setattr(PB, "_game_types_for", lambda s, e: ["Scrimmage", "Untyped"])
     PB._board.cache_clear()
+    assert PB.board("2026/2027", "Fall")["summary"][1]["pitches"] == 24
     board = PB.board("2026/2027", "Fall", game_ids=["g1"])
-    assert board["summary"][1]["pitches"] == 24
+    assert board["summary"][1]["pitches"] == 8
     assert sum(r["pitches"] for r in board["pitchers"]) == 8
     board = PB.board("2026/2027", "Fall", start="2026-10-15", end="2026-10-31")
     assert sum(r["pitches"] for r in board["pitchers"]) == 8
@@ -232,7 +236,7 @@ def test_hand_filter_splits_on_batter_side(monkeypatch):
     PB._board.cache_clear()
     lefties = PB.board("2026/2027", "Fall", hand="Left")
     assert [r["pitcher"] for r in lefties["pitchers"]] == ["B, Two (L)"]
-    assert lefties["summary"][1]["pitches"] == 24
+    assert lefties["summary"][1]["pitches"] == sum(r["pitches"] for r in lefties["pitchers"])
     assert PB.filter_key(lambda s, e: df, lambda s, e: [], "2026/2027", "Fall",
                          hand="all")[6] is None
 

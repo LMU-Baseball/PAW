@@ -3,9 +3,9 @@
 Rebuilds the coaches' "Team Process" Google Sheet (last used Spring 2026,
 e.g. "Team Process - Non-Conference Spring 3_3_2026"): one row per LMU
 pitcher with Strike% / FPS% / Pre2K% / E&A% / K% / Barrel% / BB% / 2K Kill%
-plus fastball velo, under three reference rows -- the coaches' fixed LMU
-Baseline, the selected cycle's average (all game types), and the team
-average for the selected game types.
+plus fastball velo, under two reference rows -- the coaches' fixed LMU
+Baseline and the team average over whatever the filters select (the whole
+cycle when nothing is filtered).
 
 "Throwing on the stadium field" = GAMES (games, scrimmages, intrasquads,
 live ABs loaded as games), never BULLPEN. Every metric is the same
@@ -310,6 +310,12 @@ def meets_baseline(key: str, value) -> bool | None:
     return value >= target if higher else value <= target
 
 
+def average_label(season_label: str, cycle: str, filtered: bool) -> str:
+    """The average row follows the filters, so its name says when it's no
+    longer the whole cycle."""
+    return "LMU Filtered Average" if filtered else f"LMU {cycle_display(season_label, cycle)} Average"
+
+
 def board(season_label: str, cycle: str, game_types=None, start=None, end=None,
           game_ids=None, hand=None, pitch_types=None) -> dict:
     """Everything the page renders: the reference rows + pitcher rows, under
@@ -326,15 +332,13 @@ def _board(season_label: str, cycle: str, game_types: tuple, start=None, end=Non
     c_start, c_end = cycle_bounds(season_label, cycle)
     df = narrow(window_pitches(c_start, c_end, game_types), start, end, game_ids)
     df = by_hand(df, HAND_COL, hand)
-    # The cycle row is the whole selected cycle (every game type, date,
-    # batter and pitch), so it stays put while the pitcher rows filter.
-    filtered = bool(game_types or start or game_ids or hand)
-    cycle_df = window_pitches(c_start, c_end) if filtered else df
+    kinds = list(pitch_types) or None
+    filtered = bool(game_types or start or game_ids or hand or pitch_types)
 
     baseline = dict(BASELINE, pitcher="LMU Baseline", kind="baseline")
-    cycle_row = dict(metric_line(cycle_df) if not cycle_df.empty else {},
-                     pitcher=f"LMU {cycle_display(season_label, cycle)} Average",
+    cycle_row = dict(metric_line(df, kinds) if not df.empty else {},
+                     pitcher=average_label(season_label, cycle, filtered),
                      kind="cycle")
-    pitchers = pitcher_rows(df, list(pitch_types) or None)
+    pitchers = pitcher_rows(df, kinds)
     return {"summary": [baseline, cycle_row], "pitchers": pitchers,
             "best": best_values(pitchers)}

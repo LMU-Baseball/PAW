@@ -155,7 +155,9 @@ def test_board_date_filter_moves_team_average(monkeypatch):
     HB._board.cache_clear()
     board = HB.board("2026/2027", "Fall", start="2026-11-01", end="2026-11-30")
     assert sum(r["pitches"] for r in board["hitters"]) == 3
-    assert board["summary"][0]["pitches"] == len(df)
+    assert board["summary"][0]["pitches"] == 3
+    assert board["summary"][0]["hitter"] == "LMU Filtered Average"
+    assert HB.board("2026/2027", "Fall")["summary"][0]["pitches"] == len(df)
     assert list(HB.games("2026/2027", "Fall")["game_id"]) == ["g2", "g1"]
 
 

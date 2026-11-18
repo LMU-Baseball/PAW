@@ -211,13 +211,10 @@ def _board(season_label: str, cycle: str, game_types: tuple, start=None, end=Non
     df = PB.narrow(window_pitches(c_start, c_end, game_types), start, end, game_ids)
     df = PB.by_pitch_type(PB.by_hand(df, HAND_COL, hand), pitch_types)
     filtered = bool(game_types or start or game_ids or hand or pitch_types)
-    cycle_df = window_pitches(c_start, c_end) if filtered else df
 
-    cycle_row = dict(metric_line(cycle_df) if not cycle_df.empty else {},
-                     hitter=f"LMU {cycle_display(season_label, cycle)} Average", kind="cycle")
-    team = dict(metric_line(df) if not df.empty else {},
-                hitter="LMU Team Average", kind="team")
+    cycle_row = dict(metric_line(df) if not df.empty else {},
+                     hitter=PB.average_label(season_label, cycle, filtered), kind="cycle")
     hitters = hitter_rows(df)
     return {"summary": [cycle_row], "hitters": hitters,
             "best": best_values(hitters),
-            "baseline": {k: team.get(k) for k, _l, _h in METRICS}}
+            "baseline": {k: cycle_row.get(k) for k, _l, _h in METRICS}}
