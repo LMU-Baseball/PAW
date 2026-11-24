@@ -10,13 +10,11 @@
            border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
   .forge-side { border-right: 1px solid #eee; display: flex; flex-direction: column; min-height: 0;
                 background: #fafafa; }
-  /* Same layering as the Velo Board banner: the spray-paint backdrop (alpha
-     baked into the PNG) over the palm silhouettes over the page color, so the
-     palms show through the paint. */
+  /* The Velo Board's spray-paint backdrop; its alpha is baked into the PNG,
+     so it sits on the page color rather than the white panel. */
   .forge-side-head, .forge-head {
     background:
       url("{{ url_for('static', filename='reports/velo-backdrop.png') }}") var(--paint-pos, left center) / var(--paint-size, 640px) no-repeat,
-      url("{{ url_for('static', filename='brand/palms-grey.png') }}") center 70% / 520px auto no-repeat,
       var(--bg);
     color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .35);
   }
