@@ -75,8 +75,8 @@ policy, `paw-forge-s3`:
 ```
 FORGE_S3_BUCKET=lmubsb-forge
 FORGE_S3_REGION=us-east-2
-AWS_ACCESS_KEY_ID=...        # the paw-forge user's key
-AWS_SECRET_ACCESS_KEY=...
+FORGE_AWS_ACCESS_KEY_ID=...        # the paw-forge user's key
+FORGE_AWS_SECRET_ACCESS_KEY=...
 ```
 
 Never commit these values. The repo is public.

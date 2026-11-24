@@ -6,9 +6,10 @@ box. Playback and thumbnails are short-lived presigned GETs; nothing in the
 bucket is public. Setup (bucket, CORS, IAM policy, env vars):
 docs/forge-s3-setup.md.
 
-Credentials come from the standard AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-env vars that boto3 reads itself; this module only needs FORGE_S3_BUCKET (and
-optionally FORGE_S3_REGION). With no bucket set, configured() is False and the
+Credentials come from FORGE_AWS_ACCESS_KEY_ID / FORGE_AWS_SECRET_ACCESS_KEY
+(the bucket-scoped `paw-forge` IAM user), kept separate from any other AWS key
+in .env so the two can never be swapped. Also FORGE_S3_BUCKET and optionally
+FORGE_S3_REGION. With no bucket set, configured() is False and the
 Forge runs messaging-only.
 """
 from __future__ import annotations
@@ -41,6 +42,8 @@ def _s3():
         # us-east-1 otherwise redirects, which a browser PUT can't follow.
         _client = boto3.client(
             "s3", region_name=region,
+            aws_access_key_id=os.getenv("FORGE_AWS_ACCESS_KEY_ID") or None,
+            aws_secret_access_key=os.getenv("FORGE_AWS_SECRET_ACCESS_KEY") or None,
             endpoint_url=f"https://s3.{region}.amazonaws.com",
             config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
     return _client
