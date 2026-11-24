@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Accounts — The PAW{% endblock %}
-{% macro action(uid, name, label, cls='') -%}
-  <form method="post" action="{{ url_for('auth.account_action', user_id=uid, action=name) }}">
-    {{ form.hidden_tag() }}<button type="submit" class="{{ cls }}">{{ label }}</button>
-  </form>
+{% block title %}Account management — The PAW{% endblock %}
+{% macro action(u, name, label, warning, cls='') -%}
+  <button type="button" class="{{ cls }}" data-confirm
+          data-url="{{ url_for('auth.account_action', user_id=u.id, action=name) }}"
+          data-label="{{ label }}" data-who="{{ u.name }} ({{ u.email }})"
+          data-warning="{{ warning }}">{{ label }}</button>
 {%- endmacro %}
 {% block content %}
 <style>
@@ -20,17 +21,28 @@
   .acct .tag.off { background: #fdecea; color: #a3271f; }
   .acct .tag.unconfirmed { background: #fff4e0; color: #8a5a00; }
   .acct .actions { white-space: nowrap; }
-  .acct .actions form { display: inline; }
   .acct .actions button { font-size: 12px; padding: 4px 8px; margin: 2px 0;
     border: 1px solid #ccc; border-radius: var(--radius); background: #fff; cursor: pointer; }
   .acct .actions button:hover { border-color: var(--crimson); color: var(--crimson); }
   .acct .actions button.danger { color: #a3271f; }
+  dialog.confirm { border: none; border-radius: var(--radius); padding: 24px;
+    max-width: 420px; width: calc(100% - 32px); box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+  dialog.confirm::backdrop { background: rgba(0,0,0,.45); }
+  dialog.confirm h3 { margin: 0 0 8px; color: var(--crimson); font-size: 26px; }
+  dialog.confirm .who { font-weight: 600; margin: 0 0 6px; }
+  dialog.confirm .warn { font-size: 14px; color: #555; margin: 0 0 14px; }
+  dialog.confirm .check { display: flex; gap: 8px; align-items: flex-start;
+    font-weight: 400; margin: 0 0 18px; cursor: pointer; }
+  dialog.confirm .check input { margin-top: 3px; }
+  dialog.confirm .row { display: flex; justify-content: flex-end; gap: 10px; }
+  dialog.confirm .cancel { background: #fff; color: var(--ink); border: 1px solid #ccc; }
+  dialog.confirm .btn:disabled { background: #c9a0a9; cursor: not-allowed; }
 </style>
 <div class="card">
-  <h2 style="margin-top: 0;">Accounts</h2>
+  <h2 style="margin-top: 0;">Account management</h2>
   <p style="font-size: 14px; color: #555; margin-top: 0;">
-    Turn off anyone who's left the team -- they're signed out on their next click.
-    "Sign out" ends every login for that account without turning it off.
+    Every action asks you to confirm first. "Reset password" sets the password to
+    <strong>golions</strong> -- tell the player to change it from the menu after signing in.
   </p>
   <div class="acct-wrap">
   <table class="acct">
@@ -48,13 +60,14 @@
         <td>{{ (u.last_login_at.strftime('%b ') ~ u.last_login_at.day ~ u.last_login_at.strftime(', %Y')) if u.last_login_at else '—' }}</td>
         <td class="actions">
           {% if u.id != current_user.id %}
-            {% if u.is_active %}{{ action(u.id, 'deactivate', 'Turn off', 'danger') }}
-            {% else %}{{ action(u.id, 'activate', 'Turn on') }}{% endif %}
-            {% if u.is_coach %}{{ action(u.id, 'make-player', 'Make player') }}
-            {% else %}{{ action(u.id, 'make-coach', 'Make coach') }}{% endif %}
-            {{ action(u.id, 'sign-out', 'Sign out') }}
+            {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
+            {% if u.is_coach %}{{ action(u, 'make-player', 'Make player', 'Removes coach access -- they will no longer be able to edit data or manage accounts.') }}
+            {% else %}{{ action(u, 'make-coach', 'Make coach', 'Gives full coach access, including editing data and managing every account on this page.') }}{% endif %}
+            {{ action(u, 'reset-password', 'Reset password', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
+            {% if not u.is_active %}{{ action(u, 'activate', 'Turn on', 'Lets this account sign in again.') }}{% endif %}
+            {{ action(u, 'delete', 'Delete account', 'Permanently deletes this account. This cannot be undone -- they would have to register again.', 'danger') }}
           {% endif %}
-          {% if mail_on and u.is_active %}{{ action(u.id, 'send-reset', 'Email reset link') }}{% endif %}
+          {% if mail_on and u.is_active %}{{ action(u, 'send-reset', 'Email reset link', 'Emails them a link to choose a new password.') }}{% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -62,4 +75,43 @@
   </table>
   </div>
 </div>
+
+<dialog class="confirm" id="confirm-dlg">
+  <form method="post" id="confirm-form">
+    {{ form.hidden_tag() }}
+    <h3 id="confirm-title"></h3>
+    <p class="who" id="confirm-who"></p>
+    <p class="warn" id="confirm-warn"></p>
+    <label class="check">
+      <input type="checkbox" name="confirm" value="yes" id="confirm-box" required>
+      <span>I confirm I want to perform this action.</span>
+    </label>
+    <div class="row">
+      <button type="button" class="btn cancel" id="confirm-cancel">Cancel</button>
+      <button type="submit" class="btn" id="confirm-go" disabled>Confirm</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  var dlg = document.getElementById("confirm-dlg");
+  var form = document.getElementById("confirm-form");
+  var box = document.getElementById("confirm-box");
+  var go = document.getElementById("confirm-go");
+  document.querySelectorAll("[data-confirm]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      form.action = btn.dataset.url;
+      document.getElementById("confirm-title").textContent = btn.dataset.label + "?";
+      document.getElementById("confirm-who").textContent = btn.dataset.who;
+      document.getElementById("confirm-warn").textContent = btn.dataset.warning;
+      go.textContent = btn.dataset.label;
+      box.checked = false;
+      go.disabled = true;
+      dlg.showModal();
+    });
+  });
+  box.addEventListener("change", function () { go.disabled = !box.checked; });
+  document.getElementById("confirm-cancel").addEventListener("click", function () { dlg.close(); });
+})();
+</script>
 {% endblock %}

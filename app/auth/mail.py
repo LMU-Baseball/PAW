@@ -38,7 +38,7 @@ def send_mail(to: str, subject: str, body: str) -> bool:
     raising, so a mail outage degrades to a flash message, not a 500."""
     backend = _backend()
     msg = EmailMessage()
-    msg["From"] = os.getenv("PAW_MAIL_FROM") or "noreply@lmubaseball.com"
+    msg["From"] = os.getenv("PAW_MAIL_FROM") or "LMU Baseball PAW <noreply@lmubaseball.com>"
     msg["To"] = to
     msg["Subject"] = subject
     reply_to = (os.getenv("PAW_MAIL_REPLY_TO") or "").strip()

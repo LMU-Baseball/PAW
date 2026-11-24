@@ -69,13 +69,30 @@
     header.bar .back {
       color: #fff; text-decoration: underline; font-size: 14px; margin-left: 18px;
     }
-    .user { font-size: 14px; color: rgba(255,255,255,.85); }
-    .user a { text-decoration: underline; }
-    .logout-form { display: inline; }
-    .logout-btn {
-      background: none; border: none; padding: 0; cursor: pointer;
-      font: inherit; color: inherit; text-decoration: underline;
+    /* Keep in sync with the same block in app/dashboards/shell.py's _INDEX_STRING. */
+    .paw-menu { position: relative; }
+    .paw-menu > summary {
+      list-style: none; cursor: pointer; width: 42px; height: 42px; border-radius: 6px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
     }
+    .paw-menu > summary::-webkit-details-marker { display: none; }
+    .paw-menu > summary:hover, .paw-menu[open] > summary { background: rgba(255,255,255,.18); }
+    .paw-menu > summary span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 1px; }
+    .paw-menu-panel {
+      position: absolute; right: 0; top: calc(100% + 8px); z-index: 1000; min-width: 230px;
+      background: #fff; color: #1a1a1a; border-radius: 8px; padding: 6px 0;
+      box-shadow: 0 8px 24px rgba(0,0,0,.22); font-family: system-ui, sans-serif;
+    }
+    .paw-menu-who { padding: 10px 16px; font-size: 13px; color: #666; border-bottom: 1px solid #eee; }
+    .paw-menu-who strong { display: block; font-size: 15px; color: #1a1a1a; }
+    .paw-menu-panel form { margin: 0; }
+    .paw-menu-panel a, .paw-menu-panel button {
+      display: block; width: 100%; text-align: left; padding: 10px 16px; font-size: 15px;
+      color: #1a1a1a !important; text-decoration: none; background: none; border: none; cursor: pointer;
+      font-family: system-ui, sans-serif;
+    }
+    .paw-menu-panel a:hover, .paw-menu-panel button:hover { background: #f5f5f5; color: #9A0021 !important; }
+    .paw-menu-panel .paw-menu-logout { border-top: 1px solid #eee; margin-top: 4px; }
     main.wrap { max-width: 900px; margin: 32px auto; padding: 0 20px; }
     h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: .5px; }
     .flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; font-size: 14px; }
@@ -101,13 +118,10 @@
     input[type=text]:focus, input[type=password]:focus, select:focus {
       outline: none; border-color: var(--crimson); box-shadow: 0 0 0 3px rgba(154,0,33,.15);
     }
-    /* Phone-only: let the user-info block drop to its own row instead of
-       squeezing the wordmark/links together (tablet/laptop/desktop untouched). */
+    /* Phone-only: tighter header (tablet/laptop/desktop untouched). */
     @media (max-width: 720px) {
-      header.bar { flex-wrap: wrap; height: auto; min-height: 64px;
-                   row-gap: 4px; padding: 10px 14px; }
+      header.bar { padding: 0 14px; }
       header.bar .brand .wordmark { font-size: 22px; }
-      .user { width: 100%; text-align: right; font-size: 12px; }
     }
   </style>
 </head>
@@ -121,12 +135,17 @@
       {% block header_back %}{% endblock %}
     </div>
     {% if current_user.is_authenticated %}
-      <span class="user">{{ current_user.name }} · {{ current_user.role }} ·
-        {% if current_user.is_coach %}<a href="{{ url_for('auth.accounts') }}">Accounts</a> ·{% endif %}
-        <a href="{{ url_for('auth.change_password') }}">Change password</a> ·
-        <form method="post" action="{{ url_for('auth.logout') }}" class="logout-form">
-          <button type="submit" class="logout-btn">Log out</button>
-        </form></span>
+      <details class="paw-menu">
+        <summary aria-label="Menu"><span></span><span></span><span></span></summary>
+        <div class="paw-menu-panel">
+          <div class="paw-menu-who"><strong>{{ current_user.name }}</strong>{{ current_user.role }}</div>
+          <a href="{{ url_for('auth.change_password') }}">Change password</a>
+          {% if current_user.can_manage_accounts %}<a href="{{ url_for('auth.accounts') }}">Account management</a>{% endif %}
+          <form method="post" action="{{ url_for('auth.logout') }}" class="paw-menu-logout">
+            <button type="submit">Log out</button>
+          </form>
+        </div>
+      </details>
     {% endif %}
   </header>
   <main class="wrap">
@@ -137,5 +156,12 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+    document.addEventListener("click", function (e) {
+      document.querySelectorAll("details.paw-menu[open]").forEach(function (d) {
+        if (!d.contains(e.target)) d.removeAttribute("open");
+      });
+    });
+  </script>
 </body>
 </html>

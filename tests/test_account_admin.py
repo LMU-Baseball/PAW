@@ -53,6 +53,9 @@ def _logged_in(client) -> bool:
     return client.get("/change-password").status_code == 200
 
 
+_OK = {"confirm": "yes"}
+
+
 def _uid(app, email):
     with app.app_context():
         return User.query.filter_by(email=email).one().id
@@ -119,9 +122,28 @@ def test_accounts_page_coach_only(app):
     assert b"player@lmu.edu" in resp.data
 
 
+def test_account_admins_list_limits_accounts_page_to_named_coaches(app, monkeypatch):
+    with app.app_context():
+        other = User(email="assistant@lmu.edu", name="assistant", role="coach")
+        other.set_password("password123")
+        other.mark_email_verified()
+        db.session.add(other)
+        db.session.commit()
+    monkeypatch.setenv("PAW_ACCOUNT_ADMINS", " Coach@LMU.edu ")
+    admin = _client_logged_in(app, "coach@lmu.edu")
+    assistant = _client_logged_in(app, "assistant@lmu.edu")
+    assert admin.get("/accounts").status_code == 200
+    assert assistant.get("/accounts").status_code == 403
+    pid = _uid(app, "player@lmu.edu")
+    assert assistant.post(f"/accounts/{pid}/deactivate", data=_OK).status_code == 403
+    assert _user(app, "player@lmu.edu").is_active
+    assert b"Account management" not in assistant.get("/change-password").data
+    assert b"Account management" in admin.get("/change-password").data
+
+
 def test_player_cannot_post_account_actions(app):
     player = _client_logged_in(app, "player@lmu.edu")
-    resp = player.post(f"/accounts/{_uid(app, 'coach@lmu.edu')}/deactivate")
+    resp = player.post(f"/accounts/{_uid(app, 'coach@lmu.edu')}/deactivate", data=_OK)
     assert resp.status_code == 403
     assert _user(app, "coach@lmu.edu").is_active
 
@@ -131,11 +153,11 @@ def test_coach_deactivate_and_reactivate(app):
     player = _client_logged_in(app, "player@lmu.edu")
     pid = _uid(app, "player@lmu.edu")
 
-    coach.post(f"/accounts/{pid}/deactivate")
+    coach.post(f"/accounts/{pid}/deactivate", data=_OK)
     assert not _user(app, "player@lmu.edu").is_active
     assert not _logged_in(player)
 
-    coach.post(f"/accounts/{pid}/activate")
+    coach.post(f"/accounts/{pid}/activate", data=_OK)
     assert _user(app, "player@lmu.edu").is_active
 
 
@@ -143,19 +165,19 @@ def test_coach_role_change_and_sign_out(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
     player = _client_logged_in(app, "player@lmu.edu")
     pid = _uid(app, "player@lmu.edu")
-    coach.post(f"/accounts/{pid}/make-coach")
+    coach.post(f"/accounts/{pid}/make-coach", data=_OK)
     assert _user(app, "player@lmu.edu").role == "coach"
-    coach.post(f"/accounts/{pid}/make-player")
+    coach.post(f"/accounts/{pid}/make-player", data=_OK)
     assert _user(app, "player@lmu.edu").role == "player"
-    coach.post(f"/accounts/{pid}/sign-out")
+    coach.post(f"/accounts/{pid}/sign-out", data=_OK)
     assert not _logged_in(player)
 
 
 def test_coach_cannot_lock_out_self(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
     cid = _uid(app, "coach@lmu.edu")
-    for action in ("deactivate", "make-player", "sign-out"):
-        coach.post(f"/accounts/{cid}/{action}")
+    for action in ("deactivate", "make-player", "sign-out", "reset-password", "delete"):
+        coach.post(f"/accounts/{cid}/{action}", data=_OK)
     me = _user(app, "coach@lmu.edu")
     assert me.is_active and me.role == "coach"
     assert _logged_in(coach)
@@ -163,12 +185,46 @@ def test_coach_cannot_lock_out_self(app):
 
 def test_coach_can_email_reset_link(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
-    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/send-reset")
+    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/send-reset", data=_OK)
     assert len(mail.outbox) == 1
     assert mail.outbox[0]["To"] == "player@lmu.edu"
 
 
 def test_unknown_action_rejected(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
-    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/delete")
+    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/nuke", data=_OK)
     assert _user(app, "player@lmu.edu").is_active
+
+
+def test_action_without_confirm_checkbox_is_rejected(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    pid = _uid(app, "player@lmu.edu")
+    coach.post(f"/accounts/{pid}/make-coach")
+    coach.post(f"/accounts/{pid}/delete", data={"confirm": ""})
+    assert _user(app, "player@lmu.edu").role == "player"
+
+
+def test_coach_resets_password_to_default(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    player = _client_logged_in(app, "player@lmu.edu")
+    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/reset-password", data=_OK)
+    assert _user(app, "player@lmu.edu").check_password("golions")
+    assert not _logged_in(player)
+
+
+def test_coach_deletes_account(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    player = _client_logged_in(app, "player@lmu.edu")
+    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/delete", data=_OK)
+    with app.app_context():
+        assert User.query.filter_by(email="player@lmu.edu").first() is None
+    assert not _logged_in(player)
+
+
+def test_header_menu_shows_account_management_to_coaches_only(app):
+    coach_page = _client_logged_in(app, "coach@lmu.edu").get("/change-password").data
+    player_page = _client_logged_in(app, "player@lmu.edu").get("/change-password").data
+    for page in (coach_page, player_page):
+        assert b"paw-menu" in page and b"Log out" in page
+    assert b"Account management" in coach_page
+    assert b"Account management" not in player_page

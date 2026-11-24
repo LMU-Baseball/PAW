@@ -38,6 +38,10 @@ def is_coach_email(email: str) -> bool:
     return email.strip().lower() in allowlist
 
 
+def _account_admin_emails() -> set[str]:
+    return {e.strip().lower() for e in os.getenv("PAW_ACCOUNT_ADMINS", "").split(",") if e.strip()}
+
+
 class User(UserMixin, db.Model):
     __tablename__ = "users"
 
@@ -104,6 +108,16 @@ class User(UserMixin, db.Model):
     @property
     def is_coach(self) -> bool:
         return self.role == "coach"
+
+    @property
+    def can_manage_accounts(self) -> bool:
+        """Account management is narrower than coach: when PAW_ACCOUNT_ADMINS is
+        set, only those coaches get it. Unset falls back to every coach so a
+        deploy that hasn't added the variable yet doesn't lock everyone out."""
+        if not self.is_coach:
+            return False
+        admins = _account_admin_emails()
+        return not admins or self.email.strip().lower() in admins
 
     def can_view_player(self, trackman_id) -> bool:
         """Team-transparent: any authenticated account may view any player.

@@ -15,7 +15,7 @@ from wtforms import PasswordField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 
 from app.auth import tokens
-from app.auth.access import role_required
+from app.auth.access import account_admin_required
 from app.auth.mail import mail_enabled, send_mail
 from app.auth.models import User, is_coach_email
 from app.extensions import db, limiter
@@ -105,24 +105,34 @@ class ResetPasswordForm(FlaskForm):
     submit = SubmitField("Set new password")
 
 
-_SIGNATURE = "\n\n-- LMU Baseball PAW"
+_SIGNATURE = ("\n\nGo Lions,\nLMU Baseball\n\n"
+              "--\nYou're getting this because this address is registered on the PAW, "
+              "the LMU Baseball team's player development site. This inbox isn't "
+              "monitored -- for help, ask a coach.")
+# School spam filters hold mail from senders they haven't seen before; this
+# goes on every "we sent you an email" message until LMU IT allowlists us.
+_JUNK_HINT = "Don't see it within a few minutes? Check your Junk/Spam folder."
 
 
 def _send_verify_email(user: User) -> bool:
     link = url_for("auth.verify_email", token=tokens.make_verify_token(user), _external=True)
-    return send_mail(user.email, "Confirm your PAW account",
-                     f"Hi {user.name},\n\nConfirm your email to finish setting up your PAW "
-                     f"account:\n\n{link}\n\nThis link expires in 3 days. If you didn't "
-                     f"create a PAW account, you can ignore this email.{_SIGNATURE}")
+    return send_mail(user.email, "LMU Baseball PAW: confirm your email address",
+                     f"Hi {user.name},\n\nThanks for signing up for the PAW, LMU Baseball's "
+                     f"player development site. To finish creating your account, confirm "
+                     f"your email address by opening this link:\n\n{link}\n\n"
+                     f"The link expires in 3 days. If you didn't sign up for the PAW, you "
+                     f"can safely ignore this email and no account will be activated."
+                     f"{_SIGNATURE}")
 
 
 def _send_reset_email(user: User) -> bool:
     link = url_for("auth.reset_password", token=tokens.make_reset_token(user), _external=True)
-    return send_mail(user.email, "Reset your PAW password",
-                     f"Hi {user.name},\n\nSomeone (hopefully you) asked to reset your PAW "
-                     f"password. Choose a new one here:\n\n{link}\n\nThis link expires in "
-                     f"1 hour and works once. If you didn't ask for this, ignore this email -- "
-                     f"your password hasn't changed.{_SIGNATURE}")
+    return send_mail(user.email, "LMU Baseball PAW: reset your password",
+                     f"Hi {user.name},\n\nWe received a request to reset the password for "
+                     f"your PAW account. To choose a new password, open this link:\n\n"
+                     f"{link}\n\nThe link expires in 1 hour and can only be used once. "
+                     f"If you didn't ask to reset your password, you can ignore this email "
+                     f"-- your current password still works.{_SIGNATURE}")
 
 
 class CodeForm(FlaskForm):
@@ -145,11 +155,13 @@ def _code_digest(uid: int, code: str) -> str:
 
 def _start_code_check(user: User, next_url: str | None):
     code = f"{secrets.randbelow(1_000_000):06d}"
-    sent = send_mail(user.email, f"Your PAW sign-in code: {code}",
-                     f"Hi {user.name},\n\nYour PAW sign-in code is:\n\n    {code}\n\n"
-                     f"It expires in 15 minutes. PAW asks for this about once a month to "
-                     f"confirm you're still on the team. If you didn't just try to sign in, "
-                     f"change your password.{_SIGNATURE}")
+    sent = send_mail(user.email, f"LMU Baseball PAW: your sign-in code is {code}",
+                     f"Hi {user.name},\n\nHere is your PAW sign-in code:\n\n    {code}\n\n"
+                     f"Enter it on the sign-in page within 15 minutes. About once a month "
+                     f"the PAW asks for a code like this to make sure only current team "
+                     f"members can get in.\n\nIf you didn't just try to sign in, someone "
+                     f"may know your password -- change it from the menu after you sign in, "
+                     f"or ask a coach to reset it.{_SIGNATURE}")
     if not sent:
         flash("We couldn't send your sign-in code. Try again in a few minutes.", "error")
         return redirect(url_for("auth.login"))
@@ -192,7 +204,7 @@ def login():
         if user and user.is_active and user.check_password(form.password.data):
             if mail_enabled() and not user.email_verified:
                 flash("Confirm your email first -- check your inbox for the link, "
-                      "or send a new one below.", "error")
+                      f"or send a new one below. {_JUNK_HINT}", "error")
                 return redirect(url_for("auth.resend_verification", email=user.email))
             if user.reverify_due:
                 return _start_code_check(user, _safe_next(request.args.get("next")))
@@ -235,7 +247,7 @@ def register():
                 return redirect(url_for("main.index"))
             if _send_verify_email(user):
                 flash(f"Account created. We sent a confirmation link to {email} -- "
-                      "click it to sign in.", "info")
+                      f"click it to sign in. {_JUNK_HINT}", "info")
                 return redirect(url_for("auth.login"))
             else:
                 flash("Account created, but the confirmation email didn't send. "
@@ -308,7 +320,8 @@ def resend_verification():
             _send_verify_email(user)
         # Same answer whether or not the account exists, so this form can't be
         # used to discover who has a PAW account.
-        flash("If that account is waiting on confirmation, a new link is on its way.", "info")
+        flash("If that account is waiting on confirmation, a new link is on its way. "
+              f"{_JUNK_HINT}", "info")
         return redirect(url_for("auth.login"))
     return render_template("auth/email_form.html", form=form, title="Confirm your email",
                            intro="Didn't get the confirmation email? Enter your LMU email "
@@ -327,7 +340,7 @@ def forgot_password():
         if user and user.is_active:
             _send_reset_email(user)
         flash("If there's a PAW account for that email, a reset link is on its way. "
-              "It expires in 1 hour.", "info")
+              f"It expires in 1 hour. {_JUNK_HINT}", "info")
         return redirect(url_for("auth.login"))
     return render_template("auth/email_form.html", form=form, title="Forgot password",
                            intro="Enter your LMU email and we'll send you a link to choose "
@@ -361,13 +374,16 @@ class AccountActionForm(FlaskForm):
 
 
 _ACCOUNT_ACTIONS = ("deactivate", "activate", "make-coach", "make-player",
-                    "sign-out", "send-reset")
-_SELF_BLOCKED = {"deactivate", "make-player", "sign-out"}
+                    "sign-out", "send-reset", "reset-password", "delete")
+_SELF_BLOCKED = {"deactivate", "make-player", "sign-out", "reset-password", "delete"}
+# Until account email is live, a coach resets a forgotten password to this
+# and tells the player to change it after signing in.
+DEFAULT_RESET_PASSWORD = "golions"
 
 
 @auth_bp.route("/accounts")
 @login_required
-@role_required("coach")
+@account_admin_required
 def accounts():
     users = User.query.order_by(User.is_active.desc(), User.role, User.name).all()
     return render_template("auth/accounts.html", users=users, form=AccountActionForm(),
@@ -376,12 +392,16 @@ def accounts():
 
 @auth_bp.route("/accounts/<int:user_id>/<action>", methods=["POST"])
 @login_required
-@role_required("coach")
+@account_admin_required
 def account_action(user_id, action):
     form = AccountActionForm()
     user = db.session.get(User, user_id)
     if action not in _ACCOUNT_ACTIONS or user is None or not form.validate_on_submit():
         flash("That action couldn't be completed.", "error")
+        return redirect(url_for("auth.accounts"))
+    # The confirm checkbox is enforced here too, not just in the popup's JS.
+    if request.form.get("confirm") != "yes":
+        flash("Tick the confirmation box to perform that action.", "error")
         return redirect(url_for("auth.accounts"))
     if user.id == current_user.id and action in _SELF_BLOCKED:
         # A coach turning off or demoting their own account would lock them
@@ -404,11 +424,23 @@ def account_action(user_id, action):
     elif action == "sign-out":
         user.sign_out_everywhere()
         msg = f"Signed {user.email} out of every device."
+    elif action == "reset-password":
+        user.set_password(DEFAULT_RESET_PASSWORD)
+        user.sign_out_everywhere()
+        msg = (f"Reset {user.email}'s password to \"{DEFAULT_RESET_PASSWORD}\". "
+               "Have them change it after signing in.")
+    elif action == "delete":
+        email = user.email
+        db.session.delete(user)
+        db.session.commit()
+        flash(f"Deleted the account for {email}.", "info")
+        return redirect(url_for("auth.accounts"))
     else:
         if not (mail_enabled() and user.is_active and _send_reset_email(user)):
             flash(f"Couldn't send a reset email to {user.email}.", "error")
             return redirect(url_for("auth.accounts"))
-        msg = f"Sent a password reset link to {user.email}."
+        msg = (f"Sent a password reset link to {user.email}. Tell them to check "
+               "Junk/Spam if it doesn't show up.")
     db.session.commit()
     flash(msg, "info")
     return redirect(url_for("auth.accounts"))

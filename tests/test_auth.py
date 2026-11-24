@@ -12,7 +12,10 @@ from config import Config
 
 
 @pytest.fixture()
-def app():
+def app(monkeypatch):
+    # These tests cover the email-off flow; a dev .env with SMTP turned on
+    # would otherwise route every login through email confirmation.
+    monkeypatch.delenv("PAW_MAIL_BACKEND", raising=False)
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
 

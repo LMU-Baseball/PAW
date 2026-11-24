@@ -14,7 +14,8 @@
                  autocomplete="one-time-code", maxlength="7") }}
     <div style="margin-top: 20px;">{{ form.submit(class="btn") }}</div>
   </form>
-  <p style="margin-top: 16px; font-size: 14px;">Didn't get it? Check spam, or
+  <p style="margin-top: 16px; font-size: 14px;">Don't see it within a few minutes? Check
+    your <strong>Junk/Spam</strong> folder for an email from noreply@lmubaseball.com, or
     <a href="{{ url_for('auth.login') }}">sign in again</a> to send a new code.</p>
 </div>
 {% endblock %}
