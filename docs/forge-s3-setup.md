@@ -94,9 +94,9 @@ Description=PAW Forge video worker
 After=network.target
 
 [Service]
-WorkingDirectory=/home/ubuntu/PAW
-EnvironmentFile=/home/ubuntu/PAW/.env
-ExecStart=/home/ubuntu/PAW/.venv/bin/python scripts/forge_transcode.py
+User=ubuntu
+WorkingDirectory=/opt/paw
+ExecStart=/opt/paw/.venv/bin/python scripts/forge_transcode.py
 Restart=always
 RestartSec=30
 MemoryMax=700M
@@ -104,6 +104,11 @@ MemoryMax=700M
 [Install]
 WantedBy=multi-user.target
 ```
+
+The worker reads `/opt/paw/.env` itself (via `config.py`), the same as the
+`paw` service, so it needs no `EnvironmentFile`. The deploy workflow restarts
+only `paw`, so after a deploy that changes Forge code, also run
+`sudo systemctl restart paw-forge`.
 
 ```
 sudo systemctl daemon-reload && sudo systemctl enable --now paw-forge
