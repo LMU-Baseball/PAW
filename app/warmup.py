@@ -104,23 +104,12 @@ def warm_caches() -> None:
             _safe(lambda: C.game_pitches_for(gid, cid))
             _safe(lambda: P.game_context(gid))       # catching scoreboard shares game_context
 
-    # Velo Board + Competitive Cauldron. These two boards were added after the
-    # original warm set and carry the SAME first-open cost the others do: a
-    # per-rostered-pitcher fan of Trackman round-trips (velo leaderboard) and a
-    # per-pitcher/day compute (cauldron grid), each ~0.5s to RDS. Warming them
-    # here is what makes them open instantly instead of cold-loading. The exact
-    # (season, week, cycle, play_date) keys mirror what serve_layout defaults to
-    # so the warmed @cached entries actually hit.
-    #
-    # Velo Board/Cauldron's OWN default season (serve_layout in both
-    # dashboards' layout.py) is today's real calendar season -- as of this
-    # session, current_season() (used for the hitting/pitching/catching
-    # warming above) ALSO always returns today's calendar season, so
-    # `board_season` and `season` are now the same value. Kept as two
-    # separately-computed locals (rather than collapsed to one) so this file
-    # doesn't silently break if the two functions' behavior ever diverges
-    # again later.
-    from app.data import velo_board, cauldron
+    # Velo Board: added after the original warm set and carries the same
+    # first-open cost (a per-rostered-pitcher fan of Trackman round-trips,
+    # ~0.5s each to RDS). The (season, cycle) keys mirror serve_layout's
+    # defaults so the warmed @cached entries actually hit. `board_season` is
+    # kept separate from current_season() in case the two ever diverge again.
+    from app.data import velo_board
 
     today = date.today().isoformat()
     board_season = season
@@ -144,21 +133,6 @@ def warm_caches() -> None:
     from app.data import hitter_process_board
     _safe(lambda: hitter_process_board.game_types(*hitter_process_board.cycle_bounds(board_season, velo_cycle)))
     _safe(lambda: hitter_process_board.board(board_season, velo_cycle))
-
-    cycle = f"{board_season}-c1"
-    _safe(cauldron.read_scoring)
-    _safe(lambda: cauldron.read_teams(cycle))
-    _safe(cauldron.read_daily)
-    # cauldron/grid.py::coach_grid() resolves its own roster as
-    # pitching_caps.lmu_pitchers(season) using the SAME board_season layout.py
-    # now passes in -- warm that exact roster key, not the current_season()-
-    # scoped `pitchers` fetched above for the pitching dashboard's own warming.
-    board_pitchers = _safe(lambda: P.lmu_pitchers(board_season))
-    if board_pitchers is not None and not board_pitchers.empty:
-        from app.dashboards.cauldron import grid as cauldron_grid
-        _safe(lambda: cauldron_grid._grid_rows(
-            board_pitchers, cauldron.read_scoring(), cauldron.read_teams(cycle),
-            cauldron.read_daily(today), today))            # coach grid prefill
 
 
 def start_warm_thread() -> threading.Thread:

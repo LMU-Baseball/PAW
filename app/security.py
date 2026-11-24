@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
 # violation reports) would be needed before the promised "tighten after
 # reviewing real reports" pass has any actual data to review.
 #
+# connect-src allows S3 because The Forge uploads browser -> S3 directly
+# (presigned multipart PUTs, app/data/forge_storage.py).
+#
 # media-src is deliberately as permissive as img-src: pitch video
 # (app/dashboards/video/component.py's html.Video/html.Source) is served from
 # a cross-origin public S3 bucket (see app/data/video.py), not from this app's
@@ -59,7 +62,7 @@ _CSP = (
     "img-src 'self' data: https:; "
     "media-src 'self' https:; "
     "font-src 'self' data:; "
-    "connect-src 'self'; "
+    "connect-src 'self' https://*.amazonaws.com; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'"

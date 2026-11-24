@@ -61,6 +61,7 @@ def create_app(config_object=Config) -> Flask:
     from app.data import notes  # noqa: F401  (registers GameNote for create_all)
     from app.data import dev_plans  # noqa: F401  (registers DevPlan for create_all)
     from app.data import practice_plans  # noqa: F401  (registers practice-plan models)
+    from app.data import forge  # noqa: F401  (registers Forge models)
 
     from app.auth.routes import auth_bp
     from app.main.routes import main_bp
@@ -69,6 +70,9 @@ def create_app(config_object=Config) -> Flask:
 
     from app.reports.routes import report_bp
     server.register_blueprint(report_bp)
+
+    from app.forge.routes import forge_bp
+    server.register_blueprint(forge_bp)
 
     from app.security import register_rate_limit_handler, register_security_headers
     register_security_headers(server)
