@@ -24,6 +24,7 @@ from config import Config
 PITCHER_A = "Adam Behrens"
 PITCHER_B = "Ryan Bresaw"
 HITTER = "Cam Casado"
+UNSIGNED = "Jake Newcomb"
 
 
 class FakeS3:
@@ -57,8 +58,8 @@ class FakeS3:
 @pytest.fixture()
 def app(monkeypatch):
     monkeypatch.delenv("FORGE_S3_BUCKET", raising=False)
-    monkeypatch.setattr(F, "_roster_pitcher_keys",
-                        lambda season: {"adam behrens", "bresaw ryan"})
+    monkeypatch.setattr(F, "_roster_pitchers",
+                        lambda season: [PITCHER_A, PITCHER_B, UNSIGNED])
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
 
@@ -122,6 +123,16 @@ def _uid(app, email):
         return User.query.filter_by(email=email).one().id
 
 
+def _chan(app, email_or_name):
+    """Channel id for a player's account email, or for a roster name."""
+    with app.app_context():
+        F.sync_channels()
+        if "@" in email_or_name:
+            uid = User.query.filter_by(email=email_or_name).one().id
+            return F.ForgeChannel.query.filter_by(user_id=uid).one().id
+        return F.ForgeChannel.query.filter_by(name=email_or_name).one().id
+
+
 def _say(client, channel, body, parent=None):
     r = client.post(f"/forge/api/channels/{channel}/posts", {"body": body, "parent_id": parent})
     assert r.status_code == 201, r.json
@@ -143,31 +154,66 @@ def test_pitching_hub_links_forge_not_cauldron(app):
     assert c.get("/dash/cauldron/").status_code == 404
 
 
-def test_channels_list_only_rostered_pitchers(app):
+def test_channels_list_every_rostered_pitcher_signed_up_or_not(app):
     c = Client(app, "coach@lmu.edu")
     chans = c.get("/forge/api/channels").json["channels"]
-    assert [ch["name"] for ch in chans] == [PITCHER_A, PITCHER_B]
+    assert [(ch["name"], ch["joined"]) for ch in chans] == [
+        (PITCHER_A, True), (UNSIGNED, False), (PITCHER_B, True)]
 
 
-def test_deactivated_player_has_no_channel(app):
+def test_sync_is_idempotent(app):
+    with app.app_context():
+        first = [c.id for c in F.sync_channels()]
+        assert [c.id for c in F.sync_channels()] == first
+        assert F.ForgeChannel.query.count() == 3
+
+
+def test_unsigned_pitcher_channel_takes_coach_posts_then_links_on_signup(app, s3):
+    coach = Client(app, "coach@lmu.edu")
+    chan = _chan(app, UNSIGNED)
+    _say(coach, chan, "Welcome -- post your first pen here")
+    body = {"name": "pen.mov", "size": 1000, "duration": 60}
+    with app.app_context():
+        u = User(email="j@lmu.edu", name="jake newcomb", role="player")
+        u.set_password("password123")
+        db.session.add(u)
+        db.session.commit()
+    j = Client(app, "j@lmu.edu")
+    d = j.get(f"/forge/api/channels/{chan}/posts").json
+    assert d["channel"]["joined"] and d["channel"]["mine"] and d["channel"]["can_upload"]
+    assert [p["body"] for p in d["posts"]] == ["Welcome -- post your first pen here"]
+    assert j.post(f"/forge/api/channels/{chan}/uploads", body).status_code == 201
+
+
+def test_hitter_account_gets_no_channel_and_cannot_upload_anywhere(app, s3):
+    h = Client(app, "h@lmu.edu")
+    names = [ch["name"] for ch in h.get("/forge/api/channels").json["channels"]]
+    assert HITTER not in names
+    assert h.post(f"/forge/api/channels/{_chan(app, UNSIGNED)}/uploads",
+                  {"name": "x.mov", "size": 10}).status_code == 403
+
+
+def test_deactivated_account_keeps_channel_but_shows_not_joined(app):
+    chan = _chan(app, "b@lmu.edu")
     with app.app_context():
         User.query.filter_by(email="b@lmu.edu").one().is_active = False
         db.session.commit()
     c = Client(app, "coach@lmu.edu")
-    assert PITCHER_B not in [ch["name"] for ch in c.get("/forge/api/channels").json["channels"]]
-    assert c.get(f"/forge/api/channels/{_uid(app, 'b@lmu.edu')}/posts").status_code == 404
+    chans = {ch["name"]: ch for ch in c.get("/forge/api/channels").json["channels"]}
+    assert chans[PITCHER_B]["joined"] is False
+    assert c.get(f"/forge/api/channels/{chan}/posts").status_code == 200
 
 
-def test_coach_account_is_not_a_channel(app):
+def test_unknown_channel_is_404(app):
     c = Client(app, "a@lmu.edu")
-    assert c.get(f"/forge/api/channels/{_uid(app, 'coach@lmu.edu')}/posts").status_code == 404
+    assert c.get("/forge/api/channels/9999/posts").status_code == 404
 
 
 # --- messaging permissions ---
 
 def test_player_can_read_and_comment_in_another_pitchers_channel(app):
     a, b = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu")
-    chan_a = _uid(app, "a@lmu.edu")
+    chan_a = _chan(app, "a@lmu.edu")
     top = _say(a, chan_a, "Threw 40 today")
     _say(b, chan_a, "nice", parent=top["id"])
     posts = b.get(f"/forge/api/channels/{chan_a}/posts").json["posts"]
@@ -177,13 +223,13 @@ def test_player_can_read_and_comment_in_another_pitchers_channel(app):
 
 def test_writes_need_csrf_token(app):
     a = Client(app, "a@lmu.edu")
-    r = a.c.post(f"/forge/api/channels/{_uid(app, 'a@lmu.edu')}/posts", json={"body": "hi"})
+    r = a.c.post(f"/forge/api/channels/{_chan(app, 'a@lmu.edu')}/posts", json={"body": "hi"})
     assert r.status_code == 400
 
 
 def test_empty_and_oversized_messages_rejected(app):
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     assert a.post(f"/forge/api/channels/{chan}/posts", {"body": "   "}).status_code == 400
     assert a.post(f"/forge/api/channels/{chan}/posts",
                   {"body": "x" * (F.MAX_BODY_CHARS + 1)}).status_code == 400
@@ -191,7 +237,7 @@ def test_empty_and_oversized_messages_rejected(app):
 
 def test_reply_must_target_a_top_level_post_in_the_same_channel(app):
     a = Client(app, "a@lmu.edu")
-    chan_a, chan_b = _uid(app, "a@lmu.edu"), _uid(app, "b@lmu.edu")
+    chan_a, chan_b = _chan(app, "a@lmu.edu"), _chan(app, "b@lmu.edu")
     top = _say(a, chan_a, "top")
     reply = _say(a, chan_a, "reply", parent=top["id"])
     assert a.post(f"/forge/api/channels/{chan_b}/posts",
@@ -202,7 +248,7 @@ def test_reply_must_target_a_top_level_post_in_the_same_channel(app):
 
 def test_delete_own_or_as_coach_only(app):
     a, b, coach = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu"), Client(app, "coach@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     p1 = _say(a, chan, "mine")
     p2 = _say(a, chan, "also mine")
     assert b.delete(f"/forge/api/posts/{p1['id']}").status_code == 403
@@ -218,7 +264,7 @@ def test_delete_own_or_as_coach_only(app):
 
 def test_unread_badges_count_others_posts_until_read(app):
     a, coach = Client(app, "a@lmu.edu"), Client(app, "coach@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     _say(a, chan, "my own post")
     _say(coach, chan, "looked good")
     _say(coach, chan, "check the 2:10 rep")
@@ -236,7 +282,7 @@ def test_unread_badges_count_others_posts_until_read(app):
 
 def test_season_filter_keeps_threads_together(app):
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     old = _say(a, chan, "last winter")
     _say(a, chan, "late reply", parent=old["id"])
     _say(a, chan, "this winter")
@@ -255,14 +301,14 @@ def test_season_filter_keeps_threads_together(app):
 def test_uploads_disabled_without_bucket(app):
     a = Client(app, "a@lmu.edu")
     assert a.cfg["uploads_enabled"] is False
-    r = a.post(f"/forge/api/channels/{_uid(app, 'a@lmu.edu')}/uploads",
+    r = a.post(f"/forge/api/channels/{_chan(app, 'a@lmu.edu')}/uploads",
                {"name": "pen.mov", "size": 1000})
     assert r.status_code == 503
 
 
 def test_only_channel_owner_or_coach_can_upload(app, s3):
     a, b, coach = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu"), Client(app, "coach@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     body = {"name": "pen.mov", "size": 1000, "duration": 60}
     assert b.post(f"/forge/api/channels/{chan}/uploads", body).status_code == 403
     assert a.post(f"/forge/api/channels/{chan}/uploads", body).status_code == 201
@@ -273,7 +319,7 @@ def test_only_channel_owner_or_coach_can_upload(app, s3):
 
 def test_upload_size_and_length_limits(app, s3):
     a = Client(app, "a@lmu.edu")
-    url = f"/forge/api/channels/{_uid(app, 'a@lmu.edu')}/uploads"
+    url = f"/forge/api/channels/{_chan(app, 'a@lmu.edu')}/uploads"
     assert a.post(url, {"name": "x.mov", "size": F.MAX_UPLOAD_BYTES + 1}).status_code == 400
     assert a.post(url, {"name": "x.mov", "size": 1000,
                         "duration": F.MAX_DURATION_SEC + 120}).status_code == 400
@@ -282,7 +328,7 @@ def test_upload_size_and_length_limits(app, s3):
 
 def test_upload_handshake_queues_video_and_posts_it(app, s3):
     a, b = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     size = S.PART_SIZE * 2 + 5
     start = a.post(f"/forge/api/channels/{chan}/uploads",
                    {"name": "IMG_0001.MOV", "size": size, "type": "video/quicktime",
@@ -303,10 +349,10 @@ def test_upload_handshake_queues_video_and_posts_it(app, s3):
 
 def test_abort_cancels_upload(app, s3):
     a = Client(app, "a@lmu.edu")
-    vid = a.post(f"/forge/api/channels/{_uid(app, 'a@lmu.edu')}/uploads",
+    vid = a.post(f"/forge/api/channels/{_chan(app, 'a@lmu.edu')}/uploads",
                  {"name": "x.mp4", "size": 10}).json["video_id"]
     assert a.post(f"/forge/api/uploads/{vid}/abort").status_code == 200
-    assert s3.aborted == [f"forge/{_uid(app, 'a@lmu.edu')}/{vid}/original.mp4"]
+    assert s3.aborted == [f"forge/{_chan(app, 'a@lmu.edu')}/{vid}/original.mp4"]
     with app.app_context():
         assert db.session.get(F.ForgeVideo, vid).status == "failed"
 
@@ -321,7 +367,7 @@ def _ready_video(app, s3, client, chan):
 
 def test_play_redirects_only_when_ready_and_not_deleted(app, s3):
     a, b = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     vid, post = _ready_video(app, s3, a, chan)
     assert b.get(f"/forge/video/{vid}/play").status_code == 404
     with app.app_context():
@@ -336,7 +382,7 @@ def test_play_redirects_only_when_ready_and_not_deleted(app, s3):
 
 def test_polling_reports_video_status_changes(app, s3):
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     vid, post = _ready_video(app, s3, a, chan)
     with app.app_context():
         F.set_video(db.session.get(F.ForgeVideo, vid), status="ready")
@@ -369,7 +415,7 @@ def test_transcode_makes_720p_portrait_safe_copy_and_drops_original(app, s3, tmp
                     "sine=frequency=440:duration=3", "-shortest", "-c:v", "libx264",
                     "-preset", "ultrafast", "-c:a", "aac", src], check=True)
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     vid, key = _queued_from_file(app, s3, a, chan, src, "pen.mp4")
     with app.app_context():
         assert transcode.run_once() == 1
@@ -387,7 +433,7 @@ def test_transcode_marks_non_video_failed(app, s3, tmp_path):
     junk = tmp_path / "notes.mov"
     junk.write_bytes(b"not a video at all")
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     vid, key = _queued_from_file(app, s3, a, chan, str(junk), "notes.mov")
     with app.app_context():
         transcode.run_once()
@@ -399,7 +445,7 @@ def test_transcode_marks_non_video_failed(app, s3, tmp_path):
 def test_stale_uploads_expire_and_interrupted_requeue(app, s3):
     from app.forge import transcode
     a = Client(app, "a@lmu.edu")
-    chan = _uid(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
     stale = a.post(f"/forge/api/channels/{chan}/uploads", {"name": "x.mp4", "size": 10}).json["video_id"]
     with app.app_context():
         v = db.session.get(F.ForgeVideo, stale)

@@ -45,6 +45,7 @@ def _payload() -> dict:
 
 @forge_bp.route("/")
 def index():
+    F.sync_channels()
     return render_template(
         "forge/index.html",
         forge_config={
@@ -69,8 +70,9 @@ def api_posts(channel_id):
     after = request.args.get("after", type=int) or 0
     season = request.args.get("season") or None
     return jsonify({
-        "channel": {"id": channel.id, "name": channel.name,
-                    "can_upload": F.can_upload(current_user, channel.id),
+        "channel": {"id": channel.id, "name": channel.name, "joined": channel.joined,
+                    "mine": channel.joined and channel.user_id == current_user.id,
+                    "can_upload": F.can_upload(current_user, channel),
                     "seasons": F.channel_seasons(channel.id)},
         "posts": F.list_posts(channel.id, current_user, season=season, after_id=after),
         "videos": F.video_states(channel.id, request.args.get("videos", "")),
@@ -112,7 +114,7 @@ def api_mark_read(channel_id):
 @limiter.limit("30 per hour")
 def api_start_upload(channel_id):
     channel = _channel_or_404(channel_id)
-    if not F.can_upload(current_user, channel.id):
+    if not F.can_upload(current_user, channel):
         abort(403)
     if not S.configured():
         return _json_error("Video uploads aren't set up yet.", 503)

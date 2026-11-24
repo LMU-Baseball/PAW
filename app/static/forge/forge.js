@@ -39,8 +39,13 @@
       b.type = "button";
       if (state.channel && state.channel.id === c.id) b.classList.add("active");
       if (c.unread) b.classList.add("unread");
+      if (!c.joined) {
+        b.classList.add("pending");
+        b.title = `${c.name} hasn't made a PAW account yet`;
+      }
       const nm = el("span", "nm", c.name);
       if (c.mine) nm.appendChild(el("span", "you", "(you)"));
+      if (!c.joined) nm.appendChild(el("span", "you", "· not on PAW yet"));
       b.appendChild(nm);
       if (c.unread) b.appendChild(el("span", "forge-badge", String(c.unread)));
       b.addEventListener("click", () => openChannel(c.id));
@@ -186,9 +191,13 @@
       if (!kids.has(p.parent_id)) kids.set(p.parent_id, []);
       kids.get(p.parent_id).push(p);
     }
-    if (!tops.length) {
-      const mine = state.channel && state.channel.id === cfg.me;
-      feed.appendChild(el("p", "forge-empty", mine
+    const ch = state.channel || {};
+    if (ch.name && ch.joined === false) {
+      feed.appendChild(el("p", "forge-empty",
+        `${ch.name} hasn't made a PAW account yet. Messages posted here will be waiting ` +
+        "when they sign up, and they can upload video once they do."));
+    } else if (!tops.length) {
+      feed.appendChild(el("p", "forge-empty", ch.mine
         ? "This is your channel. Upload a bullpen or send the coaches a message."
         : "Nothing here yet for this season."));
     }

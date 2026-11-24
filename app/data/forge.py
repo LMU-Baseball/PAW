@@ -1,9 +1,12 @@
-"""The Forge: one Slack-style channel per pitcher account for offseason video
+"""The Forge: one Slack-style channel per rostered pitcher for offseason video
 and back-and-forth with the coaches.
 
-A channel IS a player's user account (`channel_id` = users.id). Anyone signed in
-can read and comment in any channel; only the channel's own player (or a coach)
-can post video there. Video bytes never live in this database -- they sit in a
+Channels come from the season's reviewed roster file (RHP/LHP), so every
+pitcher has one whether or not they've made a PAW account yet. A channel is
+keyed by the pitcher's normalized name and links to their account
+(`user_id`) automatically once an account with a matching name exists.
+Anyone signed in can read and comment in any channel; only the linked player
+(or a coach) can post video there. Video bytes never live in this database -- they sit in a
 private S3 bucket (app.data.forge_storage); `ForgeVideo` holds only the keys and
 processing state. Posts are soft-deleted so a removed message can be recovered.
 """
@@ -37,11 +40,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+class ForgeChannel(db.Model):
+    __tablename__ = "forge_channels"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name_key = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    user = db.relationship(User, lazy="joined")
+
+    @property
+    def joined(self) -> bool:
+        return self.user is not None and self.user.is_active
+
+
 class ForgeVideo(db.Model):
     __tablename__ = "forge_videos"
 
     id = db.Column(db.Integer, primary_key=True)
-    channel_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    channel_id = db.Column(db.Integer, db.ForeignKey("forge_channels.id"), nullable=False, index=True)
     uploader_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     status = db.Column(db.String(16), nullable=False, default="uploading", index=True)
     original_name = db.Column(db.String(255))
@@ -69,7 +88,7 @@ class ForgePost(db.Model):
     __tablename__ = "forge_posts"
 
     id = db.Column(db.Integer, primary_key=True)
-    channel_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    channel_id = db.Column(db.Integer, db.ForeignKey("forge_channels.id"), nullable=False, index=True)
     author_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     parent_id = db.Column(db.Integer, db.ForeignKey("forge_posts.id"), index=True)
     video_id = db.Column(db.Integer, db.ForeignKey("forge_videos.id"))
@@ -87,14 +106,15 @@ class ForgeRead(db.Model):
     __tablename__ = "forge_reads"
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
-    channel_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    channel_id = db.Column(db.Integer, db.ForeignKey("forge_channels.id"), primary_key=True)
     last_read_post_id = db.Column(db.Integer, nullable=False, default=0)
 
 
 # --- permissions ---
 
-def can_upload(user, channel_id: int) -> bool:
-    return bool(user.is_authenticated and (user.is_coach or user.id == channel_id))
+def can_upload(user, channel: ForgeChannel) -> bool:
+    return bool(user.is_authenticated and
+                (user.is_coach or (channel.joined and channel.user_id == user.id)))
 
 
 def can_delete(user, post: ForgePost) -> bool:
@@ -103,46 +123,65 @@ def can_delete(user, post: ForgePost) -> bool:
 
 # --- channels ---
 
-def _roster_pitcher_keys(season: str) -> set[str] | None:
-    """Normalized names of the season's rostered pitchers, from the reviewed
-    roster file. None when there's no file for that season."""
+def _roster_pitchers(season: str) -> list[str]:
+    """"First Last" for each RHP/LHP in the season's reviewed roster file
+    (empty when there's no file for that season)."""
     path = _ROSTER_DIR / f"{season.replace('/', '-')}.json"
     if not path.exists():
-        return None
+        return []
     with open(path, encoding="utf-8") as fh:
         players = json.load(fh)
-    keys = set()
+    names = []
     for p in players:
         tokens = set(re.split(r"[/,&\s]+", (p.get("position") or "").upper()))
         if tokens & _PITCHER_TOKENS:
-            keys.add(_norm_name(f"{p['first_name']} {p['last_name']}"))
-    return keys
+            names.append(f"{p['first_name']} {p['last_name']}".strip())
+    return names
 
 
-def get_channel(channel_id: int) -> User | None:
-    user = db.session.get(User, channel_id)
-    if user is None or user.role != "player" or not user.is_active:
-        return None
-    return user
+def _current_season() -> str:
+    return season_label_for(_now().date().isoformat())
+
+
+def sync_channels(season: str | None = None) -> list[ForgeChannel]:
+    """Make sure every rostered pitcher has a channel, link any channel still
+    waiting on an account to a newly matching player account, and return the
+    season's channels. Idempotent; a channel is never deleted, so a pitcher who
+    leaves the roster keeps their history (just drops off the list)."""
+    names = _roster_pitchers(season or _current_season())
+    keys = {}
+    for name in names:
+        keys.setdefault(_norm_name(name), name)
+    existing = {c.name_key: c for c in
+                ForgeChannel.query.filter(ForgeChannel.name_key.in_(list(keys))).all()} if keys else {}
+    for key, name in keys.items():
+        if key not in existing:
+            existing[key] = ForgeChannel(name_key=key, name=name)
+            db.session.add(existing[key])
+    waiting = {c.name_key: c for c in existing.values() if c.user_id is None}
+    if waiting:
+        linked = {uid for (uid,) in db.session.query(ForgeChannel.user_id)
+                  .filter(ForgeChannel.user_id.isnot(None)).all()}
+        for u in (User.query.filter_by(role="player", is_active=True)
+                  .order_by(User.id).all()):
+            ch = waiting.get(_norm_name(u.name))
+            if ch is not None and ch.user_id is None and u.id not in linked:
+                ch.user_id = u.id
+                linked.add(u.id)
+    db.session.commit()
+    return sorted(existing.values(), key=lambda c: c.name.lower())
+
+
+def get_channel(channel_id: int) -> ForgeChannel | None:
+    return db.session.get(ForgeChannel, channel_id)
 
 
 def channels_for(viewer, season: str | None = None) -> list[dict]:
-    """A channel per active player account that matches a rostered pitcher
-    (by normalized name, so the account name must match the roster file).
-    With no roster file for the season, every player is listed."""
-    season = season or season_label_for(_now().date().isoformat())
-    pitchers = _roster_pitcher_keys(season)
-    players = (User.query.filter_by(role="player", is_active=True)
-               .order_by(User.name).all())
     unread = unread_counts(viewer.id)
-    out = []
-    for p in players:
-        if pitchers is not None and _norm_name(p.name) not in pitchers:
-            continue
-        out.append({"id": p.id, "name": p.name,
-                    "unread": unread.get(p.id, 0), "mine": p.id == viewer.id})
-    out.sort(key=lambda c: c["name"].lower())
-    return out
+    return [{"id": c.id, "name": c.name, "joined": c.joined,
+             "unread": unread.get(c.id, 0),
+             "mine": c.joined and c.user_id == viewer.id}
+            for c in sync_channels(season)]
 
 
 # --- posts ---
