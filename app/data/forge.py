@@ -33,6 +33,10 @@ STALE_UPLOAD_HOURS = 24
 VIDEO_STATUSES = ("uploading", "queued", "processing", "ready", "failed")
 
 _ROSTER_DIR = Path(__file__).resolve().parents[2] / "data" / "rosters"
+# A coach-only channel for trying uploads without touching a real pitcher's
+# history. Its key can't collide with a normalized name (those are only a-z0-9).
+SANDBOX_KEY = "__coach_test__"
+SANDBOX_NAME = "Test Channel"
 _PITCHER_TOKENS = {"RHP", "LHP"}
 
 
@@ -52,8 +56,12 @@ class ForgeChannel(db.Model):
     user = db.relationship(User, lazy="joined")
 
     @property
+    def is_sandbox(self) -> bool:
+        return self.name_key == SANDBOX_KEY
+
+    @property
     def joined(self) -> bool:
-        return self.user is not None and self.user.is_active
+        return self.is_sandbox or (self.user is not None and self.user.is_active)
 
 
 class ForgeVideo(db.Model):
@@ -172,16 +180,34 @@ def sync_channels(season: str | None = None) -> list[ForgeChannel]:
     return sorted(existing.values(), key=lambda c: c.name.lower())
 
 
+def sandbox_channel() -> ForgeChannel:
+    ch = ForgeChannel.query.filter_by(name_key=SANDBOX_KEY).first()
+    if ch is None:
+        ch = ForgeChannel(name_key=SANDBOX_KEY, name=SANDBOX_NAME)
+        db.session.add(ch)
+        db.session.commit()
+    return ch
+
+
+def can_view(user, channel: ForgeChannel) -> bool:
+    return bool(user.is_authenticated and (user.is_coach or not channel.is_sandbox))
+
+
 def get_channel(channel_id: int) -> ForgeChannel | None:
     return db.session.get(ForgeChannel, channel_id)
 
 
 def channels_for(viewer, season: str | None = None) -> list[dict]:
+    """The season's pitcher channels, with the coach-only test channel first
+    for coaches."""
+    channels = sync_channels(season)
+    if viewer.is_coach:
+        channels = [sandbox_channel()] + channels
     unread = unread_counts(viewer.id)
-    return [{"id": c.id, "name": c.name, "joined": c.joined,
+    return [{"id": c.id, "name": c.name, "joined": c.joined, "sandbox": c.is_sandbox,
              "unread": unread.get(c.id, 0),
-             "mine": c.joined and c.user_id == viewer.id}
-            for c in sync_channels(season)]
+             "mine": c.user_id is not None and c.user_id == viewer.id}
+            for c in channels]
 
 
 # --- posts ---

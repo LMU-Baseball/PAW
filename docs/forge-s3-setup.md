@@ -35,7 +35,7 @@ origin. It must also expose `ETag`, or multipart uploads can't be finished.
 ```json
 [
   {
-    "AllowedOrigins": ["https://paw.lmulions.com", "http://127.0.0.1:8050", "http://localhost:8050"],
+    "AllowedOrigins": ["https://paw.lmubaseball.com", "http://127.0.0.1:8050", "http://localhost:8050"],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
@@ -107,8 +107,7 @@ WantedBy=multi-user.target
 
 The worker reads `/opt/paw/.env` itself (via `config.py`), the same as the
 `paw` service, so it needs no `EnvironmentFile`. The deploy workflow restarts
-only `paw`, so after a deploy that changes Forge code, also run
-`sudo systemctl restart paw-forge`.
+`paw-forge` along with `paw` on every deploy.
 
 ```
 sudo systemctl daemon-reload && sudo systemctl enable --now paw-forge

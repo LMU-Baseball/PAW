@@ -34,7 +34,7 @@ def _json_error(msg: str, status: int = 400):
 
 def _channel_or_404(channel_id: int):
     channel = F.get_channel(channel_id)
-    if channel is None:
+    if channel is None or not F.can_view(current_user, channel):
         abort(404)
     return channel
 
@@ -176,8 +176,9 @@ def api_abort_upload(video_id):
 
 def _ready_video_or_404(video_id):
     video = db.session.get(F.ForgeVideo, video_id)
-    if video is None or video.status != "ready" or F.get_channel(video.channel_id) is None:
+    if video is None or video.status != "ready":
         abort(404)
+    _channel_or_404(video.channel_id)
     post = F.ForgePost.query.filter_by(video_id=video.id).first()
     if post is None or post.deleted_at is not None:
         abort(404)

@@ -39,6 +39,10 @@
       b.type = "button";
       if (state.channel && state.channel.id === c.id) b.classList.add("active");
       if (c.unread) b.classList.add("unread");
+      if (c.sandbox) {
+        b.classList.add("sandbox");
+        b.title = "Only coaches can see this channel. Use it to try uploads.";
+      }
       if (!c.joined) {
         b.classList.add("pending");
         b.title = `${c.name} hasn't made a PAW account yet`;
@@ -46,6 +50,7 @@
       const nm = el("span", "nm", c.name);
       if (c.mine) nm.appendChild(el("span", "you", "(you)"));
       if (!c.joined) nm.appendChild(el("span", "you", "· not on PAW yet"));
+      if (c.sandbox) nm.appendChild(el("span", "you", "· coaches only"));
       b.appendChild(nm);
       if (c.unread) b.appendChild(el("span", "forge-badge", String(c.unread)));
       b.addEventListener("click", () => openChannel(c.id));
