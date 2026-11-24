@@ -22,7 +22,7 @@ team scale.
 Do **not** reuse `lmubsbvideo`. That bucket is public, and players' training
 video should not be.
 
-- Name: `lmubsb-forge` (or similar), region `us-east-2`.
+- Name: `lmubsb-forge`, region `us-east-2`. (Created 2026-11-24 with the settings below.)
 - Block **all** public access: leave all four boxes checked.
 - Object Ownership: bucket owner enforced (ACLs disabled).
 - Default encryption: SSE-S3.
@@ -35,7 +35,7 @@ origin. It must also expose `ETag`, or multipart uploads can't be finished.
 ```json
 [
   {
-    "AllowedOrigins": ["https://<paw-domain>", "http://localhost:5000", "http://127.0.0.1:5000"],
+    "AllowedOrigins": ["https://paw.lmulions.com", "http://127.0.0.1:8050", "http://localhost:8050"],
     "AllowedMethods": ["PUT", "GET", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
@@ -46,7 +46,7 @@ origin. It must also expose `ETag`, or multipart uploads can't be finished.
 
 ### Lifecycle rule (Management → Lifecycle)
 
-- Rule "abort-incomplete-uploads": whole bucket, **Delete expired object delete
+- Rule "abort-incomplete-uploads": prefix `forge/`, **Delete expired object delete
   markers or incomplete multipart uploads → Incomplete multipart uploads:
   2 days**.
 
@@ -55,8 +55,8 @@ cleans these up after 24 h.
 
 ## 2. IAM user scoped to that bucket
 
-Create IAM user `paw-forge` with programmatic access only, and attach this
-inline policy:
+IAM user `paw-forge` has no console access and no groups, and one inline
+policy, `paw-forge-s3`:
 
 ```json
 {
