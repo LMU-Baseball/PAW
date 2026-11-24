@@ -28,3 +28,8 @@ jobs:
             source .venv/bin/activate
             pip install -r requirements.txt
             sudo systemctl restart paw
+            # The Forge's video worker is a separate process; restart it too so
+            # it runs the new code. A video mid-conversion is requeued on start.
+            if systemctl list-unit-files paw-forge.service | grep -q paw-forge; then
+              sudo systemctl restart paw-forge
+            fi

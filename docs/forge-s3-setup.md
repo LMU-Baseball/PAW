@@ -107,8 +107,7 @@ WantedBy=multi-user.target
 
 The worker reads `/opt/paw/.env` itself (via `config.py`), the same as the
 `paw` service, so it needs no `EnvironmentFile`. The deploy workflow restarts
-only `paw`, so after a deploy that changes Forge code, also run
-`sudo systemctl restart paw-forge`.
+`paw-forge` along with `paw` on every deploy.
 
 ```
 sudo systemctl daemon-reload && sudo systemctl enable --now paw-forge

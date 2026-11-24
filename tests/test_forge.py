@@ -158,14 +158,14 @@ def test_channels_list_every_rostered_pitcher_signed_up_or_not(app):
     c = Client(app, "coach@lmu.edu")
     chans = c.get("/forge/api/channels").json["channels"]
     assert [(ch["name"], ch["joined"]) for ch in chans] == [
-        (PITCHER_A, True), (UNSIGNED, False), (PITCHER_B, True)]
+        (F.SANDBOX_NAME, True), (PITCHER_A, True), (UNSIGNED, False), (PITCHER_B, True)]
 
 
 def test_sync_is_idempotent(app):
     with app.app_context():
         first = [c.id for c in F.sync_channels()]
         assert [c.id for c in F.sync_channels()] == first
-        assert F.ForgeChannel.query.count() == 3
+        assert F.ForgeChannel.query.filter(F.ForgeChannel.name_key != F.SANDBOX_KEY).count() == 3
 
 
 def test_unsigned_pitcher_channel_takes_coach_posts_then_links_on_signup(app, s3):
@@ -457,3 +457,38 @@ def test_stale_uploads_expire_and_interrupted_requeue(app, s3):
         assert db.session.get(F.ForgeVideo, stale).status == "failed"
         assert transcode.reset_interrupted() == 1
         assert db.session.get(F.ForgeVideo, stuck.id).status == "queued"
+
+
+# --- coach-only test channel ---
+
+def _sandbox_id(app):
+    with app.app_context():
+        return F.sandbox_channel().id
+
+
+def test_test_channel_is_coach_only(app, s3):
+    coach, a = Client(app, "coach@lmu.edu"), Client(app, "a@lmu.edu")
+    sid = _sandbox_id(app)
+    assert F.SANDBOX_NAME not in [ch["name"] for ch in a.get("/forge/api/channels").json["channels"]]
+    assert a.get(f"/forge/api/channels/{sid}/posts").status_code == 404
+    assert a.post(f"/forge/api/channels/{sid}/posts", {"body": "hi"}).status_code == 404
+    first = coach.get("/forge/api/channels").json["channels"][0]
+    assert first["id"] == sid and first["sandbox"] and first["joined"]
+    _say(coach, sid, "testing an upload")
+    body = {"name": "pen.mov", "size": 1000, "duration": 60}
+    assert coach.post(f"/forge/api/channels/{sid}/uploads", body).status_code == 201
+
+
+def test_test_channel_video_hidden_from_players(app, s3):
+    coach, a = Client(app, "coach@lmu.edu"), Client(app, "a@lmu.edu")
+    vid, _ = _ready_video(app, s3, coach, _sandbox_id(app))
+    with app.app_context():
+        F.set_video(db.session.get(F.ForgeVideo, vid), status="ready", playback_key="k/720p.mp4")
+    assert coach.get(f"/forge/video/{vid}/play").status_code == 302
+    assert a.get(f"/forge/video/{vid}/play").status_code == 404
+
+
+def test_test_channel_not_in_unread_badges_for_players(app):
+    coach, a = Client(app, "coach@lmu.edu"), Client(app, "a@lmu.edu")
+    _say(coach, _sandbox_id(app), "only coaches see this")
+    assert all(ch["unread"] == 0 for ch in a.get("/forge/api/channels").json["channels"])
