@@ -34,12 +34,7 @@
     list.textContent = "";
     const q = state.filter.toLowerCase();
     const shown = state.channels.filter((c) => !q || c.name.toLowerCase().includes(q));
-    let group = null;
     for (const c of shown) {
-      if (c.group !== group) {
-        group = c.group;
-        list.appendChild(el("div", "forge-group", group === "pitchers" ? "Pitchers" : "Other players"));
-      }
       const b = el("button", "forge-chan");
       b.type = "button";
       if (state.channel && state.channel.id === c.id) b.classList.add("active");
@@ -70,13 +65,25 @@
     return (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("");
   }
 
-  function fmtTime(iso) {
+  // Day dividers carry the date, so a post shows only its time unless it's a
+  // reply written on a different day than the post it answers.
+  function fmtTime(iso, refIso) {
+    const d = new Date(iso);
+    const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (!refIso || d.toDateString() === new Date(refIso).toDateString()) return time;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " · " + time;
+  }
+
+  function dayLabel(iso) {
     const d = new Date(iso);
     const today = new Date();
-    const sameDay = d.toDateString() === today.toDateString();
-    return sameDay ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-                   : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " · " +
-                     d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return "Today";
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+    const opts = { weekday: "long", month: "long", day: "numeric" };
+    if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString([], opts);
   }
 
   function fmtClock(sec) {
@@ -107,7 +114,7 @@
     return p;
   }
 
-  function postNode(post, videoGetter) {
+  function postNode(post, videoGetter, refIso) {
     const row = el("div", "fp");
     row.dataset.id = post.id;
     row.appendChild(el("div", "fp-av " + (post.author_is_coach ? "coach" : "player"), initials(post.author)));
@@ -115,7 +122,7 @@
     const meta = el("div", "fp-meta");
     meta.appendChild(el("strong", null, post.author));
     if (post.author_is_coach) meta.appendChild(el("span", "tag", "COACH"));
-    meta.appendChild(document.createTextNode(fmtTime(post.created_at)));
+    meta.appendChild(document.createTextNode(fmtTime(post.created_at, refIso)));
     if (post.can_delete) {
       const del = el("button", "fp-del", "Delete");
       del.type = "button";
@@ -185,7 +192,15 @@
         ? "This is your channel. Upload a bullpen or send the coaches a message."
         : "Nothing here yet for this season."));
     }
+    let lastDay = null;
     for (const post of tops) {
+      const day = new Date(post.created_at).toDateString();
+      if (day !== lastDay) {
+        lastDay = day;
+        const sep = el("div", "forge-day");
+        sep.appendChild(el("span", null, dayLabel(post.created_at)));
+        feed.appendChild(sep);
+      }
       let videoEl = null;
       const getVideo = () => videoEl;
       const { row, body } = postNode(post, post.video ? getVideo : null);
@@ -201,7 +216,7 @@
         }
       }
       const thread = el("div", "fc");
-      for (const c of kids.get(post.id) || []) thread.appendChild(postNode(c, post.video ? getVideo : null).row);
+      for (const c of kids.get(post.id) || []) thread.appendChild(postNode(c, post.video ? getVideo : null, post.created_at).row);
       if (!post.deleted) {
         const reply = el("button", "fc-reply", "Reply");
         reply.type = "button";

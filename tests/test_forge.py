@@ -143,12 +143,10 @@ def test_pitching_hub_links_forge_not_cauldron(app):
     assert c.get("/dash/cauldron/").status_code == 404
 
 
-def test_channels_list_pitchers_first_and_keeps_unmatched_players(app):
+def test_channels_list_only_rostered_pitchers(app):
     c = Client(app, "coach@lmu.edu")
     chans = c.get("/forge/api/channels").json["channels"]
-    assert [(ch["name"], ch["group"]) for ch in chans] == [
-        (PITCHER_A, "pitchers"), (PITCHER_B, "pitchers"), (HITTER, "other")]
-    assert all(ch["name"] != "Sean Coach" for ch in chans)
+    assert [ch["name"] for ch in chans] == [PITCHER_A, PITCHER_B]
 
 
 def test_deactivated_player_has_no_channel(app):

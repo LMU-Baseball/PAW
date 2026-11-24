@@ -127,9 +127,9 @@ def get_channel(channel_id: int) -> User | None:
 
 
 def channels_for(viewer, season: str | None = None) -> list[dict]:
-    """Every active player account as a channel, pitchers first. A player whose
-    account name doesn't match the roster still gets a channel (listed under
-    "Other players") so a typo in a sign-up name never hides anyone."""
+    """A channel per active player account that matches a rostered pitcher
+    (by normalized name, so the account name must match the roster file).
+    With no roster file for the season, every player is listed."""
     season = season or season_label_for(_now().date().isoformat())
     pitchers = _roster_pitcher_keys(season)
     players = (User.query.filter_by(role="player", is_active=True)
@@ -137,10 +137,11 @@ def channels_for(viewer, season: str | None = None) -> list[dict]:
     unread = unread_counts(viewer.id)
     out = []
     for p in players:
-        is_pitcher = pitchers is None or _norm_name(p.name) in pitchers
-        out.append({"id": p.id, "name": p.name, "group": "pitchers" if is_pitcher else "other",
+        if pitchers is not None and _norm_name(p.name) not in pitchers:
+            continue
+        out.append({"id": p.id, "name": p.name,
                     "unread": unread.get(p.id, 0), "mine": p.id == viewer.id})
-    out.sort(key=lambda c: (c["group"] != "pitchers", c["name"].lower()))
+    out.sort(key=lambda c: c["name"].lower())
     return out
 
 
