@@ -10,9 +10,20 @@
            border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
   .forge-side { border-right: 1px solid #eee; display: flex; flex-direction: column; min-height: 0;
                 background: #fafafa; }
-  .forge-side-head { padding: 14px 14px 12px; background: var(--crimson); }
-  .forge-side-head h2 { margin: 0 0 10px; color: #fff; font-size: 30px; line-height: 1;
-                        letter-spacing: .02em; }
+  /* Same layering as the Velo Board banner: the spray-paint backdrop (alpha
+     baked into the PNG) over the palm silhouettes over the page color, so the
+     palms show through the paint. */
+  .forge-side-head, .forge-head {
+    background:
+      url("{{ url_for('static', filename='reports/velo-backdrop.png') }}") var(--paint-pos, left center) / var(--paint-size, 640px) no-repeat,
+      url("{{ url_for('static', filename='brand/palms-grey.png') }}") center 70% / 520px auto no-repeat,
+      var(--bg);
+    color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+  }
+  .forge-side-head { padding: 14px 14px 12px; --paint-pos: 18% 40%; }
+  .forge-side-head h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: #fff;
+                        font-size: 32px; line-height: 1; letter-spacing: .03em; }
+  .forge-side-head h2 img { width: 34px; height: 34px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
   .forge-side-head input { padding: 8px 10px; font-size: 14px; border: none; }
   .forge-list { overflow-y: auto; flex: 1; padding: 6px 0 12px; }
   .forge-chan { display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -28,7 +39,8 @@
 
   .forge-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .forge-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px;
-                background: var(--blue); color: #fff; min-height: 62px; box-sizing: border-box; }
+                min-height: 62px; box-sizing: border-box;
+                --paint-pos: right 30%; --paint-size: 1300px auto; }
   .forge-head h3 { margin: 0; font-size: 28px; line-height: 1; flex: 1; min-width: 0; color: #fff;
                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .forge-head select { width: auto; padding: 6px 8px; font-size: 14px; border: none; }
@@ -113,7 +125,7 @@
 <div class="forge" id="forge">
   <aside class="forge-side">
     <div class="forge-side-head">
-      <h2>The Forge</h2>
+      <h2><img src="{{ url_for('static', filename='reports/lion-white.png') }}" alt="">The Forge</h2>
       <input type="text" id="forge-search" placeholder="Find a pitcher" autocomplete="off">
     </div>
     <nav class="forge-list" id="forge-list" aria-label="Channels"></nav>
