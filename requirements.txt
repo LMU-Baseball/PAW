@@ -47,3 +47,4 @@ playwright==1.61.0   # headless Chromium for PDF rendering
 kaleido>=0.2         # Plotly static image export
 matplotlib>=3.8      # one-pager chart rendering (Agg backend, no browser)
 Pillow>=10.0         # report logo/image assets (also scripts/make_lion_white.py)
+boto3>=1.34            # The Forge: private S3 video storage (app/data/forge_storage.py)
