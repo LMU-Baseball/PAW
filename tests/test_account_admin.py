@@ -236,3 +236,52 @@ def test_header_menu_shows_account_management_to_coaches_only(app):
         assert b"paw-menu" in page and b"Log out" in page
     assert b"Account management" in coach_page
     assert b"Account management" not in player_page
+
+
+def _positions(client, uid, *checked):
+    return client.post(f"/accounts/{uid}/positions", data={"player_type": list(checked)},
+                       follow_redirects=True)
+
+
+def test_coach_edits_a_players_positions_and_forge_channel_follows(app):
+    from app.data import forge
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    pid = _uid(app, "player@lmu.edu")
+    assert b"Edit positions" in coach.get("/accounts").data
+    assert b"is now: Position player and pitcher." in _positions(coach, pid, "position", "pitcher").data
+    page = coach.get("/accounts").data
+    assert b'data-type="both"' in page and b"position + pitcher" in page
+    with app.app_context():
+        assert "player" in [c.name for c in forge.sync_channels()]
+    _positions(coach, pid, "pitcher")
+    with app.app_context():
+        assert _user(app, "player@lmu.edu").player_type == "pitcher"
+    _positions(coach, pid, "position")
+    with app.app_context():
+        assert "player" not in [c.name for c in forge.sync_channels()]
+
+
+def test_edit_positions_needs_at_least_one_box(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    pid = _uid(app, "player@lmu.edu")
+    _positions(coach, pid, "pitcher")
+    assert b"Pick position player, pitcher, or both." in _positions(coach, pid).data
+    assert _user(app, "player@lmu.edu").player_type == "pitcher"
+
+
+def test_edit_positions_is_account_admins_only_and_players_only(app, monkeypatch):
+    with app.app_context():
+        other = User(email="assistant@lmu.edu", name="assistant", role="coach")
+        other.set_password("password123")
+        other.mark_email_verified()
+        db.session.add(other)
+        db.session.commit()
+    pid = _uid(app, "player@lmu.edu")
+    assistant = _client_logged_in(app, "assistant@lmu.edu")
+    assert _positions(assistant, pid, "pitcher").status_code == 403
+    player = _client_logged_in(app, "player@lmu.edu")
+    assert _positions(player, pid, "pitcher").status_code == 403
+    assert _user(app, "player@lmu.edu").player_type is None
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    _positions(coach, _uid(app, "assistant@lmu.edu"), "pitcher")
+    assert _user(app, "assistant@lmu.edu").player_type is None

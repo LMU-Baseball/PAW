@@ -54,11 +54,18 @@
         <td>{{ u.email }}</td>
         <td>
           <span class="tag {{ 'coach' if u.is_coach else '' }}">{{ u.role }}</span>
+          {% if not u.is_coach and u.player_type %}<span class="tag">{{ {'position': 'position', 'pitcher': 'pitcher', 'both': 'position + pitcher'}[u.player_type] }}</span>{% endif %}
           {% if not u.is_active %}<span class="tag off">off</span>{% endif %}
           {% if not u.email_verified %}<span class="tag unconfirmed">unconfirmed</span>{% endif %}
         </td>
         <td>{{ (u.last_login_at.strftime('%b ') ~ u.last_login_at.day ~ u.last_login_at.strftime(', %Y')) if u.last_login_at else '—' }}</td>
         <td class="actions">
+          {% if not u.is_coach %}
+            <button type="button" data-positions
+                    data-url="{{ url_for('auth.account_positions', user_id=u.id) }}"
+                    data-who="{{ u.name }} ({{ u.email }})"
+                    data-type="{{ u.player_type or '' }}">Edit positions</button>
+          {% endif %}
           {% if u.id != current_user.id %}
             {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
             {% if u.is_coach %}{{ action(u, 'make-player', 'Make player', 'Removes coach access -- they will no longer be able to edit data or manage accounts.') }}
@@ -92,6 +99,44 @@
     </div>
   </form>
 </dialog>
+<dialog class="confirm" id="positions-dlg">
+  <form method="post" id="positions-form">
+    {{ form.hidden_tag() }}
+    <h3>Edit positions</h3>
+    <p class="who" id="positions-who"></p>
+    <label class="check"><input type="checkbox" name="player_type" value="position" id="pos-position">
+      <span>Position player</span></label>
+    <label class="check"><input type="checkbox" name="player_type" value="pitcher" id="pos-pitcher">
+      <span>Pitcher</span></label>
+    <div class="row">
+      <button type="button" class="btn cancel" id="positions-cancel">Cancel</button>
+      <button type="submit" class="btn" id="positions-go">Save</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  var dlg = document.getElementById("positions-dlg");
+  var pos = document.getElementById("pos-position");
+  var pit = document.getElementById("pos-pitcher");
+  var go = document.getElementById("positions-go");
+  var sync = function () { go.disabled = !(pos.checked || pit.checked); };
+  document.querySelectorAll("[data-positions]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var t = btn.dataset.type;
+      document.getElementById("positions-form").action = btn.dataset.url;
+      document.getElementById("positions-who").textContent = btn.dataset.who;
+      pos.checked = t === "position" || t === "both";
+      pit.checked = t === "pitcher" || t === "both";
+      sync();
+      dlg.showModal();
+    });
+  });
+  pos.addEventListener("change", sync);
+  pit.addEventListener("change", sync);
+  document.getElementById("positions-cancel").addEventListener("click", function () { dlg.close(); });
+})();
+</script>
 <script>
 (function () {
   var dlg = document.getElementById("confirm-dlg");
