@@ -415,7 +415,7 @@
     const mute = document.createElement("input");
     mute.type = "checkbox";
     muteRow.appendChild(mute);
-    muteRow.appendChild(document.createTextNode(" Remove audio (music, talking in the background)"));
+    muteRow.appendChild(document.createTextNode(" Remove audio"));
     panel.appendChild(muteRow);
     const bar = el("div", "fu-bar");
     const fill = el("div");
