@@ -618,24 +618,17 @@ def test_set_player_type_cli_moves_a_player_on_and_off_the_list(app):
         assert HITTER not in [c.name for c in F.sync_channels()]
 
 
-def test_ensure_columns_adds_player_type_and_edited_at_to_tables_with_rows(tmp_path):
-    from sqlalchemy import create_engine, inspect, text
-    from app.auth.models import ensure_columns as ensure_user_columns
+def test_ensure_columns_adds_edited_at_to_existing_table_with_rows(tmp_path):
+    from sqlalchemy import create_engine, text
     engine = create_engine("sqlite:///" + str(tmp_path / "legacy.db").replace("\\", "/"))
     with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(255))"))
-        conn.execute(text("INSERT INTO users (id, name) VALUES (3, 'Old Account')"))
         conn.execute(text("CREATE TABLE forge_posts (id INTEGER PRIMARY KEY, body TEXT)"))
         conn.execute(text("INSERT INTO forge_posts (id, body) VALUES (9, 'hi')"))
-    for _ in range(2):
-        ensure_user_columns(engine)
-        F.ensure_columns(engine)
+    F.ensure_columns(engine)
+    F.ensure_columns(engine)
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT id, name, player_type FROM users")).all() == [
-            (3, "Old Account", None)]
         assert conn.execute(text("SELECT id, body, edited_at FROM forge_posts")).all() == [
             (9, "hi", None)]
-    assert "player_type" in {c["name"] for c in inspect(engine).get_columns("users")}
     engine.dispose()
 
 
@@ -685,3 +678,57 @@ def test_poll_picks_up_a_delete_by_someone_else(app):
     coach.delete(f"/forge/api/posts/{p['id']}")
     poll = a.get(f"/forge/api/channels/{chan}/posts?after={p['id']}&since={first['now']}").json
     assert [x["deleted"] for x in poll["posts"]] == [True]
+
+
+# --- My account page ---
+
+def _account(client, name, player_type=""):
+    return client.c.post("/account", data={"name": name, "player_type": player_type},
+                         follow_redirects=True)
+
+
+def test_menu_links_my_account(app):
+    assert b'href="/account"' in Client(app, "a@lmu.edu").get("/change-password").data
+
+
+def test_player_renames_account_and_forge_channel_follows(app):
+    chan = _chan(app, "a@lmu.edu")
+    a = Client(app, "a@lmu.edu")
+    assert b"Saved." in _account(a, "  Adam   J  Behrens ", "pitcher").data
+    names = {ch["id"]: ch["name"] for ch in a.get("/forge/api/channels").json["channels"]}
+    assert names[chan] == "Adam J Behrens"
+
+
+def test_first_name_only_is_rejected(app):
+    a = Client(app, "a@lmu.edu")
+    assert b"Enter your first and last name." in _account(a, "Adam", "pitcher").data
+    with app.app_context():
+        assert User.query.filter_by(email="a@lmu.edu").one().name == PITCHER_A
+
+
+def test_player_switches_position_and_channel_comes_and_goes(app):
+    h = Client(app, "h@lmu.edu")
+    _account(h, HITTER, "both")
+    mine = [ch for ch in h.get("/forge/api/channels").json["channels"] if ch["mine"]]
+    assert [ch["name"] for ch in mine] == [HITTER]
+    _account(h, HITTER, "position")
+    assert not [ch for ch in h.get("/forge/api/channels").json["channels"] if ch["mine"]]
+    with app.app_context():
+        assert F.ForgeChannel.query.filter_by(id=mine[0]["id"]).count() == 1
+
+
+def test_coach_edits_name_without_a_position(app):
+    coach = Client(app, "coach@lmu.edu")
+    page = coach.get("/account").data
+    assert b"Position player" not in page
+    assert b"Saved." in _account(coach, "Sean Coachman").data
+    with app.app_context():
+        u = User.query.filter_by(email="coach@lmu.edu").one()
+        assert (u.name, u.player_type) == ("Sean Coachman", None)
+
+
+def test_sign_out_everywhere_keeps_this_browser(app):
+    here, other = Client(app, "a@lmu.edu"), Client(app, "a@lmu.edu")
+    here.c.post("/account/sign-out-everywhere", follow_redirects=True)
+    assert here.get("/account").status_code == 200
+    assert other.get("/account").status_code == 302

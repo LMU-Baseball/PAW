@@ -95,11 +95,7 @@ _INDEX_STRING = """<!DOCTYPE html>
     .paw-dash-sidebar, .paw-dash-filters, .paw-dash-content { min-width: 0 !important; }
     .paw-banner-crest { height: 72px !important; }
     .paw-banner-title { font-size: 20px !important; letter-spacing: 4px !important; }
-    /* Site header: let the user-info block drop to its own row instead of
-       squeezing the wordmark into a mid-word wrap. */
-    .paw-header { flex-wrap: wrap; height: auto !important; min-height: 64px;
-                  row-gap: 4px; padding: 10px 14px !important; }
-    .paw-header-user { width: 100%; text-align: right; font-size: 12px !important; }
+    .paw-header { padding: 0 14px !important; }
     .paw-header-brand-text { font-size: 22px !important; }
     /* Video tab: clip above the pitch table instead of a forced side-by-side
        row that needs horizontal scrolling to see either one. */
@@ -137,6 +133,30 @@ _INDEX_STRING = """<!DOCTYPE html>
      dropdown at the bottom." Scoped to `.is-open` only, so a CLOSED
      dropdown's own overflow-clipped display value is untouched. */
   .Select.is-open { overflow: visible !important; }
+  /* Header account menu. Keep in sync with the same block in base.html. */
+  .paw-menu { position: relative; }
+  .paw-menu > summary {
+    list-style: none; cursor: pointer; width: 42px; height: 42px; border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  }
+  .paw-menu > summary::-webkit-details-marker { display: none; }
+  .paw-menu > summary:hover, .paw-menu[open] > summary { background: rgba(255,255,255,.18); }
+  .paw-menu > summary span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 1px; }
+  .paw-menu-panel {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 1000; min-width: 230px;
+    background: #fff; color: #1a1a1a; border-radius: 8px; padding: 6px 0;
+    box-shadow: 0 8px 24px rgba(0,0,0,.22); font-family: system-ui, sans-serif;
+  }
+  .paw-menu-who { padding: 10px 16px; font-size: 13px; color: #666; border-bottom: 1px solid #eee; }
+  .paw-menu-who strong { display: block; font-size: 15px; color: #1a1a1a; }
+  .paw-menu-panel form { margin: 0; }
+  .paw-menu-panel a, .paw-menu-panel button {
+    display: block; width: 100%; text-align: left; padding: 10px 16px; font-size: 15px;
+    color: #1a1a1a !important; text-decoration: none; background: none; border: none; cursor: pointer;
+    font-family: system-ui, sans-serif;
+  }
+  .paw-menu-panel a:hover, .paw-menu-panel button:hover { background: #f5f5f5; color: #9A0021 !important; }
+  .paw-menu-panel .paw-menu-logout { border-top: 1px solid #eee; margin-top: 4px; }
   /* Same clipping bug, a layer further out -- and a real CSS limitation, not
      just a missing override. dash_table's internal `.dash-spreadsheet-
      container` sets `overflow-x: auto` (for wide tables' own horizontal
@@ -163,6 +183,13 @@ _INDEX_STRING = """<!DOCTYPE html>
 <body>
 {%app_entry%}
 <footer>{%config%}{%scripts%}{%renderer%}</footer>
+<script>
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("details.paw-menu[open]").forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute("open");
+    });
+  });
+</script>
 </body>
 </html>"""
 
@@ -173,7 +200,7 @@ def index_string() -> str:
 
 def header(back_href: str | None = None, back_label: str | None = None) -> html.Div:
     """Site header (matches base.html): logo -> home, wordmark, optional back-link,
-    user + logout."""
+    account menu."""
     brand_children = [
         html.Img(src="/static/reports/lmu.png",
                  style={"height": "40px", "width": "auto", "display": "block"}),
@@ -192,26 +219,19 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
             "marginLeft": "18px"}))
     right = html.Span()
     if current_user.is_authenticated:
-        # Change-password link is coach-only (the player login is shared).
-        pw_link = ([html.A("Change password", href="/change-password",
-                           style={"color": "#fff", "textDecoration": "underline"}),
-                    " · "] if getattr(current_user, "is_coach", False) else [])
-        right = html.Span([
-            f"{current_user.name} · {current_user.role} · ",
-            *pw_link,
-            # Unlike base.html's .logout-btn (which uses color: inherit because
-            # its sibling links also inherit), this header sets literal #fff
-            # on both "Change password" and "Log out" -- keep them matching.
-            html.Form(
-                [html.Button("Log out", type="submit", style={
-                    "textDecoration": "underline",
-                    "background": "none", "border": "none", "padding": "0",
-                    "cursor": "pointer", "font": "inherit", "color": "#fff",
-                })],
-                action="/logout", method="POST",
-                style={"display": "inline"},
-            ),
-        ], className="paw-header-user", style={"fontSize": "14px", "color": "rgba(255,255,255,.85)"})
+        items = [
+            html.Div([html.Strong(current_user.name), current_user.role],
+                     className="paw-menu-who"),
+            html.A("Change password", href="/change-password"),
+        ]
+        if getattr(current_user, "can_manage_accounts", False):
+            items.append(html.A("Account management", href="/accounts"))
+        items.append(html.Form([html.Button("Log out", type="submit")],
+                               action="/logout", method="POST", className="paw-menu-logout"))
+        right = html.Details([
+            html.Summary([html.Span(), html.Span(), html.Span()], **{"aria-label": "Menu"}),
+            html.Div(items, className="paw-menu-panel"),
+        ], className="paw-menu")
     return html.Div([html.Div(left, style={"display": "flex", "alignItems": "center"}),
                      right], className="paw-header", style={
         "background": BANNER, "color": "#fff", "padding": "0 20px", "height": "64px",

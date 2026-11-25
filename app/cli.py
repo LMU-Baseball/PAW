@@ -25,6 +25,7 @@ def register_cli(server):
             raise click.ClickException(f"User already exists: {email}")
         user = User(email=email, name=name, role=role, trackman_id=trackman_id)
         user.set_password(password)
+        user.mark_email_verified()
         db.session.add(user)
         db.session.commit()
         click.echo(f"Created {role} {email} (id={user.id}).")
