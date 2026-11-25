@@ -33,6 +33,7 @@ def make_app() -> Flask:
     from app.data import forge  # noqa: F401
     with app.app_context():
         db.create_all()
+        forge.ensure_columns()
     return app
 
 

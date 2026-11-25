@@ -492,3 +492,52 @@ def test_test_channel_not_in_unread_badges_for_players(app):
     coach, a = Client(app, "coach@lmu.edu"), Client(app, "a@lmu.edu")
     _say(coach, _sandbox_id(app), "only coaches see this")
     assert all(ch["unread"] == 0 for ch in a.get("/forge/api/channels").json["channels"])
+
+
+# --- remove audio ---
+
+def test_ensure_columns_adds_strip_audio_to_existing_table_with_rows(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+    engine = create_engine("sqlite:///" + str(tmp_path / "legacy.db").replace("\\", "/"))
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE forge_videos (id INTEGER PRIMARY KEY, status VARCHAR(16))"))
+        conn.execute(text("INSERT INTO forge_videos (id, status) VALUES (7, 'ready')"))
+    F.ensure_columns(engine)
+    F.ensure_columns(engine)
+    cols = {c["name"] for c in inspect(engine).get_columns("forge_videos")}
+    assert "strip_audio" in cols
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT id, status, strip_audio FROM forge_videos")).all() == [
+            (7, "ready", 0)]
+    engine.dispose()
+
+
+def test_upload_records_remove_audio_choice(app, s3):
+    a = Client(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    url = f"/forge/api/channels/{chan}/uploads"
+    muted = a.post(url, {"name": "x.mov", "size": 10, "strip_audio": True}).json["video_id"]
+    loud = a.post(url, {"name": "y.mov", "size": 10}).json["video_id"]
+    with app.app_context():
+        assert db.session.get(F.ForgeVideo, muted).to_dict()["muted"] is True
+        assert db.session.get(F.ForgeVideo, loud).to_dict()["muted"] is False
+
+
+@pytest.mark.parametrize("strip", [True, False])
+def test_transcode_drops_audio_only_when_asked(app, s3, tmp_path, strip):
+    from app.forge import transcode
+    src = str(tmp_path / "pen.mp4")
+    subprocess.run([_ffmpeg(), "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc=size=640x360:rate=30:duration=2", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=2", "-shortest", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-c:a", "aac", src], check=True)
+    a = Client(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    vid, _ = _queued_from_file(app, s3, a, chan, src, "pen.mp4")
+    with app.app_context():
+        F.set_video(db.session.get(F.ForgeVideo, vid), strip_audio=strip)
+        transcode.run_once()
+        assert db.session.get(F.ForgeVideo, vid).status == "ready"
+    out = subprocess.run([_ffmpeg(), "-hide_banner", "-i", s3.objects[S.playback_key(chan, vid)]],
+                         capture_output=True, text=True).stderr
+    assert ("Audio:" in out) is (not strip)

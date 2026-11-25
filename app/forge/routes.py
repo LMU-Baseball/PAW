@@ -127,7 +127,8 @@ def api_start_upload(channel_id):
         return _json_error("That video is over 4 GB. Trim it in Photos and try again.")
     if duration > F.MAX_DURATION_SEC + 30:
         return _json_error("Videos can be up to 20 minutes. Trim it in Photos and try again.")
-    video = F.create_video(channel.id, current_user, data.get("name", ""), size)
+    video = F.create_video(channel.id, current_user, data.get("name", ""), size,
+                           strip_audio=bool(data.get("strip_audio")))
     key = S.original_key(channel.id, video.id, video.original_name)
     try:
         upload_id, urls = S.start_multipart(key, data.get("type", ""), size)

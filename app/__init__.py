@@ -99,6 +99,8 @@ def create_app(config_object=Config) -> Flask:
 
     with server.app_context():
         db.create_all()
+        from app.data.forge import ensure_columns as ensure_forge_columns
+        ensure_forge_columns()
         from app.data.practice_plans import seed_plans
         seed_plans()
         # Provision shared logins from env vars when present (lets a shell-less
