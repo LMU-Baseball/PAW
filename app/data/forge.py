@@ -17,7 +17,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 
 from app.auth.models import User
 from app.data.roster_media import _norm_name
@@ -84,11 +84,13 @@ class ForgeVideo(db.Model):
     error = db.Column(db.String(512))
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     processed_at = db.Column(db.DateTime)
+    # Added after forge_videos shipped; ensure_columns() adds it to the live table.
+    strip_audio = db.Column(db.Boolean, nullable=False, default=False, server_default=text("0"))
 
     def to_dict(self) -> dict:
         return {"id": self.id, "status": self.status, "duration_sec": self.duration_sec,
                 "width": self.width, "height": self.height, "error": self.error,
-                "name": self.original_name}
+                "name": self.original_name, "muted": bool(self.strip_audio)}
 
 
 class ForgePost(db.Model):
@@ -116,6 +118,26 @@ class ForgeRead(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
     channel_id = db.Column(db.Integer, db.ForeignKey("forge_channels.id"), primary_key=True)
     last_read_post_id = db.Column(db.Integer, nullable=False, default=0)
+
+
+# Columns added to Forge tables after they first shipped: (table, column, DDL).
+# create_all() never alters an existing table, so these are added here --
+# additive only, skipped when already present, safe to run on every boot.
+_ADDED_COLUMNS = (
+    ("forge_videos", "strip_audio", "strip_audio BOOLEAN NOT NULL DEFAULT 0"),
+)
+
+
+def ensure_columns(engine=None) -> None:
+    engine = engine or db.engine
+    tables = set(inspect(engine).get_table_names())
+    with engine.begin() as conn:
+        for table, col, ddl in _ADDED_COLUMNS:
+            if table not in tables:
+                continue
+            existing = {c["name"] for c in inspect(conn).get_columns(table)}
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
 
 
 # --- permissions ---
@@ -318,10 +340,11 @@ def total_unread(user_id: int) -> int:
 
 # --- videos ---
 
-def create_video(channel_id: int, uploader, name: str, size: int) -> ForgeVideo:
+def create_video(channel_id: int, uploader, name: str, size: int,
+                 strip_audio: bool = False) -> ForgeVideo:
     video = ForgeVideo(channel_id=channel_id, uploader_id=uploader.id,
                        original_name=(name or "video")[:255], original_size=size,
-                       status="uploading")
+                       status="uploading", strip_audio=bool(strip_audio))
     db.session.add(video)
     db.session.commit()
     return video

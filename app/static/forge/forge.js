@@ -167,6 +167,7 @@
       wrap.appendChild(video);
       const tools = el("div", "fv-tools");
       if (v.duration_sec) tools.appendChild(el("span", null, fmtClock(v.duration_sec)));
+      if (v.muted) tools.appendChild(el("span", null, "No audio"));
       wrap.appendChild(tools);
       return { wrap, video, tools };
     }
@@ -410,6 +411,12 @@
     note.placeholder = "Add a note for the coaches (what you worked on, what felt off)…";
     note.maxLength = 4000;
     panel.appendChild(note);
+    const muteRow = el("label", "fu-mute");
+    const mute = document.createElement("input");
+    mute.type = "checkbox";
+    muteRow.appendChild(mute);
+    muteRow.appendChild(document.createTextNode(" Remove audio (music, talking in the background)"));
+    panel.appendChild(muteRow);
     const bar = el("div", "fu-bar");
     const fill = el("div");
     bar.appendChild(fill);
@@ -438,13 +445,15 @@
     go.addEventListener("click", async () => {
       go.disabled = true;
       note.disabled = true;
+      mute.disabled = true;
       bar.hidden = false;
       msg.className = "fu-msg";
       msg.textContent = "Starting upload… keep this page open.";
       state.uploads += 1;
       try {
         const start = await api(`/forge/api/channels/${channelId}/uploads`, { method: "POST",
-          body: { name: file.name, size: file.size, type: file.type, duration } });
+          body: { name: file.name, size: file.size, type: file.type, duration,
+                  strip_audio: mute.checked } });
         videoId = start.video_id;
         const n = start.urls.length;
         const loaded = new Array(n).fill(0);
@@ -494,6 +503,7 @@
         go.disabled = false;
         go.textContent = "Try again";
         note.disabled = false;
+        mute.disabled = false;
       } finally {
         state.uploads -= 1;
       }

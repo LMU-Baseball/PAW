@@ -67,14 +67,14 @@ def probe(path: str) -> dict:
     return info
 
 
-def encode(src: str, dst: str, thumb: str) -> dict:
+def encode(src: str, dst: str, thumb: str, strip_audio: bool = False) -> dict:
     ff = _ffmpeg_path()
+    audio = ["-an"] if strip_audio else ["-c:a", "aac", "-b:a", "96k", "-ac", "1"]
     with _encode_slot():
         subprocess.run([ff, "-hide_banner", "-loglevel", "error", "-y", "-i", src,
                         "-vf", _SCALE, "-fpsmax", "60",
                         "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-threads", "2",
-                        "-c:a", "aac", "-b:a", "96k", "-ac", "1",
-                        "-movflags", "+faststart", dst],
+                        *audio, "-movflags", "+faststart", dst],
                        check=True, capture_output=True, timeout=_ENCODE_TIMEOUT_SEC)
     info = probe(dst)
     at = "1" if info.get("duration", 0) > 2 else "0"
@@ -98,7 +98,7 @@ def process(video: F.ForgeVideo) -> None:
                 raise ValueError("longer than 20 minutes")
             if "width" not in src_info:
                 raise ValueError("not a video file")
-            info = encode(src, dst, thumb)
+            info = encode(src, dst, thumb, strip_audio=bool(video.strip_audio))
             pkey = S.playback_key(video.channel_id, video.id)
             tkey = S.thumb_key(video.channel_id, video.id)
             S.upload(dst, pkey, "video/mp4")
