@@ -281,7 +281,7 @@ def _register(client, name, email, password, confirm=None, team_code="",
     return client.post("/register", data={
         "name": name, "email": email, "password": password,
         "confirm": confirm if confirm is not None else password,
-        "team_code": team_code, "player_type": player_type,
+        "team_code": team_code, "player_type": {"position": ["position"], "pitcher": ["pitcher"], "both": ["position", "pitcher"], "": []}[player_type],
     }, follow_redirects=True)
 
 

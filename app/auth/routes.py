@@ -11,8 +11,9 @@ from flask import (Blueprint, current_app, flash, redirect, render_template, req
                    session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf import FlaskForm
-from wtforms import PasswordField, RadioField, StringField, SubmitField
+from wtforms import PasswordField, SelectMultipleField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
+from wtforms.widgets import CheckboxInput, ListWidget
 
 from app.auth import tokens
 from app.auth.access import account_admin_required
@@ -79,14 +80,30 @@ def _full_name(form, field):
         raise ValidationError("Enter your first and last name.")
 
 
-_PLAYER_TYPE_CHOICES = [("position", "Position player"), ("pitcher", "Pitcher"), ("both", "Both")]
+def _player_type_field():
+    return SelectMultipleField("I'm a", choices=[("position", "Position player"),
+                                                 ("pitcher", "Pitcher")],
+                               validate_choice=False, option_widget=CheckboxInput(),
+                               widget=ListWidget(prefix_label=False))
+
+
+def _player_type(checked) -> str | None:
+    """The stored position from the I'm-a checkboxes (either or both)."""
+    picked = set(checked or ())
+    if {"position", "pitcher"} <= picked:
+        return "both"
+    return next((t for t in ("pitcher", "position") if t in picked), None)
+
+
+def _checked(player_type: str | None) -> list[str]:
+    return ["position", "pitcher"] if player_type == "both" else [player_type] if player_type else []
 
 
 class RegisterForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired(), Length(max=255), _full_name])
     email = StringField("Email", validators=[DataRequired(), _lmu_email])
     team_code = StringField("Team code", validators=[_team_code])
-    player_type = RadioField("I'm a", choices=_PLAYER_TYPE_CHOICES, validate_choice=False)
+    player_type = _player_type_field()
     password = PasswordField(
         "Password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
     confirm = PasswordField("Confirm password", validators=[
@@ -105,7 +122,7 @@ class ChangePasswordForm(FlaskForm):
 
 class AccountForm(FlaskForm):
     name = StringField("Name", validators=[DataRequired(), Length(max=255), _full_name])
-    player_type = RadioField("I'm a", choices=_PLAYER_TYPE_CHOICES, validate_choice=False)
+    player_type = _player_type_field()
     submit = SubmitField("Save")
 
 
@@ -255,7 +272,7 @@ def register():
         is_coach_signup = is_coach_email(email) or _matches_coach_code(form.team_code.data)
         if User.query.filter_by(email=email).first():
             flash("An account with that email already exists. Try signing in instead.", "error")
-        elif not is_coach_signup and form.player_type.data not in PLAYER_TYPES:
+        elif not is_coach_signup and _player_type(form.player_type.data) not in PLAYER_TYPES:
             form.player_type.errors = ["Pick position player, pitcher, or both."]
         else:
             role = "coach" if is_coach_signup else "player"
@@ -266,7 +283,7 @@ def register():
             db.session.add(user)
             db.session.commit()
             if role == "player":
-                forge.set_player_type(user, form.player_type.data)
+                forge.set_player_type(user, _player_type(form.player_type.data))
             if user.email_verified:
                 login_user(user)
                 flash("Account created.", "info")
@@ -312,14 +329,15 @@ def account():
     posts, Accounts page) and, for players, position player / pitcher / both."""
     from app.data import forge
     user = current_user._get_current_object()
-    form = AccountForm(obj=user)
+    form = AccountForm(name=user.name, player_type=_checked(user.player_type))
     if form.validate_on_submit():
-        if user.role == "player" and form.player_type.data not in PLAYER_TYPES:
+        player_type = _player_type(form.player_type.data)
+        if user.role == "player" and player_type not in PLAYER_TYPES:
             form.player_type.errors = ["Pick position player, pitcher, or both."]
         else:
             user.name = " ".join(form.name.data.split())
-            if user.role == "player" and form.player_type.data != user.player_type:
-                forge.set_player_type(user, form.player_type.data)
+            if user.role == "player" and player_type != user.player_type:
+                forge.set_player_type(user, player_type)
             db.session.commit()
             flash("Saved.", "info")
             return redirect(url_for("auth.account"))

@@ -18,16 +18,13 @@
       either one signs you in as the right role.
     </div>
     {% for e in form.team_code.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
-    <fieldset style="border: none; padding: 0; margin: 12px 0 0;">
+    <fieldset style="border: none; padding: 0; margin: 12px 0 8px;">
       <legend style="font-weight: 600; padding: 0;">I'm a</legend>
       {% for opt in form.player_type %}
         <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 4px 0;">
           {{ opt(style="width: auto; margin: 0;") }} {{ opt.label.text }}
         </label>
       {% endfor %}
-      <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">
-        Pitchers get a Forge channel for bullpen video, under the name above. Coaches can skip this.
-      </div>
     </fieldset>
     {% for e in form.player_type.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
     <label for="password">Password</label>

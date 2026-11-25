@@ -15,18 +15,14 @@
     </div>
     {% for e in form.name.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
     {% if current_user.role == "player" %}
-      <fieldset style="border: none; padding: 0; margin: 12px 0 0;">
-        <legend style="font-weight: 600; padding: 0;">I'm a</legend>
-        {% for opt in form.player_type %}
-          <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 4px 0;">
-            {{ opt(style="width: auto; margin: 0;") }} {{ opt.label.text }}
-          </label>
-        {% endfor %}
-        <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">
-          Pitchers get a Forge channel for bullpen video. Switching to position player hides
-          your channel from the list; nothing in it is deleted.
-        </div>
-      </fieldset>
+      <fieldset style="border: none; padding: 0; margin: 12px 0 8px;">
+      <legend style="font-weight: 600; padding: 0;">I'm a</legend>
+      {% for opt in form.player_type %}
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 4px 0;">
+          {{ opt(style="width: auto; margin: 0;") }} {{ opt.label.text }}
+        </label>
+      {% endfor %}
+    </fieldset>
       {% for e in form.player_type.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
     {% endif %}
     <div style="margin-top: 16px;">{{ form.submit(class="btn") }}</div>

@@ -543,7 +543,7 @@ def _signup(app, monkeypatch, name, email, player_type):
     c = app.test_client()
     c.post("/register", data={"name": name, "email": email, "password": "password123",
                               "confirm": "password123", "team_code": "",
-                              "player_type": player_type})
+                              "player_type": {"position": ["position"], "pitcher": ["pitcher"], "both": ["position", "pitcher"], "": []}[player_type]})
     return c
 
 
@@ -683,7 +683,7 @@ def test_poll_picks_up_a_delete_by_someone_else(app):
 # --- My account page ---
 
 def _account(client, name, player_type=""):
-    return client.c.post("/account", data={"name": name, "player_type": player_type},
+    return client.c.post("/account", data={"name": name, "player_type": {"position": ["position"], "pitcher": ["pitcher"], "both": ["position", "pitcher"], "": []}[player_type]},
                          follow_redirects=True)
 
 
