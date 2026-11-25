@@ -4,7 +4,10 @@ and back-and-forth with the coaches.
 Channels come from the season's reviewed roster file (RHP/LHP), so every
 pitcher has one whether or not they've made a PAW account yet. A channel is
 keyed by the pitcher's normalized name and links to their account
-(`user_id`) automatically once an account with a matching name exists.
+(`user_id`) when they pick it at sign-up -- or, for accounts made before
+sign-up asked, automatically once an account with a matching name exists. A
+pitcher who isn't on the roster file gets a channel of their own, named for
+their account.
 Anyone signed in can read and comment in any channel; only the linked player
 (or a coach) can post video there. Video bytes never live in this database -- they sit in a
 private S3 bucket (app.data.forge_storage); `ForgeVideo` holds only the keys and
@@ -17,12 +20,12 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import func, inspect, text
+from sqlalchemy import func, or_, text
 
-from app.auth.models import User
+from app.auth.models import PITCHER_TYPES, PLAYER_TYPES, User
 from app.data.roster_media import _name_parts, _norm_name
 from app.data.seasons import season_bounds, season_label_for
-from app.extensions import db
+from app.extensions import add_missing_columns, db
 
 MAX_UPLOAD_BYTES = 4 * 1024 ** 3
 MAX_DURATION_SEC = 20 * 60
@@ -37,6 +40,9 @@ _ROSTER_DIR = Path(__file__).resolve().parents[2] / "data" / "rosters"
 # history. Its key can't collide with a normalized name (those are only a-z0-9).
 SANDBOX_KEY = "__coach_test__"
 SANDBOX_NAME = "Test Channel"
+# Channels for pitchers who aren't on the roster file are keyed by account,
+# which (like the sandbox key) can't collide with a normalized name.
+_OWN_PREFIX = "__user_"
 _PITCHER_TOKENS = {"RHP", "LHP"}
 
 
@@ -58,6 +64,10 @@ class ForgeChannel(db.Model):
     @property
     def is_sandbox(self) -> bool:
         return self.name_key == SANDBOX_KEY
+
+    @property
+    def is_own(self) -> bool:
+        return self.name_key.startswith(_OWN_PREFIX)
 
     @property
     def joined(self) -> bool:
@@ -106,6 +116,7 @@ class ForgePost(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=_now, index=True)
     deleted_at = db.Column(db.DateTime)
     deleted_by = db.Column(db.Integer)
+    edited_at = db.Column(db.DateTime, index=True)
 
     author = db.relationship(User, foreign_keys=[author_id], lazy="joined")
     video = db.relationship(ForgeVideo, lazy="joined")
@@ -125,19 +136,12 @@ class ForgeRead(db.Model):
 # additive only, skipped when already present, safe to run on every boot.
 _ADDED_COLUMNS = (
     ("forge_videos", "strip_audio", "strip_audio BOOLEAN NOT NULL DEFAULT 0"),
+    ("forge_posts", "edited_at", "edited_at DATETIME"),
 )
 
 
 def ensure_columns(engine=None) -> None:
-    engine = engine or db.engine
-    tables = set(inspect(engine).get_table_names())
-    with engine.begin() as conn:
-        for table, col, ddl in _ADDED_COLUMNS:
-            if table not in tables:
-                continue
-            existing = {c["name"] for c in inspect(conn).get_columns(table)}
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+    add_missing_columns(engine or db.engine, _ADDED_COLUMNS)
 
 
 # --- permissions ---
@@ -149,6 +153,10 @@ def can_upload(user, channel: ForgeChannel) -> bool:
 
 def can_delete(user, post: ForgePost) -> bool:
     return bool(user.is_authenticated and (user.is_coach or user.id == post.author_id))
+
+
+def can_edit(user, post: ForgePost) -> bool:
+    return bool(user.is_authenticated and user.id == post.author_id and post.deleted_at is None)
 
 
 # --- channels ---
@@ -220,8 +228,14 @@ def _link_accounts(channels: list[ForgeChannel], accounts: list) -> None:
 def sync_channels(season: str | None = None) -> list[ForgeChannel]:
     """Make sure every rostered pitcher has a channel, link any channel still
     waiting on an account to a newly matching player account, and return the
-    season's channels. Idempotent; a channel is never deleted, so a pitcher who
-    leaves the roster keeps their history (just drops off the list)."""
+    season's channels plus every active off-roster pitcher's own channel.
+    Idempotent; a channel is never deleted, so a pitcher who leaves the roster
+    keeps their history (just drops off the list).
+
+    Only accounts that never answered "position player / pitcher / both" are
+    matched by name: anyone who answered picked their channel themselves, so a
+    position player is never handed a pitcher's channel because the names look
+    alike. A linked account that never answered is tagged a pitcher."""
     names = _roster_pitchers(season or _current_season())
     keys = {}
     for name in names:
@@ -236,11 +250,67 @@ def sync_channels(season: str | None = None) -> list[ForgeChannel]:
     if waiting:
         linked = {uid for (uid,) in db.session.query(ForgeChannel.user_id)
                   .filter(ForgeChannel.user_id.isnot(None)).all()}
-        accounts = [u for u in User.query.filter_by(role="player", is_active=True)
+        accounts = [u for u in User.query.filter_by(role="player", is_active=True,
+                                                    player_type=None)
                     .order_by(User.id).all() if u.id not in linked]
         _link_accounts(waiting, accounts)
+    own = (ForgeChannel.query.join(User, ForgeChannel.user_id == User.id)
+           .filter(ForgeChannel.name_key.startswith(_OWN_PREFIX), User.is_active.is_(True))
+           .all())
+    channels = list(existing.values()) + own
+    for c in channels:
+        u = db.session.get(User, c.user_id) if c.user_id else None
+        if u is not None and u.role == "player" and u.player_type is None:
+            u.player_type = "pitcher"
     db.session.commit()
-    return sorted(existing.values(), key=lambda c: c.name.lower())
+    return sorted(channels, key=lambda c: c.name.lower())
+
+
+def channel_of(user) -> ForgeChannel | None:
+    return ForgeChannel.query.filter_by(user_id=user.id).first()
+
+
+def claimable_channels(season: str | None = None) -> list[dict]:
+    """The season's rostered pitchers no account has claimed yet, for the
+    "which pitcher are you?" pick."""
+    return [{"id": c.id, "name": c.name} for c in sync_channels(season)
+            if c.user_id is None and not c.is_own]
+
+
+def needs_claim(user) -> bool:
+    """A player account that never said whether it pitches and has no channel
+    yet -- made before sign-up asked, under a name that didn't match."""
+    return bool(user.is_authenticated and user.role == "player"
+                and user.player_type is None and channel_of(user) is None)
+
+
+def claim(user, player_type: str, channel_id: int | None = None) -> ForgeChannel | None:
+    """Record whether `user` is a position player, pitcher or both, and give a
+    pitcher their channel: the unclaimed roster channel they picked, or (when
+    they're not on the roster) one of their own named for their account.
+    Returns the channel, or None for a position player."""
+    if player_type not in PLAYER_TYPES:
+        raise ValueError("Pick position player, pitcher, or both.")
+    if user.role != "player":
+        raise ValueError("Only player accounts pick a position.")
+    if channel_of(user) is not None:
+        raise ValueError("Your account already has a Forge channel -- ask a coach to change it.")
+    channel = None
+    if player_type in PITCHER_TYPES:
+        if channel_id:
+            channel = db.session.get(ForgeChannel, int(channel_id))
+            if channel is None or channel.is_sandbox or channel.is_own:
+                raise ValueError("That pitcher isn't on the roster.")
+            if channel.user_id is not None:
+                raise ValueError(f"{channel.name} is already linked to another account -- "
+                                 "ask a coach if that's wrong.")
+        else:
+            channel = ForgeChannel(name_key=f"{_OWN_PREFIX}{user.id}__", name=user.name)
+            db.session.add(channel)
+        channel.user_id = user.id
+    user.player_type = player_type
+    db.session.commit()
+    return channel
 
 
 def sandbox_channel() -> ForgeChannel:
@@ -288,19 +358,25 @@ def _post_dict(post: ForgePost, viewer) -> dict:
         "created_at": post.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "video": None if (deleted or post.video is None) else post.video.to_dict(),
         "can_delete": (not deleted) and can_delete(viewer, post),
+        "can_edit": can_edit(viewer, post),
+        "edited": (not deleted) and post.edited_at is not None,
     }
 
 
 def list_posts(channel_id: int, viewer, season: str | None = None,
-               after_id: int = 0) -> list[dict]:
+               after_id: int = 0, since: datetime | None = None) -> list[dict]:
     """A channel's posts, oldest first, as a flat list (comments carry
     `parent_id`). `season` limits top-level posts to that academic year, and
     their comments come along whenever they were written. `after_id` (polling)
-    returns everything newer than the client's last post, season aside."""
+    returns everything newer than the client's last post, season aside, plus
+    any older post edited or deleted since the client's last poll (`since`)."""
     base = ForgePost.query.filter(ForgePost.channel_id == channel_id)
     if after_id:
+        changed = ForgePost.id > after_id
+        if since is not None:
+            changed = or_(changed, ForgePost.edited_at >= since, ForgePost.deleted_at >= since)
         return [_post_dict(p, viewer) for p in
-                base.filter(ForgePost.id > after_id).order_by(ForgePost.id).all()]
+                base.filter(changed).order_by(ForgePost.id).all()]
     top = base.filter(ForgePost.parent_id.is_(None))
     if season:
         start, end = season_bounds(season)
@@ -338,6 +414,19 @@ def add_post(channel_id: int, author, body: str, parent_id: int | None = None,
     db.session.add(post)
     db.session.commit()
     mark_read(author.id, channel_id, post.id)
+    return post
+
+
+def edit_post(post: ForgePost, body: str) -> ForgePost:
+    body = (body or "").strip()
+    if len(body) > MAX_BODY_CHARS:
+        raise ValueError(f"Messages are limited to {MAX_BODY_CHARS} characters.")
+    if not body and post.video_id is None:
+        raise ValueError("A message can't be empty -- delete it instead.")
+    if body != post.body:
+        post.body = body
+        post.edited_at = _now()
+        db.session.commit()
     return post
 
 

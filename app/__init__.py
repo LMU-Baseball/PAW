@@ -99,6 +99,8 @@ def create_app(config_object=Config) -> Flask:
 
     with server.app_context():
         db.create_all()
+        from app.auth.models import ensure_columns as ensure_user_columns
+        ensure_user_columns()
         from app.data.forge import ensure_columns as ensure_forge_columns
         ensure_forge_columns()
         from app.data.practice_plans import seed_plans

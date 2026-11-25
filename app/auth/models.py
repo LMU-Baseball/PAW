@@ -14,9 +14,17 @@ import os
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.extensions import db, login_manager
+from app.extensions import add_missing_columns, db, login_manager
 
 ROLES = ("player", "coach")
+# What a player told us at sign-up; NULL for coaches and accounts made before
+# it was asked. Pitchers ("pitcher"/"both") get a Forge channel.
+PLAYER_TYPES = ("position", "pitcher", "both")
+PITCHER_TYPES = ("pitcher", "both")
+
+_ADDED_COLUMNS = (
+    ("users", "player_type", "player_type VARCHAR(16)"),
+)
 
 # Env-var specs for boot-time account seeding (see seed_users_from_env). Each is
 # (email_var, password_var, name_var, role).
@@ -46,6 +54,7 @@ class User(UserMixin, db.Model):
     trackman_id = db.Column(db.Integer, nullable=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    player_type = db.Column(db.String(16))
 
     # --- password ---
     def set_password(self, password: str) -> None:
@@ -66,6 +75,10 @@ class User(UserMixin, db.Model):
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role})>"
+
+
+def ensure_columns(engine=None) -> None:
+    add_missing_columns(engine or db.engine, _ADDED_COLUMNS)
 
 
 def seed_users_from_env() -> int:

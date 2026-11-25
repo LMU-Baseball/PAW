@@ -18,6 +18,24 @@
       either one signs you in as the right role.
     </div>
     {% for e in form.team_code.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <fieldset style="border: none; padding: 0; margin: 12px 0 0;">
+      <legend style="font-weight: 600; padding: 0;">I'm a</legend>
+      {% for opt in form.player_type %}
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 4px 0;">
+          {{ opt(style="width: auto; margin: 0;") }} {{ opt.label.text }}
+        </label>
+      {% endfor %}
+      <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">Coaches can skip this.</div>
+    </fieldset>
+    {% for e in form.player_type.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    <div id="pitcher-pick" hidden>
+      <label for="pitcher_channel">Which pitcher are you?</label>
+      {{ form.pitcher_channel(id="pitcher_channel") }}
+      <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">
+        This is your Forge channel for bullpen video. Pick your name as it's on the roster,
+        even if you go by something else.
+      </div>
+    </div>
     <label for="password">Password</label>
     {{ form.password(id="password") }}
     {% for e in form.password.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
@@ -28,4 +46,16 @@
   </form>
   <p style="margin-top: 16px;">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
 </div>
+<script>
+  (function () {
+    const pick = document.getElementById("pitcher-pick");
+    const radios = document.querySelectorAll('input[name="player_type"]');
+    const sync = () => {
+      const r = document.querySelector('input[name="player_type"]:checked');
+      pick.hidden = !(r && (r.value === "pitcher" || r.value === "both"));
+    };
+    radios.forEach((r) => r.addEventListener("change", sync));
+    sync();
+  })();
+</script>
 {% endblock %}

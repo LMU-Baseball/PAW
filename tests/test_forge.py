@@ -117,6 +117,9 @@ class Client:
     def delete(self, url):
         return self.c.delete(url, headers=self.h)
 
+    def patch(self, url, body=None):
+        return self.c.patch(url, json=body or {}, headers=self.h)
+
 
 def _uid(app, email):
     with app.app_context():
@@ -585,3 +588,153 @@ def test_nickname_account_links_through_the_page(app):
         db.session.commit()
     chans = Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]
     assert {ch["name"]: ch["joined"] for ch in chans}[UNSIGNED] is True
+
+
+# --- position player / pitcher / both, picked at sign-up ---
+
+def _signup(app, monkeypatch, name, email, player_type, channel=""):
+    for var in ("PAW_TEAM_CODE", "PAW_COACH_CODE", "PAW_COACH_EMAILS"):
+        monkeypatch.delenv(var, raising=False)
+    c = app.test_client()
+    c.post("/register", data={"name": name, "email": email, "password": "password123",
+                              "confirm": "password123", "team_code": "",
+                              "player_type": player_type, "pitcher_channel": str(channel)})
+    return c
+
+
+def test_signup_offers_only_unclaimed_roster_pitchers(app):
+    with app.app_context():
+        F.sync_channels()
+    page = app.test_client().get("/register").data.decode()
+    assert UNSIGNED in page
+    assert PITCHER_A not in page and PITCHER_B not in page
+
+
+def test_pitcher_picks_their_roster_channel_under_any_account_name(app, monkeypatch):
+    chan = _chan(app, UNSIGNED)
+    _signup(app, monkeypatch, "Big Jake", "jake@lmu.edu", "both", chan)
+    with app.app_context():
+        u = User.query.filter_by(email="jake@lmu.edu").one()
+        ch = db.session.get(F.ForgeChannel, chan)
+        assert (u.player_type, ch.user_id, ch.name) == ("both", u.id, UNSIGNED)
+    d = Client(app, "jake@lmu.edu").get(f"/forge/api/channels/{chan}/posts").json["channel"]
+    assert d["mine"] and d["can_upload"] and d["account_name"] == "Big Jake"
+
+
+def test_pitcher_not_on_roster_gets_own_channel_named_for_account(app, monkeypatch, s3):
+    _signup(app, monkeypatch, "Walk On", "walkon@lmu.edu", "pitcher")
+    w = Client(app, "walkon@lmu.edu")
+    mine = [ch for ch in w.get("/forge/api/channels").json["channels"] if ch["mine"]]
+    assert [ch["name"] for ch in mine] == ["Walk On"]
+    assert w.post(f"/forge/api/channels/{mine[0]['id']}/uploads",
+                  {"name": "pen.mov", "size": 1000, "duration": 60}).status_code == 201
+    names = [ch["name"] for ch in Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]]
+    assert "Walk On" in names
+
+
+def test_position_player_with_a_pitchers_name_is_not_auto_linked(app, monkeypatch):
+    _signup(app, monkeypatch, UNSIGNED, "jn@lmu.edu", "position")
+    with app.app_context():
+        assert db.session.get(F.ForgeChannel, _chan(app, UNSIGNED)).user_id is None
+        assert User.query.filter_by(email="jn@lmu.edu").one().player_type == "position"
+
+
+def test_already_linked_accounts_get_tagged_pitcher(app):
+    with app.app_context():
+        assert User.query.filter_by(email="a@lmu.edu").one().player_type is None
+        F.sync_channels()
+        assert User.query.filter_by(email="a@lmu.edu").one().player_type == "pitcher"
+        assert User.query.filter_by(email="h@lmu.edu").one().player_type is None
+
+
+def test_old_unlinked_account_is_asked_on_the_forge_then_claims(app):
+    h = Client(app, "h@lmu.edu")
+    assert h.cfg["claim"]["needed"] is True
+    assert [c["name"] for c in h.cfg["claim"]["channels"]] == [UNSIGNED]
+    assert Client(app, "a@lmu.edu").cfg["claim"]["needed"] is False
+    assert Client(app, "coach@lmu.edu").cfg["claim"]["needed"] is False
+    chan = _chan(app, UNSIGNED)
+    assert h.post("/forge/api/claim", {"player_type": "pitcher", "channel_id": chan}).json == {
+        "channel_id": chan}
+    assert Client(app, "h@lmu.edu").cfg["claim"]["needed"] is False
+    r = h.post("/forge/api/claim", {"player_type": "pitcher"})
+    assert r.status_code == 400 and "already has" in r.json["error"]
+
+
+def test_cannot_claim_someone_elses_channel(app):
+    taken = _chan(app, "a@lmu.edu")
+    h = Client(app, "h@lmu.edu")
+    r = h.post("/forge/api/claim", {"player_type": "pitcher", "channel_id": taken})
+    assert r.status_code == 400 and "already linked" in r.json["error"]
+    with app.app_context():
+        assert db.session.get(F.ForgeChannel, taken).user_id == _uid(app, "a@lmu.edu")
+        assert User.query.filter_by(email="h@lmu.edu").one().player_type is None
+
+
+def test_ensure_columns_adds_player_type_and_edited_at_to_tables_with_rows(tmp_path):
+    from sqlalchemy import create_engine, inspect, text
+    from app.auth.models import ensure_columns as ensure_user_columns
+    engine = create_engine("sqlite:///" + str(tmp_path / "legacy.db").replace("\\", "/"))
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, name VARCHAR(255))"))
+        conn.execute(text("INSERT INTO users (id, name) VALUES (3, 'Old Account')"))
+        conn.execute(text("CREATE TABLE forge_posts (id INTEGER PRIMARY KEY, body TEXT)"))
+        conn.execute(text("INSERT INTO forge_posts (id, body) VALUES (9, 'hi')"))
+    for _ in range(2):
+        ensure_user_columns(engine)
+        F.ensure_columns(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT id, name, player_type FROM users")).all() == [
+            (3, "Old Account", None)]
+        assert conn.execute(text("SELECT id, body, edited_at FROM forge_posts")).all() == [
+            (9, "hi", None)]
+    assert "player_type" in {c["name"] for c in inspect(engine).get_columns("users")}
+    engine.dispose()
+
+
+# --- editing your own message ---
+
+def test_author_edits_own_message_and_others_see_it_on_next_poll(app):
+    a, b = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    p = _say(a, chan, "typo heer")
+    first = b.get(f"/forge/api/channels/{chan}/posts").json
+    assert first["posts"][0]["can_edit"] is False
+    assert first["posts"][0]["edited"] is False
+    r = a.patch(f"/forge/api/posts/{p['id']}", {"body": "typo here"})
+    assert r.status_code == 200 and r.json["post"]["edited"] is True
+    poll = b.get(f"/forge/api/channels/{chan}/posts?after={p['id']}&since={first['now']}").json
+    assert [(x["id"], x["body"], x["edited"]) for x in poll["posts"]] == [(p["id"], "typo here", True)]
+    quiet = b.get(f"/forge/api/channels/{chan}/posts?after={p['id']}&since={poll['now']}").json
+    assert quiet["posts"] == []
+
+
+def test_only_the_author_can_edit_not_even_a_coach(app):
+    a, b, coach = Client(app, "a@lmu.edu"), Client(app, "b@lmu.edu"), Client(app, "coach@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    p = _say(a, chan, "mine")
+    c = _say(coach, chan, "coach note")
+    assert b.patch(f"/forge/api/posts/{p['id']}", {"body": "hacked"}).status_code == 403
+    assert coach.patch(f"/forge/api/posts/{p['id']}", {"body": "hacked"}).status_code == 403
+    assert coach.patch(f"/forge/api/posts/{c['id']}", {"body": "coach note, fixed"}).status_code == 200
+    with app.app_context():
+        assert db.session.get(F.ForgePost, p["id"]).body == "mine"
+
+
+def test_edit_rejects_empty_text_and_deleted_posts(app):
+    a = Client(app, "a@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    p = _say(a, chan, "keep me")
+    assert a.patch(f"/forge/api/posts/{p['id']}", {"body": "   "}).status_code == 400
+    a.delete(f"/forge/api/posts/{p['id']}")
+    assert a.patch(f"/forge/api/posts/{p['id']}", {"body": "back"}).status_code == 404
+
+
+def test_poll_picks_up_a_delete_by_someone_else(app):
+    a, coach = Client(app, "a@lmu.edu"), Client(app, "coach@lmu.edu")
+    chan = _chan(app, "a@lmu.edu")
+    p = _say(a, chan, "remove me")
+    first = a.get(f"/forge/api/channels/{chan}/posts").json
+    coach.delete(f"/forge/api/posts/{p['id']}")
+    poll = a.get(f"/forge/api/channels/{chan}/posts?after={p['id']}&since={first['now']}").json
+    assert [x["deleted"] for x in poll["posts"]] == [True]

@@ -83,6 +83,38 @@ def register_cli(server):
         db.session.commit()
         click.echo(f"Linked {email} -> trackman_id {trackman_id}.")
 
+    @server.cli.command("forge-link")
+    @click.option("--email", required=True)
+    @click.option("--channel", "channel_name", default=None,
+                  help="Roster name of the Forge channel to give this account.")
+    @click.option("--unlink", is_flag=True,
+                  help="Free this account's channel and clear its position answer, "
+                       "so the player is asked again.")
+    def forge_link(email, channel_name, unlink):
+        """Fix which Forge channel an account owns (a pitcher who picked the wrong name)."""
+        from app.data import forge
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        current = forge.channel_of(user)
+        if unlink or channel_name:
+            if current is not None:
+                current.user_id = None
+            user.player_type = None
+            db.session.commit()
+        if channel_name:
+            target = forge.ForgeChannel.query.filter_by(name=channel_name).first()
+            if target is None:
+                raise click.ClickException(f"No Forge channel named: {channel_name}")
+            try:
+                forge.claim(user, "pitcher", target.id)
+            except ValueError as e:
+                raise click.ClickException(str(e)) from e
+        now = forge.channel_of(user)
+        click.echo(f"{email}: {now.name if now else 'no channel'} "
+                   f"(player_type={user.player_type}).")
+
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",
                   type=click.Choice(["all", "hitting", "pitching", "catching"]),
