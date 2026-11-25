@@ -116,13 +116,10 @@ class User(UserMixin, db.Model):
 
     @property
     def can_manage_accounts(self) -> bool:
-        """Account management is narrower than coach: when PAW_ACCOUNT_ADMINS is
-        set, only those coaches get it. Unset falls back to every coach so a
-        deploy that hasn't added the variable yet doesn't lock everyone out."""
-        if not self.is_coach:
-            return False
-        admins = _account_admin_emails()
-        return not admins or self.email.strip().lower() in admins
+        """Account management is narrower than coach: only coaches listed in
+        PAW_ACCOUNT_ADMINS get it. Unset means nobody (the flask CLI still works),
+        so forgetting the variable never hands it to the whole staff."""
+        return self.is_coach and self.email.strip().lower() in _account_admin_emails()
 
     def can_view_player(self, trackman_id) -> bool:
         """Team-transparent: any authenticated account may view any player.

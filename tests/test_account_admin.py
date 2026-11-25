@@ -15,6 +15,7 @@ from config import Config
 @pytest.fixture()
 def app(monkeypatch):
     monkeypatch.setenv("PAW_MAIL_BACKEND", "console")
+    monkeypatch.setenv("PAW_ACCOUNT_ADMINS", "coach@lmu.edu")
     mail.outbox.clear()
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -139,6 +140,13 @@ def test_account_admins_list_limits_accounts_page_to_named_coaches(app, monkeypa
     assert _user(app, "player@lmu.edu").is_active
     assert b"Account management" not in assistant.get("/change-password").data
     assert b"Account management" in admin.get("/change-password").data
+
+
+def test_no_account_admins_listed_means_no_coach_manages_accounts(app, monkeypatch):
+    monkeypatch.delenv("PAW_ACCOUNT_ADMINS")
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    assert coach.get("/accounts").status_code == 403
+    assert b"Account management" not in coach.get("/change-password").data
 
 
 def test_player_cannot_post_account_actions(app):
