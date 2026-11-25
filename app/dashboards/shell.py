@@ -222,6 +222,7 @@ def header(back_href: str | None = None, back_label: str | None = None) -> html.
         items = [
             html.Div([html.Strong(current_user.name), current_user.role],
                      className="paw-menu-who"),
+            html.A("My account", href="/account"),
             html.A("Change password", href="/change-password"),
         ]
         if getattr(current_user, "can_manage_accounts", False):

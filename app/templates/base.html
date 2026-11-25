@@ -139,6 +139,7 @@
         <summary aria-label="Menu"><span></span><span></span><span></span></summary>
         <div class="paw-menu-panel">
           <div class="paw-menu-who"><strong>{{ current_user.name }}</strong>{{ current_user.role }}</div>
+          <a href="{{ url_for('auth.account') }}">My account</a>
           <a href="{{ url_for('auth.change_password') }}">Change password</a>
           {% if current_user.can_manage_accounts %}<a href="{{ url_for('auth.accounts') }}">Account management</a>{% endif %}
           <form method="post" action="{{ url_for('auth.logout') }}" class="paw-menu-logout">

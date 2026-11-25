@@ -294,7 +294,7 @@ def test_register_player_must_say_position_or_pitcher(app, client):
 
 def test_register_coach_can_skip_position(app, client, monkeypatch):
     monkeypatch.setenv("PAW_COACH_EMAILS", "skipper@lmu.edu")
-    _register(client, "Skipper", "skipper@lmu.edu", "a-real-password", player_type="")
+    _register(client, "Skip Coach", "skipper@lmu.edu", "a-real-password", player_type="")
     with app.app_context():
         user = User.query.filter_by(email="skipper@lmu.edu").one()
         assert user.role == "coach" and user.player_type is None
@@ -325,14 +325,14 @@ def test_register_creates_coach_account_for_allowlisted_email(app, client, monke
 
 
 def test_register_rejects_non_lmu_email(app, client):
-    resp = _register(client, "Outsider", "outsider@gmail.com", "a-real-password")
+    resp = _register(client, "Out Sider", "outsider@gmail.com", "a-real-password")
     assert b"Use your LMU email address" in resp.data
     with app.app_context():
         assert User.query.filter_by(email="outsider@gmail.com").first() is None
 
 
 def test_register_rejects_duplicate_email(app, client):
-    resp = _register(client, "Impostor", "coach@lmu.edu", "a-real-password")
+    resp = _register(client, "Imp Ostor", "coach@lmu.edu", "a-real-password")
     assert b"already exists" in resp.data
     with app.app_context():
         assert User.query.filter_by(email="coach@lmu.edu").count() == 1
@@ -446,3 +446,10 @@ def test_coach_email_allowlist_still_works_alongside_coach_code(app, client, mon
     with app.app_context():
         user = User.query.filter_by(email="allowlisted@lmu.edu").first()
         assert user is not None and user.role == "coach"
+
+
+def test_register_requires_first_and_last_name(app, client):
+    resp = _register(client, "Will", "will@lmu.edu", "a-real-password")
+    assert b"Enter your first and last name." in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="will@lmu.edu").first() is None
