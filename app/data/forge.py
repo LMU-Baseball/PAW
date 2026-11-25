@@ -20,7 +20,7 @@ from pathlib import Path
 from sqlalchemy import func, inspect, text
 
 from app.auth.models import User
-from app.data.roster_media import _norm_name
+from app.data.roster_media import _name_parts, _norm_name
 from app.data.seasons import season_bounds, season_label_for
 from app.extensions import db
 
@@ -173,6 +173,50 @@ def _current_season() -> str:
     return season_label_for(_now().date().isoformat())
 
 
+def _single_first_name(name: str) -> str:
+    tokens = re.findall(r"[a-z]+", (name or "").lower())
+    return tokens[0] if len(tokens) == 1 else ""
+
+
+def _link_accounts(channels: list[ForgeChannel], accounts: list) -> None:
+    """Link channels waiting on an account to player accounts whose sign-up
+    name doesn't exactly match the roster -- players type nicknames ("Charles"
+    for Charlie, "Matt" for Matthew) or only a first name ("Will"). Looser
+    passes run only after stricter ones, and a pass links a channel only when
+    it and the account pick each other uniquely, so an ambiguous name stays
+    unlinked rather than handing one pitcher's channel to another player."""
+    roster_firsts = [_name_parts(c.name)[0] for c in channels]
+
+    def exact(ch, u):
+        return _norm_name(u.name) == ch.name_key
+
+    def last_and_initial(ch, u):
+        cf, cl = _name_parts(ch.name)
+        uf, ul = _name_parts(u.name)
+        return bool(cl) and ul == cl and uf[:1] == cf[:1]
+
+    def first_name_only(ch, u):
+        first = _single_first_name(u.name)
+        cf = _name_parts(ch.name)[0]
+        return bool(first) and first == cf and roster_firsts.count(cf) == 1
+
+    for ch in channels:
+        picks = [u for u in accounts if exact(ch, u)]
+        if picks:
+            ch.user_id = picks[0].id
+            accounts.remove(picks[0])
+    for matches in (last_and_initial, first_name_only):
+        open_chans = [c for c in channels if c.user_id is None]
+        for ch in open_chans:
+            picks = [u for u in accounts if matches(ch, u)]
+            if len(picks) != 1:
+                continue
+            u = picks[0]
+            if sum(1 for c in open_chans if c.user_id is None and matches(c, u)) == 1:
+                ch.user_id = u.id
+                accounts.remove(u)
+
+
 def sync_channels(season: str | None = None) -> list[ForgeChannel]:
     """Make sure every rostered pitcher has a channel, link any channel still
     waiting on an account to a newly matching player account, and return the
@@ -188,16 +232,13 @@ def sync_channels(season: str | None = None) -> list[ForgeChannel]:
         if key not in existing:
             existing[key] = ForgeChannel(name_key=key, name=name)
             db.session.add(existing[key])
-    waiting = {c.name_key: c for c in existing.values() if c.user_id is None}
+    waiting = [c for c in existing.values() if c.user_id is None]
     if waiting:
         linked = {uid for (uid,) in db.session.query(ForgeChannel.user_id)
                   .filter(ForgeChannel.user_id.isnot(None)).all()}
-        for u in (User.query.filter_by(role="player", is_active=True)
-                  .order_by(User.id).all()):
-            ch = waiting.get(_norm_name(u.name))
-            if ch is not None and ch.user_id is None and u.id not in linked:
-                ch.user_id = u.id
-                linked.add(u.id)
+        accounts = [u for u in User.query.filter_by(role="player", is_active=True)
+                    .order_by(User.id).all() if u.id not in linked]
+        _link_accounts(waiting, accounts)
     db.session.commit()
     return sorted(existing.values(), key=lambda c: c.name.lower())
 

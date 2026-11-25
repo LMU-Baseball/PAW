@@ -541,3 +541,47 @@ def test_transcode_drops_audio_only_when_asked(app, s3, tmp_path, strip):
     out = subprocess.run([_ffmpeg(), "-hide_banner", "-i", s3.objects[S.playback_key(chan, vid)]],
                          capture_output=True, text=True).stderr
     assert ("Audio:" in out) is (not strip)
+
+
+# --- linking accounts whose sign-up name isn't the roster name ---
+
+def _link(roster, accounts):
+    from types import SimpleNamespace
+    from app.data.roster_media import _norm_name
+    chans = [F.ForgeChannel(name_key=_norm_name(n), name=n) for n in roster]
+    users = [SimpleNamespace(id=i, name=n) for i, n in enumerate(accounts, start=1)]
+    F._link_accounts(chans, users)
+    return {c.name: (accounts[c.user_id - 1] if c.user_id else None) for c in chans}
+
+
+def test_links_nicknames_and_first_name_only_accounts():
+    got = _link(["Charlie Ushijima", "John Casale", "Matthew Champion", "Will Kaczynski",
+                 "Colten Landen", "Branson Wade"],
+                ["Charles Ushijima", "Johnny Casale", "Matt Champion", "Will", "Colten",
+                 "matthew moreno", "Alex Gamboa"])
+    assert got == {"Charlie Ushijima": "Charles Ushijima", "John Casale": "Johnny Casale",
+                   "Matthew Champion": "Matt Champion", "Will Kaczynski": "Will",
+                   "Colten Landen": "Colten", "Branson Wade": None}
+
+
+def test_exact_name_beats_a_nickname_match():
+    got = _link(["Matt Champion"], ["Matthew Champion", "Matt Champion"])
+    assert got == {"Matt Champion": "Matt Champion"}
+
+
+def test_ambiguous_names_stay_unlinked():
+    assert _link(["Will Kaczynski", "Will Smith"], ["Will"]) == {
+        "Will Kaczynski": None, "Will Smith": None}
+    assert _link(["Jake Casale"], ["Jack Casale", "Jim Casale"]) == {"Jake Casale": None}
+    assert _link(["John Casale", "Jim Casale"], ["J Casale"]) == {
+        "John Casale": None, "Jim Casale": None}
+
+
+def test_nickname_account_links_through_the_page(app):
+    with app.app_context():
+        u = User(email="c@lmu.edu", name="Jakey Newcomb", role="player")
+        u.set_password("password123")
+        db.session.add(u)
+        db.session.commit()
+    chans = Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]
+    assert {ch["name"]: ch["joined"] for ch in chans}[UNSIGNED] is True
