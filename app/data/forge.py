@@ -1,29 +1,24 @@
-"""The Forge: one Slack-style channel per rostered pitcher for offseason video
-and back-and-forth with the coaches.
+"""The Forge: one Slack-style channel per pitcher for offseason video and
+back-and-forth with the coaches.
 
-Channels come from the season's reviewed roster file (RHP/LHP), so every
-pitcher has one whether or not they've made a PAW account yet. A channel is
-keyed by the pitcher's normalized name and links to their account
-(`user_id`) when they pick it at sign-up -- or, for accounts made before
-sign-up asked, automatically once an account with a matching name exists. A
-pitcher who isn't on the roster file gets a channel of their own, named for
-their account.
-Anyone signed in can read and comment in any channel; only the linked player
-(or a coach) can post video there. Video bytes never live in this database -- they sit in a
-private S3 bucket (app.data.forge_storage); `ForgeVideo` holds only the keys and
-processing state. Posts are soft-deleted so a removed message can be recovered.
+A channel belongs to a player account that said it pitches ("pitcher" or
+"both") at sign-up, and is named for that account -- there is no roster
+lookup or name matching, so a player sees exactly the name they signed up
+with. Accounts linked to a channel before sign-up asked are tagged pitchers.
+Anyone signed in can read and comment in any channel; only its owner (or a
+coach) can post video there. Video bytes never live in this database -- they
+sit in a private S3 bucket (app.data.forge_storage); `ForgeVideo` holds only
+the keys and processing state. Posts are soft-deleted so a removed message can
+be recovered, and a channel is never deleted, so an account that's turned off
+or stops being a pitcher keeps its history (it just drops off the list).
 """
 from __future__ import annotations
 
-import json
-import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from sqlalchemy import func, or_, text
 
 from app.auth.models import PITCHER_TYPES, PLAYER_TYPES, User
-from app.data.roster_media import _name_parts, _norm_name
 from app.data.seasons import season_bounds, season_label_for
 from app.extensions import add_missing_columns, db
 
@@ -35,15 +30,12 @@ STALE_UPLOAD_HOURS = 24
 
 VIDEO_STATUSES = ("uploading", "queued", "processing", "ready", "failed")
 
-_ROSTER_DIR = Path(__file__).resolve().parents[2] / "data" / "rosters"
 # A coach-only channel for trying uploads without touching a real pitcher's
-# history. Its key can't collide with a normalized name (those are only a-z0-9).
+# history. Channels made before accounts owned them were keyed by normalized
+# roster name (a-z0-9 only), so neither special key can collide with those.
 SANDBOX_KEY = "__coach_test__"
 SANDBOX_NAME = "Test Channel"
-# Channels for pitchers who aren't on the roster file are keyed by account,
-# which (like the sandbox key) can't collide with a normalized name.
-_OWN_PREFIX = "__user_"
-_PITCHER_TOKENS = {"RHP", "LHP"}
+_ACCOUNT_PREFIX = "__user_"
 
 
 def _now() -> datetime:
@@ -64,10 +56,6 @@ class ForgeChannel(db.Model):
     @property
     def is_sandbox(self) -> bool:
         return self.name_key == SANDBOX_KEY
-
-    @property
-    def is_own(self) -> bool:
-        return self.name_key.startswith(_OWN_PREFIX)
 
     @property
     def joined(self) -> bool:
@@ -161,156 +149,58 @@ def can_edit(user, post: ForgePost) -> bool:
 
 # --- channels ---
 
-def _roster_pitchers(season: str) -> list[str]:
-    """"First Last" for each RHP/LHP in the season's reviewed roster file
-    (empty when there's no file for that season)."""
-    path = _ROSTER_DIR / f"{season.replace('/', '-')}.json"
-    if not path.exists():
-        return []
-    with open(path, encoding="utf-8") as fh:
-        players = json.load(fh)
-    names = []
-    for p in players:
-        tokens = set(re.split(r"[/,&\s]+", (p.get("position") or "").upper()))
-        if tokens & _PITCHER_TOKENS:
-            names.append(f"{p['first_name']} {p['last_name']}".strip())
-    return names
-
-
-def _current_season() -> str:
-    return season_label_for(_now().date().isoformat())
-
-
-def _single_first_name(name: str) -> str:
-    tokens = re.findall(r"[a-z]+", (name or "").lower())
-    return tokens[0] if len(tokens) == 1 else ""
-
-
-def _link_accounts(channels: list[ForgeChannel], accounts: list) -> None:
-    """Link channels waiting on an account to player accounts whose sign-up
-    name doesn't exactly match the roster -- players type nicknames ("Charles"
-    for Charlie, "Matt" for Matthew) or only a first name ("Will"). Looser
-    passes run only after stricter ones, and a pass links a channel only when
-    it and the account pick each other uniquely, so an ambiguous name stays
-    unlinked rather than handing one pitcher's channel to another player."""
-    roster_firsts = [_name_parts(c.name)[0] for c in channels]
-
-    def exact(ch, u):
-        return _norm_name(u.name) == ch.name_key
-
-    def last_and_initial(ch, u):
-        cf, cl = _name_parts(ch.name)
-        uf, ul = _name_parts(u.name)
-        return bool(cl) and ul == cl and uf[:1] == cf[:1]
-
-    def first_name_only(ch, u):
-        first = _single_first_name(u.name)
-        cf = _name_parts(ch.name)[0]
-        return bool(first) and first == cf and roster_firsts.count(cf) == 1
-
-    for ch in channels:
-        picks = [u for u in accounts if exact(ch, u)]
-        if picks:
-            ch.user_id = picks[0].id
-            accounts.remove(picks[0])
-    for matches in (last_and_initial, first_name_only):
-        open_chans = [c for c in channels if c.user_id is None]
-        for ch in open_chans:
-            picks = [u for u in accounts if matches(ch, u)]
-            if len(picks) != 1:
-                continue
-            u = picks[0]
-            if sum(1 for c in open_chans if c.user_id is None and matches(c, u)) == 1:
-                ch.user_id = u.id
-                accounts.remove(u)
-
-
-def sync_channels(season: str | None = None) -> list[ForgeChannel]:
-    """Make sure every rostered pitcher has a channel, link any channel still
-    waiting on an account to a newly matching player account, and return the
-    season's channels plus every active off-roster pitcher's own channel.
-    Idempotent; a channel is never deleted, so a pitcher who leaves the roster
-    keeps their history (just drops off the list).
-
-    Only accounts that never answered "position player / pitcher / both" are
-    matched by name: anyone who answered picked their channel themselves, so a
-    position player is never handed a pitcher's channel because the names look
-    alike. A linked account that never answered is tagged a pitcher."""
-    names = _roster_pitchers(season or _current_season())
-    keys = {}
-    for name in names:
-        keys.setdefault(_norm_name(name), name)
-    existing = {c.name_key: c for c in
-                ForgeChannel.query.filter(ForgeChannel.name_key.in_(list(keys))).all()} if keys else {}
-    for key, name in keys.items():
-        if key not in existing:
-            existing[key] = ForgeChannel(name_key=key, name=name)
-            db.session.add(existing[key])
-    waiting = [c for c in existing.values() if c.user_id is None]
-    if waiting:
-        linked = {uid for (uid,) in db.session.query(ForgeChannel.user_id)
-                  .filter(ForgeChannel.user_id.isnot(None)).all()}
-        accounts = [u for u in User.query.filter_by(role="player", is_active=True,
-                                                    player_type=None)
-                    .order_by(User.id).all() if u.id not in linked]
-        _link_accounts(waiting, accounts)
-    own = (ForgeChannel.query.join(User, ForgeChannel.user_id == User.id)
-           .filter(ForgeChannel.name_key.startswith(_OWN_PREFIX), User.is_active.is_(True))
-           .all())
-    channels = list(existing.values()) + own
-    for c in channels:
-        u = db.session.get(User, c.user_id) if c.user_id else None
-        if u is not None and u.role == "player" and u.player_type is None:
-            u.player_type = "pitcher"
-    db.session.commit()
-    return sorted(channels, key=lambda c: c.name.lower())
+def needs_player_type(user) -> bool:
+    """A player account made before sign-up asked position player / pitcher /
+    both, and not already linked to a channel (those are tagged pitchers)."""
+    return bool(user.is_authenticated and user.role == "player" and user.player_type is None
+                and channel_of(user) is None)
 
 
 def channel_of(user) -> ForgeChannel | None:
     return ForgeChannel.query.filter_by(user_id=user.id).first()
 
 
-def claimable_channels(season: str | None = None) -> list[dict]:
-    """The season's rostered pitchers no account has claimed yet, for the
-    "which pitcher are you?" pick."""
-    return [{"id": c.id, "name": c.name} for c in sync_channels(season)
-            if c.user_id is None and not c.is_own]
+def _ensure_channel(user) -> ForgeChannel:
+    channel = channel_of(user)
+    if channel is None:
+        channel = ForgeChannel(name_key=f"{_ACCOUNT_PREFIX}{user.id}__", name=user.name,
+                               user_id=user.id)
+        db.session.add(channel)
+    return channel
 
 
-def needs_claim(user) -> bool:
-    """A player account that never said whether it pitches and has no channel
-    yet -- made before sign-up asked, under a name that didn't match."""
-    return bool(user.is_authenticated and user.role == "player"
-                and user.player_type is None and channel_of(user) is None)
-
-
-def claim(user, player_type: str, channel_id: int | None = None) -> ForgeChannel | None:
-    """Record whether `user` is a position player, pitcher or both, and give a
-    pitcher their channel: the unclaimed roster channel they picked, or (when
-    they're not on the roster) one of their own named for their account.
-    Returns the channel, or None for a position player."""
+def set_player_type(user, player_type: str) -> ForgeChannel | None:
+    """Record whether `user` is a position player, pitcher or both; a pitcher
+    gets their channel. Returns the channel, or None for a position player."""
     if player_type not in PLAYER_TYPES:
         raise ValueError("Pick position player, pitcher, or both.")
     if user.role != "player":
         raise ValueError("Only player accounts pick a position.")
-    if channel_of(user) is not None:
-        raise ValueError("Your account already has a Forge channel -- ask a coach to change it.")
-    channel = None
-    if player_type in PITCHER_TYPES:
-        if channel_id:
-            channel = db.session.get(ForgeChannel, int(channel_id))
-            if channel is None or channel.is_sandbox or channel.is_own:
-                raise ValueError("That pitcher isn't on the roster.")
-            if channel.user_id is not None:
-                raise ValueError(f"{channel.name} is already linked to another account -- "
-                                 "ask a coach if that's wrong.")
-        else:
-            channel = ForgeChannel(name_key=f"{_OWN_PREFIX}{user.id}__", name=user.name)
-            db.session.add(channel)
-        channel.user_id = user.id
     user.player_type = player_type
+    channel = _ensure_channel(user) if player_type in PITCHER_TYPES else None
     db.session.commit()
     return channel
+
+
+def sync_channels() -> list[ForgeChannel]:
+    """Every active pitcher account's channel, named for the account (a
+    renamed account renames its channel). Tags accounts linked to a channel
+    before sign-up asked as pitchers. Idempotent."""
+    for channel in ForgeChannel.query.filter(ForgeChannel.user_id.isnot(None)).all():
+        if channel.user.role == "player" and channel.user.player_type is None:
+            channel.user.player_type = "pitcher"
+    pitchers = User.query.filter(User.role == "player", User.is_active.is_(True),
+                                 User.player_type.in_(PITCHER_TYPES)).all()
+    owned = {c.user_id: c for c in ForgeChannel.query.filter(
+        ForgeChannel.user_id.in_([u.id for u in pitchers])).all()} if pitchers else {}
+    channels = []
+    for user in pitchers:
+        channel = owned.get(user.id) or _ensure_channel(user)
+        if channel.name != user.name:
+            channel.name = user.name
+        channels.append(channel)
+    db.session.commit()
+    return sorted(channels, key=lambda c: c.name.lower())
 
 
 def sandbox_channel() -> ForgeChannel:
@@ -330,10 +220,10 @@ def get_channel(channel_id: int) -> ForgeChannel | None:
     return db.session.get(ForgeChannel, channel_id)
 
 
-def channels_for(viewer, season: str | None = None) -> list[dict]:
-    """The season's pitcher channels, with the coach-only test channel first
-    for coaches."""
-    channels = sync_channels(season)
+def channels_for(viewer) -> list[dict]:
+    """The pitcher channels, with the coach-only test channel first for
+    coaches."""
+    channels = sync_channels()
     if viewer.is_coach:
         channels = [sandbox_channel()] + channels
     unread = unread_counts(viewer.id)

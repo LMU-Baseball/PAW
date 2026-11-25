@@ -1,7 +1,7 @@
 """Custom Flask CLI commands (user management + data ingestion)."""
 import click
 
-from app.auth.models import ROLES, User
+from app.auth.models import PLAYER_TYPES, ROLES, User
 from app.extensions import db
 
 
@@ -83,37 +83,22 @@ def register_cli(server):
         db.session.commit()
         click.echo(f"Linked {email} -> trackman_id {trackman_id}.")
 
-    @server.cli.command("forge-link")
+    @server.cli.command("set-player-type")
     @click.option("--email", required=True)
-    @click.option("--channel", "channel_name", default=None,
-                  help="Roster name of the Forge channel to give this account.")
-    @click.option("--unlink", is_flag=True,
-                  help="Free this account's channel and clear its position answer, "
-                       "so the player is asked again.")
-    def forge_link(email, channel_name, unlink):
-        """Fix which Forge channel an account owns (a pitcher who picked the wrong name)."""
+    @click.option("--type", "player_type", type=click.Choice(PLAYER_TYPES), required=True)
+    def set_player_type(email, player_type):
+        """Change whether a player is a position player, pitcher or both (pitchers get a
+        Forge channel; switching away keeps its history but drops it off the list)."""
         from app.data import forge
         email = email.strip().lower()
         user = User.query.filter_by(email=email).first()
         if not user:
             raise click.ClickException(f"No user with email: {email}")
-        current = forge.channel_of(user)
-        if unlink or channel_name:
-            if current is not None:
-                current.user_id = None
-            user.player_type = None
-            db.session.commit()
-        if channel_name:
-            target = forge.ForgeChannel.query.filter_by(name=channel_name).first()
-            if target is None:
-                raise click.ClickException(f"No Forge channel named: {channel_name}")
-            try:
-                forge.claim(user, "pitcher", target.id)
-            except ValueError as e:
-                raise click.ClickException(str(e)) from e
-        now = forge.channel_of(user)
-        click.echo(f"{email}: {now.name if now else 'no channel'} "
-                   f"(player_type={user.player_type}).")
+        try:
+            forge.set_player_type(user, player_type)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+        click.echo(f"Set {email} to {player_type}.")
 
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",

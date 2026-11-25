@@ -43,13 +43,8 @@
         b.classList.add("sandbox");
         b.title = "Only coaches can see this channel. Use it to try uploads.";
       }
-      if (!c.joined) {
-        b.classList.add("pending");
-        b.title = `${c.name} hasn't made a PAW account yet`;
-      }
       const nm = el("span", "nm", c.name);
       if (c.mine) nm.appendChild(el("span", "you", "(you)"));
-      if (!c.joined) nm.appendChild(el("span", "you", "· not on PAW yet"));
       if (c.sandbox) nm.appendChild(el("span", "you", "· coaches only"));
       b.appendChild(nm);
       if (c.unread) b.appendChild(el("span", "forge-badge", String(c.unread)));
@@ -244,8 +239,7 @@
     const ch = state.channel || {};
     if (ch.name && ch.joined === false) {
       feed.appendChild(el("p", "forge-empty",
-        `${ch.name} hasn't made a PAW account yet. Messages posted here will be waiting ` +
-        "when they sign up, and they can upload video once they do."));
+        `${ch.name}'s account is turned off, so they can't post here right now.`));
     } else if (!tops.length) {
       feed.appendChild(el("p", "forge-empty", ch.mine
         ? "This is your channel. Upload a bullpen or send the coaches a message."
@@ -379,9 +373,7 @@
       if (!state.channel || state.channel.id !== id) return;
       state.channel = d.channel;
       state.since = d.now;
-      const title = $("forge-title");
-      title.textContent = d.channel.name;
-      if (d.channel.account_name) title.appendChild(el("span", "forge-alias", `on PAW as ${d.channel.account_name}`));
+      $("forge-title").textContent = d.channel.name;
       const sel = $("forge-season");
       if (full) {
         sel.textContent = "";
@@ -578,43 +570,33 @@
   }
 
   // ---------- "do you pitch?" for accounts made before sign-up asked ----------
-  function renderClaim() {
+  function renderAsk() {
     const box = $("forge-claim");
-    if (!cfg.claim || !cfg.claim.needed) return;
+    if (!cfg.ask_player_type) return;
     box.hidden = false;
     box.appendChild(el("strong", null, "Do you pitch?"));
-    box.appendChild(el("p", null, "Tell us so the coaches can find your channel."));
+    box.appendChild(el("p", null, "Pitchers get their own channel here for bullpen video."));
     const type = el("select");
     for (const [v, t] of [["", "Choose…"], ["position", "Position player"], ["pitcher", "Pitcher"], ["both", "Both"]]) {
       const o = el("option", null, t); o.value = v; type.appendChild(o);
     }
-    const who = el("select");
-    for (const c of [{ id: "", name: "I'm not on this list" }, ...cfg.claim.channels]) {
-      const o = el("option", null, c.name); o.value = c.id; who.appendChild(o);
-    }
-    const whoLabel = el("label", null, "Which pitcher are you?");
     const save = el("button", "btn", "Save");
     save.type = "button";
     const err = el("div", "err");
-    const sync = () => { const p = type.value === "pitcher" || type.value === "both"; who.hidden = !p; whoLabel.hidden = !p; };
-    type.addEventListener("change", sync);
-    sync();
     save.addEventListener("click", () => {
       if (!type.value) { err.textContent = "Pick position player, pitcher, or both."; return; }
       save.disabled = true;
-      api("/forge/api/claim", { method: "POST", body: { player_type: type.value, channel_id: who.hidden ? null : (Number(who.value) || null) } })
+      api("/forge/api/player-type", { method: "POST", body: { player_type: type.value } })
         .then((d) => { location.hash = d.channel_id ? String(d.channel_id) : ""; location.reload(); })
         .catch((e) => { err.textContent = e.message; save.disabled = false; });
     });
     box.appendChild(type);
-    box.appendChild(whoLabel);
-    box.appendChild(who);
     box.appendChild(save);
     box.appendChild(err);
   }
 
   // ---------- wiring ----------
-  renderClaim();
+  renderAsk();
   $("forge-search").addEventListener("input", (e) => { state.filter = e.target.value; renderChannels(); });
   $("forge-send").addEventListener("click", sendMessage);
   $("forge-text").addEventListener("keydown", (e) => {

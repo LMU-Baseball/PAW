@@ -46,10 +46,7 @@ def _payload() -> dict:
 
 @forge_bp.route("/")
 def index():
-    claim = F.needs_claim(current_user)
-    channels = F.claimable_channels() if claim else []
-    if not claim:
-        F.sync_channels()
+    F.sync_channels()
     return render_template(
         "forge/index.html",
         forge_config={
@@ -60,16 +57,17 @@ def index():
             "season": season_label_for(F._now().date().isoformat()),
             "max_bytes": F.MAX_UPLOAD_BYTES,
             "max_duration": F.MAX_DURATION_SEC,
-            "claim": {"needed": claim, "channels": channels},
+            "ask_player_type": F.needs_player_type(current_user),
         })
 
 
-@forge_bp.route("/api/claim", methods=["POST"])
+@forge_bp.route("/api/player-type", methods=["POST"])
 @limiter.limit("10 per hour")
-def api_claim():
-    data = _payload()
+def api_player_type():
+    if not F.needs_player_type(current_user):
+        return _json_error("Your account already has an answer -- ask a coach to change it.")
     try:
-        channel = F.claim(current_user, data.get("player_type", ""), data.get("channel_id"))
+        channel = F.set_player_type(current_user, _payload().get("player_type", ""))
     except ValueError as e:
         return _json_error(str(e))
     return jsonify({"channel_id": channel.id if channel else None})
@@ -77,7 +75,7 @@ def api_claim():
 
 @forge_bp.route("/api/channels")
 def api_channels():
-    return jsonify({"channels": F.channels_for(current_user, request.args.get("season"))})
+    return jsonify({"channels": F.channels_for(current_user)})
 
 
 @forge_bp.route("/api/channels/<int:channel_id>/posts")
@@ -91,11 +89,9 @@ def api_posts(channel_id):
     except ValueError:
         pass
     now = F._now()
-    account = channel.user.name if channel.user is not None else None
     return jsonify({
         "now": now.isoformat(),
         "channel": {"id": channel.id, "name": channel.name, "joined": channel.joined,
-                    "account_name": account if account and account != channel.name else None,
                     "mine": channel.joined and channel.user_id == current_user.id,
                     "can_upload": F.can_upload(current_user, channel),
                     "seasons": F.channel_seasons(channel.id)},

@@ -24,7 +24,6 @@ from config import Config
 PITCHER_A = "Adam Behrens"
 PITCHER_B = "Ryan Bresaw"
 HITTER = "Cam Casado"
-UNSIGNED = "Jake Newcomb"
 
 
 class FakeS3:
@@ -58,8 +57,6 @@ class FakeS3:
 @pytest.fixture()
 def app(monkeypatch):
     monkeypatch.delenv("FORGE_S3_BUCKET", raising=False)
-    monkeypatch.setattr(F, "_roster_pitchers",
-                        lambda season: [PITCHER_A, PITCHER_B, UNSIGNED])
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
 
@@ -71,11 +68,11 @@ def app(monkeypatch):
 
     application = create_app(TestConfig)
     with application.app_context():
-        for email, name, role in (("coach@lmu.edu", "Sean Coach", "coach"),
-                                  ("a@lmu.edu", PITCHER_A, "player"),
-                                  ("b@lmu.edu", PITCHER_B, "player"),
-                                  ("h@lmu.edu", HITTER, "player")):
-            u = User(email=email, name=name, role=role)
+        for email, name, role, kind in (("coach@lmu.edu", "Sean Coach", "coach", None),
+                                        ("a@lmu.edu", PITCHER_A, "player", "pitcher"),
+                                        ("b@lmu.edu", PITCHER_B, "player", "both"),
+                                        ("h@lmu.edu", HITTER, "player", "position")):
+            u = User(email=email, name=name, role=role, player_type=kind)
             u.set_password("password123")
             db.session.add(u)
         db.session.commit()
@@ -127,7 +124,7 @@ def _uid(app, email):
 
 
 def _chan(app, email_or_name):
-    """Channel id for a player's account email, or for a roster name."""
+    """Channel id for a player's account email, or for a channel name."""
     with app.app_context():
         F.sync_channels()
         if "@" in email_or_name:
@@ -157,54 +154,46 @@ def test_pitching_hub_links_forge_not_cauldron(app):
     assert c.get("/dash/cauldron/").status_code == 404
 
 
-def test_channels_list_every_rostered_pitcher_signed_up_or_not(app):
+def test_channels_are_pitcher_accounts_named_for_the_account(app):
     c = Client(app, "coach@lmu.edu")
     chans = c.get("/forge/api/channels").json["channels"]
     assert [(ch["name"], ch["joined"]) for ch in chans] == [
-        (F.SANDBOX_NAME, True), (PITCHER_A, True), (UNSIGNED, False), (PITCHER_B, True)]
+        (F.SANDBOX_NAME, True), (PITCHER_A, True), (PITCHER_B, True)]
 
 
 def test_sync_is_idempotent(app):
     with app.app_context():
         first = [c.id for c in F.sync_channels()]
         assert [c.id for c in F.sync_channels()] == first
-        assert F.ForgeChannel.query.filter(F.ForgeChannel.name_key != F.SANDBOX_KEY).count() == 3
+        assert F.ForgeChannel.query.filter(F.ForgeChannel.name_key != F.SANDBOX_KEY).count() == 2
 
 
-def test_unsigned_pitcher_channel_takes_coach_posts_then_links_on_signup(app, s3):
-    coach = Client(app, "coach@lmu.edu")
-    chan = _chan(app, UNSIGNED)
-    _say(coach, chan, "Welcome -- post your first pen here")
-    body = {"name": "pen.mov", "size": 1000, "duration": 60}
+def test_renamed_account_renames_its_channel(app):
+    chan = _chan(app, "a@lmu.edu")
     with app.app_context():
-        u = User(email="j@lmu.edu", name="jake newcomb", role="player")
-        u.set_password("password123")
-        db.session.add(u)
+        User.query.filter_by(email="a@lmu.edu").one().name = "Ace Behrens"
         db.session.commit()
-    j = Client(app, "j@lmu.edu")
-    d = j.get(f"/forge/api/channels/{chan}/posts").json
-    assert d["channel"]["joined"] and d["channel"]["mine"] and d["channel"]["can_upload"]
-    assert [p["body"] for p in d["posts"]] == ["Welcome -- post your first pen here"]
-    assert j.post(f"/forge/api/channels/{chan}/uploads", body).status_code == 201
+    names = {ch["id"]: ch["name"] for ch in
+             Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]}
+    assert names[chan] == "Ace Behrens"
 
 
-def test_hitter_account_gets_no_channel_and_cannot_upload_anywhere(app, s3):
+def test_position_player_gets_no_channel_and_cannot_upload_anywhere(app, s3):
     h = Client(app, "h@lmu.edu")
     names = [ch["name"] for ch in h.get("/forge/api/channels").json["channels"]]
     assert HITTER not in names
-    assert h.post(f"/forge/api/channels/{_chan(app, UNSIGNED)}/uploads",
+    assert h.post(f"/forge/api/channels/{_chan(app, 'a@lmu.edu')}/uploads",
                   {"name": "x.mov", "size": 10}).status_code == 403
 
 
-def test_deactivated_account_keeps_channel_but_shows_not_joined(app):
+def test_deactivated_account_drops_off_list_but_keeps_history(app):
     chan = _chan(app, "b@lmu.edu")
     with app.app_context():
         User.query.filter_by(email="b@lmu.edu").one().is_active = False
         db.session.commit()
     c = Client(app, "coach@lmu.edu")
-    chans = {ch["name"]: ch for ch in c.get("/forge/api/channels").json["channels"]}
-    assert chans[PITCHER_B]["joined"] is False
-    assert c.get(f"/forge/api/channels/{chan}/posts").status_code == 200
+    assert PITCHER_B not in [ch["name"] for ch in c.get("/forge/api/channels").json["channels"]]
+    assert c.get(f"/forge/api/channels/{chan}/posts").json["channel"]["joined"] is False
 
 
 def test_unknown_channel_is_404(app):
@@ -546,129 +535,87 @@ def test_transcode_drops_audio_only_when_asked(app, s3, tmp_path, strip):
     assert ("Audio:" in out) is (not strip)
 
 
-# --- linking accounts whose sign-up name isn't the roster name ---
-
-def _link(roster, accounts):
-    from types import SimpleNamespace
-    from app.data.roster_media import _norm_name
-    chans = [F.ForgeChannel(name_key=_norm_name(n), name=n) for n in roster]
-    users = [SimpleNamespace(id=i, name=n) for i, n in enumerate(accounts, start=1)]
-    F._link_accounts(chans, users)
-    return {c.name: (accounts[c.user_id - 1] if c.user_id else None) for c in chans}
-
-
-def test_links_nicknames_and_first_name_only_accounts():
-    got = _link(["Charlie Ushijima", "John Casale", "Matthew Champion", "Will Kaczynski",
-                 "Colten Landen", "Branson Wade"],
-                ["Charles Ushijima", "Johnny Casale", "Matt Champion", "Will", "Colten",
-                 "matthew moreno", "Alex Gamboa"])
-    assert got == {"Charlie Ushijima": "Charles Ushijima", "John Casale": "Johnny Casale",
-                   "Matthew Champion": "Matt Champion", "Will Kaczynski": "Will",
-                   "Colten Landen": "Colten", "Branson Wade": None}
-
-
-def test_exact_name_beats_a_nickname_match():
-    got = _link(["Matt Champion"], ["Matthew Champion", "Matt Champion"])
-    assert got == {"Matt Champion": "Matt Champion"}
-
-
-def test_ambiguous_names_stay_unlinked():
-    assert _link(["Will Kaczynski", "Will Smith"], ["Will"]) == {
-        "Will Kaczynski": None, "Will Smith": None}
-    assert _link(["Jake Casale"], ["Jack Casale", "Jim Casale"]) == {"Jake Casale": None}
-    assert _link(["John Casale", "Jim Casale"], ["J Casale"]) == {
-        "John Casale": None, "Jim Casale": None}
-
-
-def test_nickname_account_links_through_the_page(app):
-    with app.app_context():
-        u = User(email="c@lmu.edu", name="Jakey Newcomb", role="player")
-        u.set_password("password123")
-        db.session.add(u)
-        db.session.commit()
-    chans = Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]
-    assert {ch["name"]: ch["joined"] for ch in chans}[UNSIGNED] is True
-
-
 # --- position player / pitcher / both, picked at sign-up ---
 
-def _signup(app, monkeypatch, name, email, player_type, channel=""):
+def _signup(app, monkeypatch, name, email, player_type):
     for var in ("PAW_TEAM_CODE", "PAW_COACH_CODE", "PAW_COACH_EMAILS"):
         monkeypatch.delenv(var, raising=False)
     c = app.test_client()
     c.post("/register", data={"name": name, "email": email, "password": "password123",
                               "confirm": "password123", "team_code": "",
-                              "player_type": player_type, "pitcher_channel": str(channel)})
+                              "player_type": player_type})
     return c
 
 
-def test_signup_offers_only_unclaimed_roster_pitchers(app):
-    with app.app_context():
-        F.sync_channels()
-    page = app.test_client().get("/register").data.decode()
-    assert UNSIGNED in page
-    assert PITCHER_A not in page and PITCHER_B not in page
-
-
-def test_pitcher_picks_their_roster_channel_under_any_account_name(app, monkeypatch):
-    chan = _chan(app, UNSIGNED)
-    _signup(app, monkeypatch, "Big Jake", "jake@lmu.edu", "both", chan)
-    with app.app_context():
-        u = User.query.filter_by(email="jake@lmu.edu").one()
-        ch = db.session.get(F.ForgeChannel, chan)
-        assert (u.player_type, ch.user_id, ch.name) == ("both", u.id, UNSIGNED)
-    d = Client(app, "jake@lmu.edu").get(f"/forge/api/channels/{chan}/posts").json["channel"]
-    assert d["mine"] and d["can_upload"] and d["account_name"] == "Big Jake"
-
-
-def test_pitcher_not_on_roster_gets_own_channel_named_for_account(app, monkeypatch, s3):
-    _signup(app, monkeypatch, "Walk On", "walkon@lmu.edu", "pitcher")
-    w = Client(app, "walkon@lmu.edu")
-    mine = [ch for ch in w.get("/forge/api/channels").json["channels"] if ch["mine"]]
-    assert [ch["name"] for ch in mine] == ["Walk On"]
-    assert w.post(f"/forge/api/channels/{mine[0]['id']}/uploads",
+def test_pitcher_signup_gets_a_channel_under_their_account_name(app, monkeypatch, s3):
+    _signup(app, monkeypatch, "Big Jake", "jake@lmu.edu", "both")
+    j = Client(app, "jake@lmu.edu")
+    mine = [ch for ch in j.get("/forge/api/channels").json["channels"] if ch["mine"]]
+    assert [ch["name"] for ch in mine] == ["Big Jake"]
+    assert j.post(f"/forge/api/channels/{mine[0]['id']}/uploads",
                   {"name": "pen.mov", "size": 1000, "duration": 60}).status_code == 201
     names = [ch["name"] for ch in Client(app, "coach@lmu.edu").get("/forge/api/channels").json["channels"]]
-    assert "Walk On" in names
+    assert "Big Jake" in names
 
 
-def test_position_player_with_a_pitchers_name_is_not_auto_linked(app, monkeypatch):
-    _signup(app, monkeypatch, UNSIGNED, "jn@lmu.edu", "position")
+def test_position_player_signup_gets_no_channel(app, monkeypatch):
+    _signup(app, monkeypatch, "Cam Hitter", "cam@lmu.edu", "position")
     with app.app_context():
-        assert db.session.get(F.ForgeChannel, _chan(app, UNSIGNED)).user_id is None
-        assert User.query.filter_by(email="jn@lmu.edu").one().player_type == "position"
+        u = User.query.filter_by(email="cam@lmu.edu").one()
+        assert u.player_type == "position" and F.channel_of(u) is None
 
 
-def test_already_linked_accounts_get_tagged_pitcher(app):
+def _legacy(app, email, name):
     with app.app_context():
-        assert User.query.filter_by(email="a@lmu.edu").one().player_type is None
-        F.sync_channels()
-        assert User.query.filter_by(email="a@lmu.edu").one().player_type == "pitcher"
-        assert User.query.filter_by(email="h@lmu.edu").one().player_type is None
+        u = User(email=email, name=name, role="player")
+        u.set_password("password123")
+        db.session.add(u)
+        db.session.commit()
+        return u.id
 
 
-def test_old_unlinked_account_is_asked_on_the_forge_then_claims(app):
-    h = Client(app, "h@lmu.edu")
-    assert h.cfg["claim"]["needed"] is True
-    assert [c["name"] for c in h.cfg["claim"]["channels"]] == [UNSIGNED]
-    assert Client(app, "a@lmu.edu").cfg["claim"]["needed"] is False
-    assert Client(app, "coach@lmu.edu").cfg["claim"]["needed"] is False
-    chan = _chan(app, UNSIGNED)
-    assert h.post("/forge/api/claim", {"player_type": "pitcher", "channel_id": chan}).json == {
-        "channel_id": chan}
-    assert Client(app, "h@lmu.edu").cfg["claim"]["needed"] is False
-    r = h.post("/forge/api/claim", {"player_type": "pitcher"})
-    assert r.status_code == 400 and "already has" in r.json["error"]
-
-
-def test_cannot_claim_someone_elses_channel(app):
-    taken = _chan(app, "a@lmu.edu")
-    h = Client(app, "h@lmu.edu")
-    r = h.post("/forge/api/claim", {"player_type": "pitcher", "channel_id": taken})
-    assert r.status_code == 400 and "already linked" in r.json["error"]
+def test_linked_legacy_account_is_tagged_pitcher_and_channel_shows_account_name(app):
+    uid = _legacy(app, "will@lmu.edu", "Will")
     with app.app_context():
-        assert db.session.get(F.ForgeChannel, taken).user_id == _uid(app, "a@lmu.edu")
-        assert User.query.filter_by(email="h@lmu.edu").one().player_type is None
+        db.session.add(F.ForgeChannel(name_key="kaczynski will", name="Will Kaczynski", user_id=uid))
+        db.session.commit()
+        chans = {c.user_id: c.name for c in F.sync_channels()}
+        assert chans[uid] == "Will"
+        assert db.session.get(User, uid).player_type == "pitcher"
+
+
+def test_unlinked_roster_channel_from_before_is_hidden_not_deleted(app):
+    with app.app_context():
+        db.session.add(F.ForgeChannel(name_key="newcomb jake", name="Jake Newcomb"))
+        db.session.commit()
+        assert "Jake Newcomb" not in [c.name for c in F.sync_channels()]
+        assert F.ForgeChannel.query.filter_by(name="Jake Newcomb").count() == 1
+
+
+def test_legacy_unlinked_account_is_asked_on_the_forge_once(app):
+    _legacy(app, "old@lmu.edu", "Old Timer")
+    o = Client(app, "old@lmu.edu")
+    assert o.cfg["ask_player_type"] is True
+    assert Client(app, "a@lmu.edu").cfg["ask_player_type"] is False
+    assert Client(app, "h@lmu.edu").cfg["ask_player_type"] is False
+    assert Client(app, "coach@lmu.edu").cfg["ask_player_type"] is False
+    r = o.post("/forge/api/player-type", {"player_type": "pitcher"})
+    chan = r.json["channel_id"]
+    assert chan and chan == _chan(app, "old@lmu.edu")
+    assert Client(app, "old@lmu.edu").cfg["ask_player_type"] is False
+    again = o.post("/forge/api/player-type", {"player_type": "position"})
+    assert again.status_code == 400 and "already has an answer" in again.json["error"]
+
+
+def test_set_player_type_cli_moves_a_player_on_and_off_the_list(app):
+    runner = app.test_cli_runner()
+    r = runner.invoke(args=["set-player-type", "--email", "h@lmu.edu", "--type", "pitcher"])
+    assert r.exit_code == 0, r.output
+    with app.app_context():
+        assert HITTER in [c.name for c in F.sync_channels()]
+    runner.invoke(args=["set-player-type", "--email", "h@lmu.edu", "--type", "position"])
+    with app.app_context():
+        assert HITTER not in [c.name for c in F.sync_channels()]
 
 
 def test_ensure_columns_adds_player_type_and_edited_at_to_tables_with_rows(tmp_path):

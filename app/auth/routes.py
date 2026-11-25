@@ -5,10 +5,10 @@ from urllib.parse import urlparse
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf import FlaskForm
-from wtforms import PasswordField, RadioField, SelectField, StringField, SubmitField
+from wtforms import PasswordField, RadioField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
 
-from app.auth.models import PITCHER_TYPES, User, is_coach_email
+from app.auth.models import PLAYER_TYPES, User, is_coach_email
 from app.extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
@@ -70,8 +70,6 @@ class RegisterForm(FlaskForm):
     player_type = RadioField("I'm a", choices=[("position", "Position player"),
                                                ("pitcher", "Pitcher"), ("both", "Both")],
                              validate_choice=False)
-    # Choices are the season's unclaimed rostered pitchers, filled in per request.
-    pitcher_channel = SelectField("Which pitcher are you?", validate_choice=False)
     password = PasswordField(
         "Password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
     confirm = PasswordField("Confirm password", validators=[
@@ -130,8 +128,6 @@ def register():
         return redirect(url_for("main.index"))
     from app.data import forge
     form = RegisterForm()
-    form.pitcher_channel.choices = [("", "I'm not on this list")] + [
-        (str(c["id"]), c["name"]) for c in forge.claimable_channels()]
     if form.validate_on_submit():
         email = form.email.data.strip().lower()
         # Coach role from EITHER the email allowlist (PAW_COACH_EMAILS,
@@ -140,7 +136,7 @@ def register():
         is_coach_signup = is_coach_email(email) or _matches_coach_code(form.team_code.data)
         if User.query.filter_by(email=email).first():
             flash("An account with that email already exists. Try signing in instead.", "error")
-        elif not is_coach_signup and form.player_type.data not in ("position", *PITCHER_TYPES):
+        elif not is_coach_signup and form.player_type.data not in PLAYER_TYPES:
             form.player_type.errors = ["Pick position player, pitcher, or both."]
         else:
             role = "coach" if is_coach_signup else "player"
@@ -151,13 +147,7 @@ def register():
             login_user(user)
             flash("Account created.", "info")
             if role == "player":
-                # The account exists either way; if the pitcher they picked was
-                # claimed a moment ago, The Forge asks them again.
-                try:
-                    forge.claim(user, form.player_type.data, form.pitcher_channel.data or None)
-                except ValueError as e:
-                    db.session.rollback()
-                    flash(f"{e} You can pick again on The Forge.", "error")
+                forge.set_player_type(user, form.player_type.data)
             return redirect(url_for("main.index"))
     return render_template("auth/register.html", form=form)
 
