@@ -11,7 +11,7 @@
     <label for="name">Name</label>
     {{ form.name(id="name") }}
     <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">
-      First and last -- the name coaches and teammates see, including on your Forge channel.
+      First and last
     </div>
     {% for e in form.name.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
     {% if current_user.role == "player" %}
@@ -33,7 +33,7 @@
   </form>
 
   <h3 style="margin: 28px 0 6px;">Password</h3>
-  <a href="{{ url_for('auth.change_password') }}">Change password</a>
+  <a class="btn" href="{{ url_for('auth.change_password') }}" style="display: inline-block; text-decoration: none;">Change password</a>
 
   <h3 style="margin: 28px 0 6px;">Signed-in devices</h3>
   <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
