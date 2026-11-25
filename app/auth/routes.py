@@ -1,14 +1,24 @@
-"""Login / logout / change password."""
+"""Login / logout / registration / password change, plus the email-driven
+verify-address, forgot-password and periodic sign-in-code flows."""
+import hashlib
+import hmac
 import os
+import secrets
+import time
 from urllib.parse import urlparse
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (Blueprint, current_app, flash, redirect, render_template, request,
+                   session, url_for)
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_wtf import FlaskForm
-from wtforms import PasswordField, StringField, SubmitField
+from wtforms import PasswordField, SelectMultipleField, StringField, SubmitField
 from wtforms.validators import DataRequired, EqualTo, Length, ValidationError
+from wtforms.widgets import CheckboxInput, ListWidget
 
-from app.auth.models import User, is_coach_email
+from app.auth import tokens
+from app.auth.access import account_admin_required
+from app.auth.mail import mail_enabled, send_mail
+from app.auth.models import PLAYER_TYPES, User, is_coach_email
 from app.extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
@@ -63,10 +73,37 @@ def _team_code(form, field):
         raise ValidationError("Incorrect team code.")
 
 
+def _full_name(form, field):
+    # Players signed up as just "Will" or "Colten", which leaves coaches
+    # guessing who's who in The Forge and on the Accounts page.
+    if len((field.data or "").split()) < 2:
+        raise ValidationError("Enter your first and last name.")
+
+
+def _player_type_field():
+    return SelectMultipleField("I'm a", choices=[("position", "Position player"),
+                                                 ("pitcher", "Pitcher")],
+                               validate_choice=False, option_widget=CheckboxInput(),
+                               widget=ListWidget(prefix_label=False))
+
+
+def _player_type(checked) -> str | None:
+    """The stored position from the I'm-a checkboxes (either or both)."""
+    picked = set(checked or ())
+    if {"position", "pitcher"} <= picked:
+        return "both"
+    return next((t for t in ("pitcher", "position") if t in picked), None)
+
+
+def _checked(player_type: str | None) -> list[str]:
+    return ["position", "pitcher"] if player_type == "both" else [player_type] if player_type else []
+
+
 class RegisterForm(FlaskForm):
-    name = StringField("Name", validators=[DataRequired()])
+    name = StringField("Name", validators=[DataRequired(), Length(max=255), _full_name])
     email = StringField("Email", validators=[DataRequired(), _lmu_email])
     team_code = StringField("Team code", validators=[_team_code])
+    player_type = _player_type_field()
     password = PasswordField(
         "Password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
     confirm = PasswordField("Confirm password", validators=[
@@ -81,6 +118,100 @@ class ChangePasswordForm(FlaskForm):
     confirm = PasswordField("Confirm new password", validators=[
         DataRequired(), EqualTo("new_password", message="Passwords must match.")])
     submit = SubmitField("Change password")
+
+
+class AccountForm(FlaskForm):
+    name = StringField("Name", validators=[DataRequired(), Length(max=255), _full_name])
+    player_type = _player_type_field()
+    submit = SubmitField("Save")
+
+
+class SignOutEverywhereForm(FlaskForm):
+    submit = SubmitField("Sign out everywhere")
+
+
+class EmailForm(FlaskForm):
+    email = StringField("Email", validators=[DataRequired()])
+    submit = SubmitField("Send link")
+
+
+class ResetPasswordForm(FlaskForm):
+    new_password = PasswordField(
+        "New password", validators=[DataRequired(), Length(min=8, message="Use at least 8 characters.")])
+    confirm = PasswordField("Confirm new password", validators=[
+        DataRequired(), EqualTo("new_password", message="Passwords must match.")])
+    submit = SubmitField("Set new password")
+
+
+_SIGNATURE = ("\n\nGo Lions,\nLMU Baseball\n\n"
+              "--\nYou're getting this because this address is registered on the PAW, "
+              "the LMU Baseball team's player development site. This inbox isn't "
+              "monitored -- for help, ask a coach.")
+# School spam filters hold mail from senders they haven't seen before; this
+# goes on every "we sent you an email" message until LMU IT allowlists us.
+_JUNK_HINT = "Don't see it within a few minutes? Check your Junk/Spam folder."
+
+
+def _send_verify_email(user: User) -> bool:
+    link = url_for("auth.verify_email", token=tokens.make_verify_token(user), _external=True)
+    return send_mail(user.email, "LMU Baseball PAW: confirm your email address",
+                     f"Hi {user.name},\n\nThanks for signing up for the PAW, LMU Baseball's "
+                     f"player development site. To finish creating your account, confirm "
+                     f"your email address by opening this link:\n\n{link}\n\n"
+                     f"The link expires in 3 days. If you didn't sign up for the PAW, you "
+                     f"can safely ignore this email and no account will be activated."
+                     f"{_SIGNATURE}")
+
+
+def _send_reset_email(user: User) -> bool:
+    link = url_for("auth.reset_password", token=tokens.make_reset_token(user), _external=True)
+    return send_mail(user.email, "LMU Baseball PAW: reset your password",
+                     f"Hi {user.name},\n\nWe received a request to reset the password for "
+                     f"your PAW account. To choose a new password, open this link:\n\n"
+                     f"{link}\n\nThe link expires in 1 hour and can only be used once. "
+                     f"If you didn't ask to reset your password, you can ignore this email "
+                     f"-- your current password still works.{_SIGNATURE}")
+
+
+class CodeForm(FlaskForm):
+    code = StringField("Code", validators=[DataRequired()])
+    submit = SubmitField("Sign in")
+
+
+_CODE_TTL_SECONDS = 15 * 60
+_CODE_MAX_TRIES = 5
+_PENDING_KEY = "pending_code_login"
+
+
+def _code_digest(uid: int, code: str) -> str:
+    # The Flask session cookie is signed but NOT encrypted -- the browser can
+    # read it -- so the code itself must never be stored there, only a keyed
+    # hash the browser can't reverse without SECRET_KEY.
+    key = current_app.config["SECRET_KEY"].encode()
+    return hmac.new(key, f"{uid}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
+def _start_code_check(user: User, next_url: str | None):
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    sent = send_mail(user.email, f"LMU Baseball PAW: your sign-in code is {code}",
+                     f"Hi {user.name},\n\nHere is your PAW sign-in code:\n\n    {code}\n\n"
+                     f"Enter it on the sign-in page within 15 minutes. About once a month "
+                     f"the PAW asks for a code like this to make sure only current team "
+                     f"members can get in.\n\nIf you didn't just try to sign in, someone "
+                     f"may know your password -- change it from the menu after you sign in, "
+                     f"or ask a coach to reset it.{_SIGNATURE}")
+    if not sent:
+        flash("We couldn't send your sign-in code. Try again in a few minutes.", "error")
+        return redirect(url_for("auth.login"))
+    session[_PENDING_KEY] = {"uid": user.id, "epoch": user.session_epoch or 0,
+                             "digest": _code_digest(user.id, code),
+                             "exp": time.time() + _CODE_TTL_SECONDS, "tries": 0,
+                             "next": next_url}
+    return redirect(url_for("auth.login_code"))
+
+
+def _lookup(email: str | None) -> User | None:
+    return User.query.filter_by(email=(email or "").strip().lower()).first()
 
 
 def _safe_next(target: str | None) -> str | None:
@@ -109,6 +240,14 @@ def login():
     if form.validate_on_submit():
         user = User.query.filter_by(email=form.email.data.strip().lower()).first()
         if user and user.is_active and user.check_password(form.password.data):
+            if mail_enabled() and not user.email_verified:
+                flash("Confirm your email first -- check your inbox for the link, "
+                      f"or send a new one below. {_JUNK_HINT}", "error")
+                return redirect(url_for("auth.resend_verification", email=user.email))
+            if user.reverify_due:
+                return _start_code_check(user, _safe_next(request.args.get("next")))
+            user.record_login()
+            db.session.commit()
             login_user(user)
             return redirect(_safe_next(request.args.get("next")) or url_for("main.index"))
         flash("Invalid email or password.", "error")
@@ -123,24 +262,40 @@ def login():
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("main.index"))
+    from app.data import forge
     form = RegisterForm()
     if form.validate_on_submit():
         email = form.email.data.strip().lower()
+        # Coach role from EITHER the email allowlist (PAW_COACH_EMAILS,
+        # pre-listed individuals) OR the coach code (self-service, no
+        # allowlist maintenance needed) -- either one is sufficient.
+        is_coach_signup = is_coach_email(email) or _matches_coach_code(form.team_code.data)
         if User.query.filter_by(email=email).first():
             flash("An account with that email already exists. Try signing in instead.", "error")
+        elif not is_coach_signup and _player_type(form.player_type.data) not in PLAYER_TYPES:
+            form.player_type.errors = ["Pick position player, pitcher, or both."]
         else:
-            # Coach role from EITHER the email allowlist (PAW_COACH_EMAILS,
-            # pre-listed individuals) OR the coach code (self-service, no
-            # allowlist maintenance needed) -- either one is sufficient.
-            role = "coach" if (is_coach_email(email) or _matches_coach_code(form.team_code.data)) \
-                else "player"
+            role = "coach" if is_coach_signup else "player"
             user = User(email=email, name=form.name.data.strip(), role=role)
             user.set_password(form.password.data)
+            if not mail_enabled():
+                user.mark_email_verified()
             db.session.add(user)
             db.session.commit()
-            login_user(user)
-            flash("Account created.", "info")
-            return redirect(url_for("main.index"))
+            if role == "player":
+                forge.set_player_type(user, _player_type(form.player_type.data))
+            if user.email_verified:
+                login_user(user)
+                flash("Account created.", "info")
+                return redirect(url_for("main.index"))
+            if _send_verify_email(user):
+                flash(f"Account created. We sent a confirmation link to {email} -- "
+                      f"click it to sign in. {_JUNK_HINT}", "info")
+                return redirect(url_for("auth.login"))
+            else:
+                flash("Account created, but the confirmation email didn't send. "
+                      "Try sending it again below.", "error")
+            return redirect(url_for("auth.resend_verification", email=email))
     return render_template("auth/register.html", form=form)
 
 
@@ -155,11 +310,51 @@ def change_password():
         if not current_user.check_password(form.current_password.data):
             flash("Current password is incorrect.", "error")
         else:
-            current_user.set_password(form.new_password.data)
+            user = current_user._get_current_object()
+            user.set_password(form.new_password.data)
+            # Logs out every other device (e.g. someone who learned the old
+            # password); re-login keeps this browser signed in under the new epoch.
+            user.sign_out_everywhere()
             db.session.commit()
-            flash("Password changed.", "info")
+            login_user(user)
+            flash("Password changed. Any other devices were signed out.", "info")
             return redirect(url_for("main.index"))
     return render_template("auth/change_password.html", form=form)
+
+
+@auth_bp.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    """Each person's own settings: the name everyone sees (Forge channel,
+    posts, Accounts page) and, for players, position player / pitcher / both."""
+    from app.data import forge
+    user = current_user._get_current_object()
+    form = AccountForm(name=user.name, player_type=_checked(user.player_type))
+    if form.validate_on_submit():
+        player_type = _player_type(form.player_type.data)
+        if user.role == "player" and player_type not in PLAYER_TYPES:
+            form.player_type.errors = ["Pick position player, pitcher, or both."]
+        else:
+            user.name = " ".join(form.name.data.split())
+            if user.role == "player" and player_type != user.player_type:
+                forge.set_player_type(user, player_type)
+            db.session.commit()
+            flash("Saved.", "info")
+            return redirect(url_for("auth.account"))
+    return render_template("auth/account.html", form=form,
+                           signout_form=SignOutEverywhereForm())
+
+
+@auth_bp.route("/account/sign-out-everywhere", methods=["POST"])
+@login_required
+def sign_out_everywhere():
+    if SignOutEverywhereForm().validate_on_submit():
+        user = current_user._get_current_object()
+        user.sign_out_everywhere()
+        db.session.commit()
+        login_user(user)
+        flash("Signed out on every other device.", "info")
+    return redirect(url_for("auth.account"))
 
 
 @auth_bp.route("/logout", methods=["POST"])
@@ -168,3 +363,197 @@ def logout():
     logout_user()
     flash("You have been logged out.", "info")
     return redirect(url_for("auth.login"))
+
+
+@auth_bp.route("/verify-email/<token>")
+def verify_email(token):
+    user = tokens.user_from_verify_token(token)
+    if user is None:
+        flash("That confirmation link is invalid or has expired. Send a new one below.", "error")
+        return redirect(url_for("auth.resend_verification"))
+    user.mark_email_verified()
+    user.record_login()
+    db.session.commit()
+    if not user.is_active:
+        flash("Email confirmed, but this account is turned off. Ask a coach.", "error")
+        return redirect(url_for("auth.login"))
+    login_user(user)
+    flash("Email confirmed -- welcome to the PAW.", "info")
+    return redirect(url_for("main.index"))
+
+
+# Every POST costs budget (no deduct_when): each one can send an email, so this
+# limit is what stops the form being used to spam someone's inbox.
+@auth_bp.route("/resend-verification", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def resend_verification():
+    if not mail_enabled():
+        return redirect(url_for("auth.login"))
+    form = EmailForm()
+    if request.method == "GET" and request.args.get("email"):
+        form.email.data = request.args["email"]
+    if form.validate_on_submit():
+        user = _lookup(form.email.data)
+        if user and user.is_active and not user.email_verified:
+            _send_verify_email(user)
+        # Same answer whether or not the account exists, so this form can't be
+        # used to discover who has a PAW account.
+        flash("If that account is waiting on confirmation, a new link is on its way. "
+              f"{_JUNK_HINT}", "info")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/email_form.html", form=form, title="Confirm your email",
+                           intro="Didn't get the confirmation email? Enter your LMU email "
+                                 "and we'll send a new link.",
+                           action=url_for("auth.resend_verification"))
+
+
+@auth_bp.route("/forgot-password", methods=["GET", "POST"])
+@limiter.limit("5 per hour", methods=["POST"])
+def forgot_password():
+    if current_user.is_authenticated:
+        return redirect(url_for("auth.change_password"))
+    form = EmailForm()
+    if mail_enabled() and form.validate_on_submit():
+        user = _lookup(form.email.data)
+        if user and user.is_active:
+            _send_reset_email(user)
+        flash("If there's a PAW account for that email, a reset link is on its way. "
+              f"It expires in 1 hour. {_JUNK_HINT}", "info")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/email_form.html", form=form, title="Forgot password",
+                           intro="Enter your LMU email and we'll send you a link to choose "
+                                 "a new password.",
+                           action=url_for("auth.forgot_password"),
+                           disabled=not mail_enabled())
+
+
+@auth_bp.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    user = tokens.user_from_reset_token(token)
+    if user is None:
+        flash("That reset link is invalid, expired, or already used. Request a new one.", "error")
+        return redirect(url_for("auth.forgot_password"))
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        user.set_password(form.new_password.data)
+        # Receiving the link proves they own the address.
+        user.mark_email_verified()
+        user.sign_out_everywhere()
+        db.session.commit()
+        logout_user()
+        flash("Password updated -- sign in with your new password.", "info")
+        return redirect(url_for("auth.login"))
+    return render_template("auth/reset_password.html", form=form, token=token)
+
+
+class AccountActionForm(FlaskForm):
+    """Empty form -- exists only to carry the CSRF token on the per-row
+    action buttons of the accounts page."""
+
+
+_ACCOUNT_ACTIONS = ("deactivate", "activate", "make-coach", "make-player",
+                    "sign-out", "send-reset", "reset-password", "delete")
+_SELF_BLOCKED = {"deactivate", "make-player", "sign-out", "reset-password", "delete"}
+# Until account email is live, a coach resets a forgotten password to this
+# and tells the player to change it after signing in.
+DEFAULT_RESET_PASSWORD = "golions"
+
+
+@auth_bp.route("/accounts")
+@login_required
+@account_admin_required
+def accounts():
+    users = User.query.order_by(User.is_active.desc(), User.role, User.name).all()
+    return render_template("auth/accounts.html", users=users, form=AccountActionForm(),
+                           mail_on=mail_enabled())
+
+
+@auth_bp.route("/accounts/<int:user_id>/<action>", methods=["POST"])
+@login_required
+@account_admin_required
+def account_action(user_id, action):
+    form = AccountActionForm()
+    user = db.session.get(User, user_id)
+    if action not in _ACCOUNT_ACTIONS or user is None or not form.validate_on_submit():
+        flash("That action couldn't be completed.", "error")
+        return redirect(url_for("auth.accounts"))
+    # The confirm checkbox is enforced here too, not just in the popup's JS.
+    if request.form.get("confirm") != "yes":
+        flash("Tick the confirmation box to perform that action.", "error")
+        return redirect(url_for("auth.accounts"))
+    if user.id == current_user.id and action in _SELF_BLOCKED:
+        # A coach turning off or demoting their own account would lock them
+        # out of this page with no way back in except the server CLI.
+        flash("You can't do that to your own account.", "error")
+        return redirect(url_for("auth.accounts"))
+
+    if action == "deactivate":
+        user.is_active = False
+        msg = f"Turned off {user.email}. They're signed out everywhere."
+    elif action == "activate":
+        user.is_active = True
+        msg = f"Turned {user.email} back on."
+    elif action == "make-coach":
+        user.role = "coach"
+        msg = f"{user.email} is now a coach."
+    elif action == "make-player":
+        user.role = "player"
+        msg = f"{user.email} is now a player."
+    elif action == "sign-out":
+        user.sign_out_everywhere()
+        msg = f"Signed {user.email} out of every device."
+    elif action == "reset-password":
+        user.set_password(DEFAULT_RESET_PASSWORD)
+        user.sign_out_everywhere()
+        msg = (f"Reset {user.email}'s password to \"{DEFAULT_RESET_PASSWORD}\". "
+               "Have them change it after signing in.")
+    elif action == "delete":
+        email = user.email
+        db.session.delete(user)
+        db.session.commit()
+        flash(f"Deleted the account for {email}.", "info")
+        return redirect(url_for("auth.accounts"))
+    else:
+        if not (mail_enabled() and user.is_active and _send_reset_email(user)):
+            flash(f"Couldn't send a reset email to {user.email}.", "error")
+            return redirect(url_for("auth.accounts"))
+        msg = (f"Sent a password reset link to {user.email}. Tell them to check "
+               "Junk/Spam if it doesn't show up.")
+    db.session.commit()
+    flash(msg, "info")
+    return redirect(url_for("auth.accounts"))
+
+
+# The tries counter lives in the client's cookie, so a replayed cookie could
+# reset it -- this per-IP limit is the real brute-force bound (10 guesses an
+# hour against a 1-in-a-million code that expires in 15 minutes).
+@auth_bp.route("/login/code", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def login_code():
+    pending = session.get(_PENDING_KEY)
+    if not pending or time.time() > pending.get("exp", 0):
+        session.pop(_PENDING_KEY, None)
+        flash("That sign-in code expired. Sign in again to get a new one.", "error")
+        return redirect(url_for("auth.login"))
+    user = db.session.get(User, pending["uid"])
+    if user is None or not user.is_active or (user.session_epoch or 0) != pending["epoch"]:
+        session.pop(_PENDING_KEY, None)
+        return redirect(url_for("auth.login"))
+    form = CodeForm()
+    if form.validate_on_submit():
+        entered = "".join(ch for ch in form.code.data if ch.isdigit())
+        if hmac.compare_digest(_code_digest(user.id, entered), pending["digest"]):
+            session.pop(_PENDING_KEY, None)
+            user.mark_email_checked()
+            user.record_login()
+            db.session.commit()
+            login_user(user)
+            return redirect(pending.get("next") or url_for("main.index"))
+        pending["tries"] += 1
+        if pending["tries"] >= _CODE_MAX_TRIES:
+            session.pop(_PENDING_KEY, None)
+            flash("Too many wrong codes. Sign in again to get a new one.", "error")
+            return redirect(url_for("auth.login"))
+        session[_PENDING_KEY] = pending
+        flash("That code didn't match. Check the most recent email.", "error")
+    return render_template("auth/login_code.html", form=form, email=user.email)

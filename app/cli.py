@@ -1,7 +1,7 @@
 """Custom Flask CLI commands (user management + data ingestion)."""
 import click
 
-from app.auth.models import ROLES, User
+from app.auth.models import PLAYER_TYPES, ROLES, User
 from app.extensions import db
 
 
@@ -25,6 +25,7 @@ def register_cli(server):
             raise click.ClickException(f"User already exists: {email}")
         user = User(email=email, name=name, role=role, trackman_id=trackman_id)
         user.set_password(password)
+        user.mark_email_verified()
         db.session.add(user)
         db.session.commit()
         click.echo(f"Created {role} {email} (id={user.id}).")
@@ -82,6 +83,23 @@ def register_cli(server):
         user.trackman_id = trackman_id
         db.session.commit()
         click.echo(f"Linked {email} -> trackman_id {trackman_id}.")
+
+    @server.cli.command("set-player-type")
+    @click.option("--email", required=True)
+    @click.option("--type", "player_type", type=click.Choice(PLAYER_TYPES), required=True)
+    def set_player_type(email, player_type):
+        """Change whether a player is a position player, pitcher or both (pitchers get a
+        Forge channel; switching away keeps its history but drops it off the list)."""
+        from app.data import forge
+        email = email.strip().lower()
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            raise click.ClickException(f"No user with email: {email}")
+        try:
+            forge.set_player_type(user, player_type)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+        click.echo(f"Set {email} to {player_type}.")
 
     @server.cli.command("rebuild-precalc")
     @click.option("--module", default="all",

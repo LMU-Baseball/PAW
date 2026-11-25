@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}My account — The PAW{% endblock %}
+{% block content %}
+<div class="card" style="max-width: 420px; margin: 40px auto;">
+  <h2 style="margin-top: 0;">My account</h2>
+  <div style="font-size: 14px; color: #666; margin-bottom: 12px;">
+    {{ current_user.email }} · {{ current_user.role }}
+  </div>
+  <form method="post" action="{{ url_for('auth.account') }}">
+    {{ form.hidden_tag() }}
+    <label for="name">Name</label>
+    {{ form.name(id="name") }}
+    <div style="font-size: 13px; color: #666; margin: 2px 0 8px;">
+      First and last
+    </div>
+    {% for e in form.name.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    {% if current_user.role == "player" %}
+      <fieldset style="border: none; padding: 0; margin: 12px 0 8px;">
+      <legend style="font-weight: 600; padding: 0;">I'm a</legend>
+      {% for opt in form.player_type %}
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; margin: 4px 0;">
+          {{ opt(style="width: auto; margin: 0;") }} {{ opt.label.text }}
+        </label>
+      {% endfor %}
+    </fieldset>
+      {% for e in form.player_type.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    {% endif %}
+    <div style="margin-top: 16px;">{{ form.submit(class="btn") }}</div>
+  </form>
+
+  <h3 style="margin: 28px 0 6px;">Password</h3>
+  <a class="btn" href="{{ url_for('auth.change_password') }}" style="display: inline-block; text-decoration: none;">Change password</a>
+
+  <h3 style="margin: 28px 0 6px;">Signed-in devices</h3>
+  <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
+    Lost a phone or signed in on a shared computer? This signs you out everywhere except here.
+  </div>
+  <form method="post" action="{{ url_for('auth.sign_out_everywhere') }}">
+    {{ signout_form.hidden_tag() }}
+    {{ signout_form.submit(class="btn", style="background: #555;") }}
+  </form>
+</div>
+{% endblock %}

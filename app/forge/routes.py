@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from flask import Blueprint, abort, jsonify, redirect, render_template, request
 from flask_login import current_user, login_required
@@ -56,12 +57,25 @@ def index():
             "season": season_label_for(F._now().date().isoformat()),
             "max_bytes": F.MAX_UPLOAD_BYTES,
             "max_duration": F.MAX_DURATION_SEC,
+            "ask_player_type": F.needs_player_type(current_user),
         })
+
+
+@forge_bp.route("/api/player-type", methods=["POST"])
+@limiter.limit("10 per hour")
+def api_player_type():
+    if not F.needs_player_type(current_user):
+        return _json_error("Your account already has an answer -- ask a coach to change it.")
+    try:
+        channel = F.set_player_type(current_user, _payload().get("player_type", ""))
+    except ValueError as e:
+        return _json_error(str(e))
+    return jsonify({"channel_id": channel.id if channel else None})
 
 
 @forge_bp.route("/api/channels")
 def api_channels():
-    return jsonify({"channels": F.channels_for(current_user, request.args.get("season"))})
+    return jsonify({"channels": F.channels_for(current_user)})
 
 
 @forge_bp.route("/api/channels/<int:channel_id>/posts")
@@ -69,12 +83,20 @@ def api_posts(channel_id):
     channel = _channel_or_404(channel_id)
     after = request.args.get("after", type=int) or 0
     season = request.args.get("season") or None
+    since = None
+    try:
+        since = datetime.fromisoformat(request.args.get("since", ""))
+    except ValueError:
+        pass
+    now = F._now()
     return jsonify({
+        "now": now.isoformat(),
         "channel": {"id": channel.id, "name": channel.name, "joined": channel.joined,
                     "mine": channel.joined and channel.user_id == current_user.id,
                     "can_upload": F.can_upload(current_user, channel),
                     "seasons": F.channel_seasons(channel.id)},
-        "posts": F.list_posts(channel.id, current_user, season=season, after_id=after),
+        "posts": F.list_posts(channel.id, current_user, season=season, after_id=after,
+                              since=since),
         "videos": F.video_states(channel.id, request.args.get("videos", "")),
     })
 
@@ -90,6 +112,22 @@ def api_add_post(channel_id):
     except ValueError as e:
         return _json_error(str(e))
     return jsonify({"post": F._post_dict(post, current_user)}), 201
+
+
+@forge_bp.route("/api/posts/<int:post_id>", methods=["PATCH"])
+@limiter.limit("60 per minute")
+def api_edit_post(post_id):
+    post = db.session.get(F.ForgePost, post_id)
+    if post is None or post.deleted_at is not None:
+        abort(404)
+    _channel_or_404(post.channel_id)
+    if not F.can_edit(current_user, post):
+        abort(403)
+    try:
+        F.edit_post(post, _payload().get("body", ""))
+    except ValueError as e:
+        return _json_error(str(e))
+    return jsonify({"post": F._post_dict(post, current_user)})
 
 
 @forge_bp.route("/api/posts/<int:post_id>", methods=["DELETE"])
