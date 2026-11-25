@@ -31,7 +31,6 @@
   .forge-chan.active { background: var(--crimson); color: #fff; }
   .forge-chan.unread .nm { font-weight: 700; }
   .forge-chan .you { font-size: 12px; opacity: .7; margin-left: 4px; }
-  .forge-chan.pending:not(.active) { color: #999; }
   .forge-chan.sandbox { border-bottom: 1px dashed #ddd; font-style: italic; }
   .forge-badge { background: var(--crimson); color: #fff; border-radius: 10px; font-size: 12px;
                  font-weight: 700; padding: 1px 7px; min-width: 20px; text-align: center; }
@@ -69,6 +68,13 @@
   .fp-del { background: none; border: none; color: #bbb; cursor: pointer; font-size: 13px;
             margin-left: 8px; }
   .fp-del:hover { color: var(--crimson); }
+  .fp-edited { color: #aaa; font-size: 12px; margin-left: 4px; }
+  .fp-edit { margin-top: 4px; }
+  .fp-edit .btn.ghost { padding: 10px 12px; }
+  .forge-claim { padding: 12px 14px; border-bottom: 1px solid #eee; background: #fdf6f7; font-size: 14px; }
+  .forge-claim p { margin: 2px 0 8px; color: #666; font-size: 13px; }
+  .forge-claim select { width: 100%; margin: 0 0 8px; padding: 6px 8px; font-size: 14px; }
+  .forge-claim .err { color: var(--crimson); font-size: 13px; margin-top: 6px; }
   .ts { color: var(--blue); font-weight: 600; cursor: pointer; text-decoration: underline; }
 
   .fv { margin-top: 8px; max-width: 560px; }
@@ -131,6 +137,7 @@
       <h2><img src="{{ url_for('static', filename='reports/lion-white.png') }}" alt="">The Forge</h2>
       <input type="text" id="forge-search" placeholder="Find a pitcher" autocomplete="off">
     </div>
+    <div class="forge-claim" id="forge-claim" hidden></div>
     <nav class="forge-list" id="forge-list" aria-label="Channels"></nav>
   </aside>
   <section class="forge-main">

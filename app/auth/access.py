@@ -19,6 +19,18 @@ def role_required(*roles):
     return decorator
 
 
+def account_admin_required(view):
+    """Account management (/accounts): coaches on the PAW_ACCOUNT_ADMINS list."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.can_manage_accounts:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
 def can_view_player(user, trackman_id) -> bool:
     """Standalone check usable outside a view (e.g. inside Dash callbacks)."""
     if not getattr(user, "is_authenticated", False):

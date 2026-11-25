@@ -10,7 +10,7 @@
   };
 
   const state = { channels: [], channel: null, posts: new Map(), lastId: 0, season: cfg.season,
-                  filter: "", uploads: 0, videoEls: new Map() };
+                  filter: "", uploads: 0, videoEls: new Map(), since: null, editing: null };
   const POLL_MS = 15000;
   const PARALLEL_PARTS = 3;
   const PART_RETRIES = 4;
@@ -43,13 +43,8 @@
         b.classList.add("sandbox");
         b.title = "Only coaches can see this channel. Use it to try uploads.";
       }
-      if (!c.joined) {
-        b.classList.add("pending");
-        b.title = `${c.name} hasn't made a PAW account yet`;
-      }
       const nm = el("span", "nm", c.name);
       if (c.mine) nm.appendChild(el("span", "you", "(you)"));
-      if (!c.joined) nm.appendChild(el("span", "you", "· not on PAW yet"));
       if (c.sandbox) nm.appendChild(el("span", "you", "· coaches only"));
       b.appendChild(nm);
       if (c.unread) b.appendChild(el("span", "forge-badge", String(c.unread)));
@@ -133,6 +128,17 @@
     meta.appendChild(el("strong", null, post.author));
     if (post.author_is_coach) meta.appendChild(el("span", "tag", "COACH"));
     meta.appendChild(document.createTextNode(fmtTime(post.created_at, refIso)));
+    if (post.edited) meta.appendChild(el("span", "fp-edited", "(edited)"));
+    const editing = state.editing && state.editing.id === post.id;
+    if (post.can_edit && !editing) {
+      const ed = el("button", "fp-del", "Edit");
+      ed.type = "button";
+      ed.addEventListener("click", () => {
+        state.editing = { id: post.id, text: post.body, focus: true };
+        renderFeed();
+      });
+      meta.appendChild(ed);
+    }
     if (post.can_delete) {
       const del = el("button", "fp-del", "Delete");
       del.type = "button";
@@ -142,11 +148,42 @@
     body.appendChild(meta);
     if (post.deleted) {
       body.appendChild(el("div", "fp-text deleted", "Message deleted"));
+    } else if (editing) {
+      body.appendChild(editBox(post));
     } else if (post.body) {
       body.appendChild(textNode(post.body, videoGetter));
     }
     row.appendChild(body);
     return { row, body };
+  }
+
+  function editBox(post) {
+    const box = el("div", "fc-box fp-edit");
+    const ta = el("textarea");
+    ta.maxLength = 4000;
+    ta.value = state.editing.text;
+    ta.addEventListener("input", () => { if (state.editing) state.editing.text = ta.value; });
+    const save = el("button", "btn", "Save");
+    save.type = "button";
+    const cancel = el("button", "btn ghost", "Cancel");
+    cancel.type = "button";
+    const stop = () => { state.editing = null; renderFeed(); };
+    const go = () => {
+      save.disabled = true;
+      api(`/forge/api/posts/${post.id}`, { method: "PATCH", body: { body: ta.value } })
+        .then((d) => { state.editing = null; addPosts([d.post]); renderFeed(); })
+        .catch((e) => { alertNote(e.message); save.disabled = false; });
+    };
+    save.addEventListener("click", go);
+    cancel.addEventListener("click", stop);
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); }
+      if (e.key === "Escape") { e.preventDefault(); stop(); }
+    });
+    box.appendChild(ta);
+    box.appendChild(save);
+    box.appendChild(cancel);
+    return box;
   }
 
   function videoBlock(post) {
@@ -184,6 +221,8 @@
     const scrollTop = feed.scrollTop;
     const drafts = new Map();
     let focusedParent = null;
+    const editTa = feed.querySelector(".fp-edit textarea");
+    if (state.editing && editTa && document.activeElement === editTa) state.editing.focus = true;
     feed.querySelectorAll(".fc-box").forEach((box) => {
       const ta = box.querySelector("textarea");
       drafts.set(Number(box.dataset.parent), ta.value);
@@ -200,8 +239,7 @@
     const ch = state.channel || {};
     if (ch.name && ch.joined === false) {
       feed.appendChild(el("p", "forge-empty",
-        `${ch.name} hasn't made a PAW account yet. Messages posted here will be waiting ` +
-        "when they sign up, and they can upload video once they do."));
+        `${ch.name}'s account is turned off, so they can't post here right now.`));
     } else if (!tops.length) {
       feed.appendChild(el("p", "forge-empty", ch.mine
         ? "This is your channel. Upload a bullpen or send the coaches a message."
@@ -244,6 +282,12 @@
     for (const [parentId, text] of drafts) {
       const row = feed.querySelector(`.fp[data-id="${parentId}"] > .fp-body`);
       if (row) openReply(row, parentId, "", text, parentId === focusedParent);
+    }
+    const ed = feed.querySelector(".fp-edit textarea");
+    if (ed && state.editing && state.editing.focus) {
+      state.editing.focus = false;
+      ed.focus({ preventScroll: true });
+      ed.setSelectionRange(ed.value.length, ed.value.length);
     }
     if (atBottom || state.scrollToEnd) { feed.scrollTop = feed.scrollHeight; state.scrollToEnd = false; }
     else feed.scrollTop = scrollTop;
@@ -302,6 +346,8 @@
     state.posts = new Map();
     state.videoEls = new Map();
     state.lastId = 0;
+    state.since = null;
+    state.editing = null;
     state.season = cfg.season;
     $("forge").classList.add("open");
     $("forge-compose").hidden = false;
@@ -321,10 +367,12 @@
       .filter((p) => p.video && (p.video.status === "queued" || p.video.status === "processing"))
       .map((p) => p.video.id);
     const qs = full ? `season=${encodeURIComponent(state.season)}`
-                    : `after=${state.lastId}` + (pending.length ? `&videos=${pending.join(",")}` : "");
+                    : `after=${state.lastId}` + (state.since ? `&since=${encodeURIComponent(state.since)}` : "") +
+                      (pending.length ? `&videos=${pending.join(",")}` : "");
     return api(`/forge/api/channels/${id}/posts?${qs}`).then((d) => {
       if (!state.channel || state.channel.id !== id) return;
       state.channel = d.channel;
+      state.since = d.now;
       $("forge-title").textContent = d.channel.name;
       const sel = $("forge-season");
       if (full) {
@@ -521,7 +569,34 @@
     startUploadPanel(file, duration);
   }
 
+  // ---------- "do you pitch?" for accounts made before sign-up asked ----------
+  function renderAsk() {
+    const box = $("forge-claim");
+    if (!cfg.ask_player_type) return;
+    box.hidden = false;
+    box.appendChild(el("strong", null, "Do you pitch?"));
+    box.appendChild(el("p", null, "Pitchers get their own channel here for bullpen video."));
+    const type = el("select");
+    for (const [v, t] of [["", "Choose…"], ["position", "Position player"], ["pitcher", "Pitcher"], ["both", "Both"]]) {
+      const o = el("option", null, t); o.value = v; type.appendChild(o);
+    }
+    const save = el("button", "btn", "Save");
+    save.type = "button";
+    const err = el("div", "err");
+    save.addEventListener("click", () => {
+      if (!type.value) { err.textContent = "Pick position player, pitcher, or both."; return; }
+      save.disabled = true;
+      api("/forge/api/player-type", { method: "POST", body: { player_type: type.value } })
+        .then((d) => { location.hash = d.channel_id ? String(d.channel_id) : ""; location.reload(); })
+        .catch((e) => { err.textContent = e.message; save.disabled = false; });
+    });
+    box.appendChild(type);
+    box.appendChild(save);
+    box.appendChild(err);
+  }
+
   // ---------- wiring ----------
+  renderAsk();
   $("forge-search").addEventListener("input", (e) => { state.filter = e.target.value; renderChannels(); });
   $("forge-send").addEventListener("click", sendMessage);
   $("forge-text").addEventListener("keydown", (e) => {
