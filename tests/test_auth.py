@@ -453,3 +453,16 @@ def test_register_requires_first_and_last_name(app, client):
     assert b"Enter your first and last name." in resp.data
     with app.app_context():
         assert User.query.filter_by(email="will@lmu.edu").first() is None
+
+
+def test_register_tells_coaches_to_skip_position(client):
+    assert b"(coaches: leave blank)" in client.get("/register").data
+
+
+def test_coach_code_signup_ignores_ticked_position(app, client, monkeypatch):
+    monkeypatch.setenv("PAW_COACH_CODE", "staff-code")
+    _register(client, "Ticked Coach", "ticked@lmu.edu", "a-real-password",
+              team_code="staff-code", player_type="both")
+    with app.app_context():
+        u = User.query.filter_by(email="ticked@lmu.edu").one()
+        assert (u.role, u.player_type) == ("coach", None)
