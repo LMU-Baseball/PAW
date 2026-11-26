@@ -238,38 +238,50 @@ def test_header_menu_shows_account_management_to_coaches_only(app):
     assert b"Account management" not in player_page
 
 
-def _positions(client, uid, *checked):
-    return client.post(f"/accounts/{uid}/positions", data={"player_type": list(checked)},
+def _info(client, uid, name, *checked):
+    return client.post(f"/accounts/{uid}/info", data={"name": name, "player_type": list(checked)},
                        follow_redirects=True)
 
 
-def test_coach_edits_a_players_positions_and_forge_channel_follows(app):
+def test_coach_edits_a_players_info_and_forge_channel_follows(app):
     from app.data import forge
     coach = _client_logged_in(app, "coach@lmu.edu")
     pid = _uid(app, "player@lmu.edu")
-    assert b"Edit positions" in coach.get("/accounts").data
-    assert b"is now: Position player and pitcher." in _positions(coach, pid, "position", "pitcher").data
+    assert b"Edit info" in coach.get("/accounts").data
+    page = _info(coach, pid, "  Will   Kaczynski ", "position", "pitcher").data
+    assert b"Saved Will Kaczynski&#39;s info." in page
     page = coach.get("/accounts").data
     assert b'data-type="both"' in page and b"position + pitcher" in page
     with app.app_context():
-        assert "player" in [c.name for c in forge.sync_channels()]
-    _positions(coach, pid, "pitcher")
+        assert _user(app, "player@lmu.edu").name == "Will Kaczynski"
+        assert "Will Kaczynski" in [c.name for c in forge.sync_channels()]
+    _info(coach, pid, "William Kaczynski", "pitcher")
     with app.app_context():
         assert _user(app, "player@lmu.edu").player_type == "pitcher"
-    _positions(coach, pid, "position")
+        assert "William Kaczynski" in [c.name for c in forge.sync_channels()]
+    _info(coach, pid, "William Kaczynski", "position")
     with app.app_context():
-        assert "player" not in [c.name for c in forge.sync_channels()]
+        assert "William Kaczynski" not in [c.name for c in forge.sync_channels()]
 
 
-def test_edit_positions_needs_at_least_one_box(app):
+def test_edit_info_needs_full_name_and_a_position(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
     pid = _uid(app, "player@lmu.edu")
-    _positions(coach, pid, "pitcher")
-    assert b"Pick position player, pitcher, or both." in _positions(coach, pid).data
-    assert _user(app, "player@lmu.edu").player_type == "pitcher"
+    _info(coach, pid, "Will Kaczynski", "pitcher")
+    assert b"Enter a first and last name." in _info(coach, pid, "Will", "pitcher").data
+    assert b"Pick position player, pitcher, or both." in _info(coach, pid, "Bill Kaczynski").data
+    user = _user(app, "player@lmu.edu")
+    assert (user.name, user.player_type) == ("Will Kaczynski", "pitcher")
 
 
-def test_edit_positions_is_account_admins_only_and_players_only(app, monkeypatch):
+def test_edit_info_renames_coaches_without_positions(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    _info(coach, _uid(app, "coach@lmu.edu"), "Head Coach", "pitcher")
+    user = _user(app, "coach@lmu.edu")
+    assert (user.name, user.player_type) == ("Head Coach", None)
+
+
+def test_edit_info_is_account_admins_only(app):
     with app.app_context():
         other = User(email="assistant@lmu.edu", name="assistant", role="coach")
         other.set_password("password123")
@@ -278,10 +290,8 @@ def test_edit_positions_is_account_admins_only_and_players_only(app, monkeypatch
         db.session.commit()
     pid = _uid(app, "player@lmu.edu")
     assistant = _client_logged_in(app, "assistant@lmu.edu")
-    assert _positions(assistant, pid, "pitcher").status_code == 403
+    assert _info(assistant, pid, "New Name", "pitcher").status_code == 403
     player = _client_logged_in(app, "player@lmu.edu")
-    assert _positions(player, pid, "pitcher").status_code == 403
-    assert _user(app, "player@lmu.edu").player_type is None
-    coach = _client_logged_in(app, "coach@lmu.edu")
-    _positions(coach, _uid(app, "assistant@lmu.edu"), "pitcher")
-    assert _user(app, "assistant@lmu.edu").player_type is None
+    assert _info(player, pid, "New Name", "pitcher").status_code == 403
+    user = _user(app, "player@lmu.edu")
+    assert (user.name, user.player_type) == ("player", None)

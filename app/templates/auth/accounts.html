@@ -60,12 +60,11 @@
         </td>
         <td>{{ (u.last_login_at.strftime('%b ') ~ u.last_login_at.day ~ u.last_login_at.strftime(', %Y')) if u.last_login_at else '—' }}</td>
         <td class="actions">
-          {% if not u.is_coach %}
-            <button type="button" data-positions
-                    data-url="{{ url_for('auth.account_positions', user_id=u.id) }}"
-                    data-who="{{ u.name }} ({{ u.email }})"
-                    data-type="{{ u.player_type or '' }}">Edit positions</button>
-          {% endif %}
+          <button type="button" data-info
+                  data-url="{{ url_for('auth.account_info', user_id=u.id) }}"
+                  data-email="{{ u.email }}" data-name="{{ u.name }}"
+                  data-player="{{ '' if u.is_coach else '1' }}"
+                  data-type="{{ u.player_type or '' }}">Edit info</button>
           {% if u.id != current_user.id %}
             {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
             {% if u.is_coach %}{{ action(u, 'make-player', 'Make player', 'Removes coach access -- they will no longer be able to edit data or manage accounts.') }}
@@ -99,42 +98,61 @@
     </div>
   </form>
 </dialog>
-<dialog class="confirm" id="positions-dlg">
-  <form method="post" id="positions-form">
+<dialog class="confirm" id="info-dlg">
+  <form method="post" id="info-form">
     {{ form.hidden_tag() }}
-    <h3>Edit positions</h3>
-    <p class="who" id="positions-who"></p>
-    <label class="check"><input type="checkbox" name="player_type" value="position" id="pos-position">
-      <span>Position player</span></label>
-    <label class="check"><input type="checkbox" name="player_type" value="pitcher" id="pos-pitcher">
-      <span>Pitcher</span></label>
+    <h3>Edit info</h3>
+    <p class="who" id="info-who"></p>
+    <label for="info-name" style="display: block; font-weight: 600; margin: 8px 0 4px;">Name</label>
+    <input type="text" name="name" id="info-name" maxlength="255" autocomplete="off"
+           style="width: 100%; box-sizing: border-box;">
+    <p style="font-size: 12px; color: #666; margin: 4px 0 8px;">First and last</p>
+    <div id="info-positions">
+      <p style="font-weight: 600; margin: 8px 0 4px;">Positions</p>
+      <label class="check"><input type="checkbox" name="player_type" value="position" id="pos-position">
+        <span>Position player</span></label>
+      <label class="check"><input type="checkbox" name="player_type" value="pitcher" id="pos-pitcher">
+        <span>Pitcher</span></label>
+    </div>
     <div class="row">
-      <button type="button" class="btn cancel" id="positions-cancel">Cancel</button>
-      <button type="submit" class="btn" id="positions-go">Save</button>
+      <button type="button" class="btn cancel" id="info-cancel">Cancel</button>
+      <button type="submit" class="btn" id="info-go">Save</button>
     </div>
   </form>
 </dialog>
 <script>
 (function () {
-  var dlg = document.getElementById("positions-dlg");
+  var dlg = document.getElementById("info-dlg");
+  var name = document.getElementById("info-name");
+  var box = document.getElementById("info-positions");
   var pos = document.getElementById("pos-position");
   var pit = document.getElementById("pos-pitcher");
-  var go = document.getElementById("positions-go");
-  var sync = function () { go.disabled = !(pos.checked || pit.checked); };
-  document.querySelectorAll("[data-positions]").forEach(function (btn) {
+  var go = document.getElementById("info-go");
+  var player = false;
+  var sync = function () {
+    var named = name.value.trim().split(/\s+/).length >= 2;
+    go.disabled = !named || (player && !(pos.checked || pit.checked));
+  };
+  document.querySelectorAll("[data-info]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var t = btn.dataset.type;
-      document.getElementById("positions-form").action = btn.dataset.url;
-      document.getElementById("positions-who").textContent = btn.dataset.who;
+      player = btn.dataset.player === "1";
+      document.getElementById("info-form").action = btn.dataset.url;
+      document.getElementById("info-who").textContent = btn.dataset.email;
+      name.value = btn.dataset.name;
+      box.style.display = player ? "" : "none";
+      pos.disabled = pit.disabled = !player;
       pos.checked = t === "position" || t === "both";
       pit.checked = t === "pitcher" || t === "both";
       sync();
       dlg.showModal();
     });
   });
-  pos.addEventListener("change", sync);
-  pit.addEventListener("change", sync);
-  document.getElementById("positions-cancel").addEventListener("click", function () { dlg.close(); });
+  [name, pos, pit].forEach(function (el) {
+    el.addEventListener("input", sync);
+    el.addEventListener("change", sync);
+  });
+  document.getElementById("info-cancel").addEventListener("click", function () { dlg.close(); });
 })();
 </script>
 <script>
