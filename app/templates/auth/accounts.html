@@ -6,6 +6,7 @@
           data-label="{{ label }}" data-who="{{ u.name }} ({{ u.email }})"
           data-warning="{{ warning }}">{{ label }}</button>
 {%- endmacro %}
+{% block main_class %} wide{% endblock %}
 {% block content %}
 <style>
   .acct-wrap { overflow-x: auto; }
@@ -15,6 +16,7 @@
     border-bottom: 2px solid var(--crimson); padding: 6px 8px; white-space: nowrap; }
   .acct td { padding: 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
   .acct tr.off td { color: #999; }
+  .acct td:first-child { white-space: nowrap; }
   .acct .tag { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px;
     background: #eee; color: #555; margin-right: 4px; white-space: nowrap; }
   .acct .tag.coach { background: var(--crimson); color: #fff; }
@@ -37,6 +39,13 @@
   dialog.confirm .row { display: flex; justify-content: flex-end; gap: 10px; }
   dialog.confirm .cancel { background: #fff; color: var(--ink); border: 1px solid #ccc; }
   dialog.confirm .btn:disabled { background: #c9a0a9; cursor: not-allowed; }
+  #info-form { display: flex; flex-direction: column; gap: 10px; }
+  #info-form h3, #info-form p, #info-form .check { margin: 0; }
+  #info-form .field { display: flex; flex-direction: column; gap: 6px; }
+  #info-form .field-label { font-weight: 600; }
+  #info-form .hint { font-size: 12px; color: #666; }
+  #info-form input[type=text] { width: 100%; box-sizing: border-box; }
+  #info-form .row { margin-top: 6px; }
 </style>
 <div class="card">
   <h2 style="margin-top: 0;">Account management</h2>
@@ -103,12 +112,13 @@
     {{ form.hidden_tag() }}
     <h3>Edit info</h3>
     <p class="who" id="info-who"></p>
-    <label for="info-name" style="display: block; font-weight: 600; margin: 8px 0 4px;">Name</label>
-    <input type="text" name="name" id="info-name" maxlength="255" autocomplete="off"
-           style="width: 100%; box-sizing: border-box;">
-    <p style="font-size: 12px; color: #666; margin: 4px 0 8px;">First and last</p>
-    <div id="info-positions">
-      <p style="font-weight: 600; margin: 8px 0 4px;">Positions</p>
+    <div class="field">
+      <label for="info-name" class="field-label">Name</label>
+      <input type="text" name="name" id="info-name" maxlength="255" autocomplete="off">
+      <span class="hint">First and last</span>
+    </div>
+    <div class="field" id="info-positions">
+      <span class="field-label">Positions</span>
       <label class="check"><input type="checkbox" name="player_type" value="position" id="pos-position">
         <span>Position player</span></label>
       <label class="check"><input type="checkbox" name="player_type" value="pitcher" id="pos-pitcher">
