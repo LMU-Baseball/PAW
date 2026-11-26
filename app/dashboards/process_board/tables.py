@@ -14,6 +14,7 @@ from app.data import process_board as PB
 from app.dashboards import shell
 
 TABLE_ID = "process-grid"
+ROWS_KEY, NAME_KEY = "pitchers", "pitcher"
 
 LEADER = "#FFD54A"
 MEETS = "#DCEFF7"
@@ -38,6 +39,21 @@ def columns() -> list[dict]:
              for key, label in PB.VELO_COLS]
     cols.append({"name": "Pitches", "id": "pitches", "type": "numeric"})
     return cols
+
+
+def player_names(board: dict, rows_key: str = ROWS_KEY, name_key: str = NAME_KEY) -> list[str]:
+    return sorted({r[name_key] for r in board.get(rows_key, [])}, key=str.lower)
+
+
+def only_players(board: dict, players, rows_key: str = ROWS_KEY,
+                 name_key: str = NAME_KEY) -> dict:
+    """The board with just the picked player rows. The reference rows and
+    leaders stay whole-team, so a coach comparing two pitchers still sees
+    the team average and baseline. None = no filter (everyone)."""
+    if players is None:
+        return board
+    keep = set(players)
+    return dict(board, **{rows_key: [r for r in board.get(rows_key, []) if r[name_key] in keep]})
 
 
 def _sort_key(row: dict, col: str):
