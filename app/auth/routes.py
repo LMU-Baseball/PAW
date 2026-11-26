@@ -528,9 +528,10 @@ def account_action(user_id, action):
 @login_required
 @account_admin_required
 def account_info(user_id):
-    """A coach fixing someone's name (e.g. adding a last name for The Forge)
-    and, for players, position player / pitcher / both (e.g. a two-way
-    player in the fall who's only pitching in the spring)."""
+    """A coach fixing someone's name (e.g. adding a last name for The Forge),
+    switching them between player and coach, and for players setting
+    position player / pitcher / both (e.g. a two-way player in the fall
+    who's only pitching in the spring)."""
     from app.data import forge
     user = db.session.get(User, user_id)
     if user is None or not AccountActionForm().validate_on_submit():
@@ -540,13 +541,18 @@ def account_info(user_id):
     if len(name.split()) < 2 or len(name) > 255:
         flash("Enter a first and last name.", "error")
         return redirect(url_for("auth.accounts"))
+    role = request.form.get("role", user.role)
+    # Demoting yourself would lock you out of this page (same rule as Make player).
+    if role not in ("player", "coach") or user.id == current_user.id:
+        role = user.role
     player_type = None
-    if user.role == "player":
+    if role == "player":
         player_type = _player_type(request.form.getlist("player_type"))
         if player_type is None:
             flash("Pick position player, pitcher, or both.", "error")
             return redirect(url_for("auth.accounts"))
     user.name = name
+    user.role = role
     if player_type is not None and player_type != user.player_type:
         forge.set_player_type(user, player_type)
     db.session.commit()
