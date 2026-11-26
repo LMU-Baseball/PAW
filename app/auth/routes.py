@@ -524,6 +524,36 @@ def account_action(user_id, action):
     return redirect(url_for("auth.accounts"))
 
 
+@auth_bp.route("/accounts/<int:user_id>/info", methods=["POST"])
+@login_required
+@account_admin_required
+def account_info(user_id):
+    """A coach fixing someone's name (e.g. adding a last name for The Forge)
+    and, for players, position player / pitcher / both (e.g. a two-way
+    player in the fall who's only pitching in the spring)."""
+    from app.data import forge
+    user = db.session.get(User, user_id)
+    if user is None or not AccountActionForm().validate_on_submit():
+        flash("That action couldn't be completed.", "error")
+        return redirect(url_for("auth.accounts"))
+    name = " ".join((request.form.get("name") or "").split())
+    if len(name.split()) < 2 or len(name) > 255:
+        flash("Enter a first and last name.", "error")
+        return redirect(url_for("auth.accounts"))
+    player_type = None
+    if user.role == "player":
+        player_type = _player_type(request.form.getlist("player_type"))
+        if player_type is None:
+            flash("Pick position player, pitcher, or both.", "error")
+            return redirect(url_for("auth.accounts"))
+    user.name = name
+    if player_type is not None and player_type != user.player_type:
+        forge.set_player_type(user, player_type)
+    db.session.commit()
+    flash(f"Saved {user.name}'s info.", "info")
+    return redirect(url_for("auth.accounts"))
+
+
 # The tries counter lives in the client's cookie, so a replayed cookie could
 # reset it -- this per-IP limit is the real brute-force bound (10 guesses an
 # hour against a 1-in-a-million code that expires in 15 minutes).
