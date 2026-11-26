@@ -36,7 +36,7 @@ def serve_layout() -> html.Div:
     return html.Div([
         shell.header(back_href="/hitting", back_label="← Hitting"),
         process_header(),
-        html.Div(filters("hproc", HB, season, cycle),
+        html.Div(filters("hproc", HB, season, cycle, tables),
                  style={"borderBottom": f"2px solid {shell.CRIMSON}",
                         "backgroundColor": "rgba(255,255,255,0.55)"}),
         legend(),

@@ -66,14 +66,55 @@ def games_placeholder(games_df) -> str:
     return f"All {len(games_df)} games in range"
 
 
-def filters(prefix: str, data, season: str, cycle: str) -> html.Div:
-    """Season / Cycle / Game Type / Date / Games, shared by the pitcher and
-    hitter boards (`data` is the board's app.data module; ids are
-    f"{prefix}-season" etc.). Games starts empty = every game in range."""
+def players_summary(picked, names) -> str:
+    picked = [n for n in (picked or []) if n in set(names)]
+    if names and len(picked) == len(names):
+        return "All players"
+    if not picked:
+        return "No players"
+    return picked[0] if len(picked) == 1 else f"{len(picked)} of {len(names)} players"
+
+
+_POP_BTN = {"fontSize": "12px", "padding": "3px 10px", "border": "1px solid #ccc",
+            "borderRadius": "4px", "background": "#fff", "cursor": "pointer"}
+
+
+def players_control(prefix: str, names: list[str]) -> html.Details:
+    """Players pop-out: All / None plus a checkbox per player on the board,
+    so a coach can compare a few (or one) against the team rows."""
+    return html.Details([
+        html.Summary(players_summary(names, names), id=f"{prefix}-players-label", style={
+            "cursor": "pointer", "background": "#fff", "border": "1px solid #ccc",
+            "borderRadius": "4px", "padding": "7px 12px", "minWidth": "190px",
+            "fontSize": "14px", "listStylePosition": "inside"}),
+        html.Div([
+            html.Div([
+                html.Button("Select all", id=f"{prefix}-players-all", n_clicks=0, style=_POP_BTN),
+                html.Button("Deselect all", id=f"{prefix}-players-none", n_clicks=0,
+                            style=_POP_BTN),
+            ], style={"display": "flex", "gap": "8px", "marginBottom": "8px"}),
+            dcc.Checklist(id=f"{prefix}-players", options=names, value=list(names),
+                          labelStyle={"display": "flex", "alignItems": "center", "gap": "6px",
+                                      "padding": "3px 0", "fontSize": "14px",
+                                      "cursor": "pointer"},
+                          style={"maxHeight": "320px", "overflowY": "auto"}),
+        ], style={"position": "absolute", "zIndex": 20, "background": "#fff",
+                  "border": "1px solid #ccc", "borderRadius": "6px", "padding": "10px 12px",
+                  "marginTop": "4px", "minWidth": "230px",
+                  "boxShadow": "0 6px 20px rgba(0,0,0,.18)"}),
+    ], id=f"{prefix}-players-pop", style={"position": "relative"})
+
+
+def filters(prefix: str, data, season: str, cycle: str, table) -> html.Div:
+    """Season / Cycle / Game Type / Date / Games / Players, shared by the
+    pitcher and hitter boards (`data` is the board's app.data module and
+    `table` its tables module; ids are f"{prefix}-season" etc.). Games
+    starts empty = every game in range; Players starts with everyone."""
     c_start, c_end = data.cycle_bounds(season, cycle)
     types = data.game_types(c_start, c_end)
     games_df = data.games(season, cycle)
     kinds = data.pitch_types(season, cycle)
+    names = table.player_names(data.board(season, cycle), table.ROWS_KEY, table.NAME_KEY)
     return html.Div([
         html.Div([
             html.Label("Season", style=_LABEL_STYLE),
@@ -118,6 +159,10 @@ def filters(prefix: str, data, season: str, cycle: str) -> html.Div:
                          multi=True, placeholder="All pitch types",
                          style={"minWidth": "220px", "maxWidth": "420px"}),
         ]),
+        html.Div([
+            html.Label("Players", style=_LABEL_STYLE),
+            players_control(prefix, names),
+        ]),
     ], style={"display": "flex", "gap": "28px", "justifyContent": "center",
               "alignItems": "flex-start", "flexWrap": "wrap", "padding": "12px 16px"})
 
@@ -151,7 +196,7 @@ def serve_layout() -> html.Div:
     return html.Div([
         shell.header(back_href="/pitching", back_label="← Pitching"),
         process_header(),
-        html.Div(filters("process", PB, season, cycle),
+        html.Div(filters("process", PB, season, cycle, tables),
                  style={"borderBottom": f"2px solid {shell.CRIMSON}",
                         "backgroundColor": "rgba(255,255,255,0.55)"}),
         legend(),

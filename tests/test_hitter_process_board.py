@@ -174,3 +174,11 @@ def test_board_pitcher_hand_and_pitch_type_filters(monkeypatch):
     sliders = HB.board("2026/2027", "Fall", pitch_types=["Slider"])
     assert sum(r["pitches"] for r in sliders["hitters"]) == 3
     assert HB.pitch_types("2026/2027", "Fall") == ["Fastball", "Slider"]
+
+
+def test_hitter_board_player_filter():
+    board = {"summary": [{"hitter": "Team", "kind": "team"}],
+             "hitters": [{"hitter": "Zed"}, {"hitter": "amy"}, {"hitter": "Bo"}], "best": {}}
+    assert T.player_names(board, T.ROWS_KEY, T.NAME_KEY) == ["amy", "Bo", "Zed"]
+    kept = T.only_players(board, ["Bo"], T.ROWS_KEY, T.NAME_KEY)
+    assert [r["hitter"] for r in T.records(kept)] == ["Team", "Bo"]

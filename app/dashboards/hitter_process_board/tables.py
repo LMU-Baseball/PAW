@@ -12,9 +12,17 @@ from dash.dash_table.Format import Format, Scheme, Symbol
 
 from app.data import hitter_process_board as HB
 from app.dashboards import shell
-from app.dashboards.process_board.tables import LEADER, MEETS, MISSES, _HEADER
+from app.dashboards.process_board.tables import (  # noqa: F401 (player helpers used by the shared callbacks)
+    _HEADER,
+    LEADER,
+    MEETS,
+    MISSES,
+    only_players,
+    player_names,
+)
 
 TABLE_ID = "hproc-grid"
+ROWS_KEY, NAME_KEY = "hitters", "hitter"
 
 _SUMMARY_BG = {"cycle": "#4A4A4A", "team": shell.BLUE}
 

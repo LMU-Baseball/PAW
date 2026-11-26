@@ -252,3 +252,27 @@ def test_pitch_type_filter_pitch_and_pa_metrics():
     assert PB.pitch_types_in(f) == ["Fastball", "Slider"]
     assert [r["pitcher"] for r in PB.pitcher_rows(_frame().assign(
         tagged_pitch_type=["Slider"] * 7 + ["Fastball"]), ["Slider"])] == ["A, One (R)"]
+
+
+def test_player_filter_keeps_reference_rows_and_leaders():
+    board = T.only_players(_board(), ["C"])
+    assert [r["pitcher"] for r in T.records(board)] == ["LMU Baseline", "C"]
+    assert board["best"] == _board()["best"]
+    assert T.only_players(_board(), None) == _board()
+    assert [r["pitcher"] for r in T.records(T.only_players(_board(), []))] == ["LMU Baseline"]
+    assert T.player_names(_board()) == ["A", "B", "C"]
+
+
+def test_players_summary_text():
+    names = ["A", "B", "C"]
+    assert L.players_summary(names, names) == "All players"
+    assert L.players_summary([], names) == "No players"
+    assert L.players_summary(["B"], names) == "B"
+    assert L.players_summary(["A", "C"], names) == "2 of 3 players"
+
+
+def test_keep_picks_when_board_players_change():
+    from app.dashboards.process_board.callbacks import keep_picks
+    assert keep_picks(["A", "B", "D"], ["A", "B", "C"], ["A", "B", "C"]) == ["A", "B", "D"]
+    assert keep_picks(["A", "B", "D"], ["A", "B", "C"], ["B", "C"]) == ["B"]
+    assert keep_picks(["A", "B"], ["A", "B"], []) == []
