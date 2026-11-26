@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Account management — The PAW{% endblock %}
-{% macro action(u, name, label, warning, cls='') -%}
-  <button type="button" class="{{ cls }}" data-confirm
+{% macro action(u, name, label, warning) -%}
+  <option value="{{ name }}"
           data-url="{{ url_for('auth.account_action', user_id=u.id, action=name) }}"
           data-label="{{ label }}" data-who="{{ u.name }} ({{ u.email }})"
-          data-warning="{{ warning }}">{{ label }}</button>
+          data-warning="{{ warning }}">{{ label }}</option>
 {%- endmacro %}
 {% block main_class %} wide{% endblock %}
 {% block content %}
@@ -25,8 +25,10 @@
   .acct .actions { white-space: nowrap; }
   .acct .actions button { font-size: 12px; padding: 4px 8px; margin: 2px 0;
     border: 1px solid #ccc; border-radius: var(--radius); background: #fff; cursor: pointer; }
-  .acct .actions button:hover { border-color: var(--crimson); color: var(--crimson); }
-  .acct .actions button.danger { color: #a3271f; }
+  .acct .actions select { font-size: 12px; padding: 4px 6px; margin: 2px 0 2px 4px;
+    border: 1px solid #ccc; border-radius: var(--radius); background: #fff; cursor: pointer;
+    width: auto; font-family: inherit; }
+  .acct .actions button:hover, .acct .actions select:hover { border-color: var(--crimson); color: var(--crimson); }
   dialog.confirm { border: none; border-radius: var(--radius); padding: 24px;
     max-width: 420px; width: calc(100% - 32px); box-shadow: 0 8px 30px rgba(0,0,0,.25); }
   dialog.confirm::backdrop { background: rgba(0,0,0,.45); }
@@ -72,17 +74,23 @@
           <button type="button" data-info
                   data-url="{{ url_for('auth.account_info', user_id=u.id) }}"
                   data-email="{{ u.email }}" data-name="{{ u.name }}"
-                  data-player="{{ '' if u.is_coach else '1' }}"
+                  data-role="{{ u.role }}" data-self="{{ '1' if u.id == current_user.id else '' }}"
                   data-type="{{ u.player_type or '' }}">Edit info</button>
-          {% if u.id != current_user.id %}
-            {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
-            {% if u.is_coach %}{{ action(u, 'make-player', 'Make player', 'Removes coach access -- they will no longer be able to edit data or manage accounts.') }}
-            {% else %}{{ action(u, 'make-coach', 'Make coach', 'Gives full coach access, including editing data and managing every account on this page.') }}{% endif %}
-            {{ action(u, 'reset-password', 'Reset password', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
-            {% if not u.is_active %}{{ action(u, 'activate', 'Turn on', 'Lets this account sign in again.') }}{% endif %}
-            {{ action(u, 'delete', 'Delete account', 'Permanently deletes this account. This cannot be undone -- they would have to register again.', 'danger') }}
+          {% set self_row = u.id == current_user.id %}
+          {% if not self_row or (mail_on and u.is_active) %}
+          <select data-account aria-label="Edit account for {{ u.email }}">
+            <option value="" selected>Edit account</option>
+            {% if not self_row %}
+              {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
+              {{ action(u, 'reset-password', 'Reset password', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
+            {% endif %}
+            {% if mail_on and u.is_active %}{{ action(u, 'send-reset', 'Email reset link', 'Emails them a link to choose a new password.') }}{% endif %}
+            {% if not self_row %}
+              {% if not u.is_active %}{{ action(u, 'activate', 'Turn on', 'Lets this account sign in again.') }}{% endif %}
+              {{ action(u, 'delete', 'Delete account', 'Permanently deletes this account. This cannot be undone -- they would have to register again.') }}
+            {% endif %}
+          </select>
           {% endif %}
-          {% if mail_on and u.is_active %}{{ action(u, 'send-reset', 'Email reset link', 'Emails them a link to choose a new password.') }}{% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -117,6 +125,14 @@
       <input type="text" name="name" id="info-name" maxlength="255" autocomplete="off">
       <span class="hint">First and last</span>
     </div>
+    <div class="field" id="info-role">
+      <span class="field-label">Role</span>
+      <label class="check"><input type="radio" name="role" value="player" id="role-player">
+        <span>Player</span></label>
+      <label class="check"><input type="radio" name="role" value="coach" id="role-coach">
+        <span>Coach</span></label>
+      <span class="hint" id="role-warn">Coaches can edit data and see every dashboard.</span>
+    </div>
     <div class="field" id="info-positions">
       <span class="field-label">Positions</span>
       <label class="check"><input type="checkbox" name="player_type" value="position" id="pos-position">
@@ -135,30 +151,41 @@
   var dlg = document.getElementById("info-dlg");
   var name = document.getElementById("info-name");
   var box = document.getElementById("info-positions");
+  var roleBox = document.getElementById("info-role");
+  var asPlayer = document.getElementById("role-player");
+  var asCoach = document.getElementById("role-coach");
+  var roleWarn = document.getElementById("role-warn");
   var pos = document.getElementById("pos-position");
   var pit = document.getElementById("pos-pitcher");
   var go = document.getElementById("info-go");
-  var player = false;
+  var wasCoach = false;
   var sync = function () {
+    var player = asPlayer.checked;
+    box.style.display = player ? "" : "none";
+    pos.disabled = pit.disabled = !player;
+    roleWarn.style.display = asCoach.checked && !wasCoach ? "" : "none";
     var named = name.value.trim().split(/\s+/).length >= 2;
     go.disabled = !named || (player && !(pos.checked || pit.checked));
   };
   document.querySelectorAll("[data-info]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var t = btn.dataset.type;
-      player = btn.dataset.player === "1";
+      wasCoach = btn.dataset.role === "coach";
       document.getElementById("info-form").action = btn.dataset.url;
       document.getElementById("info-who").textContent = btn.dataset.email;
       name.value = btn.dataset.name;
-      box.style.display = player ? "" : "none";
-      pos.disabled = pit.disabled = !player;
+      asPlayer.checked = !wasCoach;
+      asCoach.checked = wasCoach;
+      // Can't change your own role from here (it could lock you out).
+      roleBox.style.display = btn.dataset.self === "1" ? "none" : "";
+      asPlayer.disabled = asCoach.disabled = btn.dataset.self === "1";
       pos.checked = t === "position" || t === "both";
       pit.checked = t === "pitcher" || t === "both";
       sync();
       dlg.showModal();
     });
   });
-  [name, pos, pit].forEach(function (el) {
+  [name, pos, pit, asPlayer, asCoach].forEach(function (el) {
     el.addEventListener("input", sync);
     el.addEventListener("change", sync);
   });
@@ -171,13 +198,16 @@
   var form = document.getElementById("confirm-form");
   var box = document.getElementById("confirm-box");
   var go = document.getElementById("confirm-go");
-  document.querySelectorAll("[data-confirm]").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      form.action = btn.dataset.url;
-      document.getElementById("confirm-title").textContent = btn.dataset.label + "?";
-      document.getElementById("confirm-who").textContent = btn.dataset.who;
-      document.getElementById("confirm-warn").textContent = btn.dataset.warning;
-      go.textContent = btn.dataset.label;
+  document.querySelectorAll("[data-account]").forEach(function (sel) {
+    sel.addEventListener("change", function () {
+      var opt = sel.options[sel.selectedIndex];
+      sel.value = "";
+      if (!opt.value) { return; }
+      form.action = opt.dataset.url;
+      document.getElementById("confirm-title").textContent = opt.dataset.label + "?";
+      document.getElementById("confirm-who").textContent = opt.dataset.who;
+      document.getElementById("confirm-warn").textContent = opt.dataset.warning;
+      go.textContent = opt.dataset.label;
       box.checked = false;
       go.disabled = true;
       dlg.showModal();

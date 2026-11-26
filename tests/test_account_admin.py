@@ -295,3 +295,33 @@ def test_edit_info_is_account_admins_only(app):
     assert _info(player, pid, "New Name", "pitcher").status_code == 403
     user = _user(app, "player@lmu.edu")
     assert (user.name, user.player_type) == ("player", None)
+
+
+def test_edit_info_switches_player_and_coach(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    pid = _uid(app, "player@lmu.edu")
+    client = coach
+    client.post(f"/accounts/{pid}/info", data={"name": "Player One", "role": "coach"})
+    assert _user(app, "player@lmu.edu").role == "coach"
+    page = client.post(f"/accounts/{pid}/info", data={"name": "Player One", "role": "player"},
+                       follow_redirects=True).data
+    assert b"Pick position player, pitcher, or both." in page
+    assert _user(app, "player@lmu.edu").role == "coach"
+    client.post(f"/accounts/{pid}/info",
+                data={"name": "Player One", "role": "player", "player_type": ["pitcher"]})
+    user = _user(app, "player@lmu.edu")
+    assert (user.role, user.player_type) == ("player", "pitcher")
+
+
+def test_edit_info_cant_change_your_own_role(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    coach.post(f"/accounts/{_uid(app, 'coach@lmu.edu')}/info",
+               data={"name": "Head Coach", "role": "player", "player_type": ["pitcher"]})
+    user = _user(app, "coach@lmu.edu")
+    assert (user.name, user.role) == ("Head Coach", "coach")
+
+
+def test_accounts_page_has_two_controls_per_row(app):
+    page = _client_logged_in(app, "coach@lmu.edu").get("/accounts").data
+    assert b"Edit info" in page and b"Edit account" in page
+    assert b"Make coach" not in page and b"Make player" not in page
