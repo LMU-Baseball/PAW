@@ -55,12 +55,16 @@
     Every action asks you to confirm first. "Reset password" sets the password to
     <strong>golions</strong> -- tell the player to change it from the menu after signing in.
   </p>
+  <input type="search" id="acct-search" placeholder="Search by name or email"
+         aria-label="Search accounts" autocomplete="off"
+         style="width: 100%; max-width: 360px; box-sizing: border-box; margin: 0 0 10px;">
+  <p id="acct-none" style="display: none; font-size: 14px; color: #666;">No accounts match.</p>
   <div class="acct-wrap">
   <table class="acct">
     <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
-      <tr class="{{ '' if u.is_active else 'off' }}">
+      <tr class="{{ '' if u.is_active else 'off' }}" data-search="{{ (u.name ~ ' ' ~ u.email)|lower }}">
         <td>{{ u.name }}</td>
         <td>{{ u.email }}</td>
         <td>
@@ -146,6 +150,23 @@
     </div>
   </form>
 </dialog>
+<script>
+(function () {
+  var search = document.getElementById("acct-search");
+  var none = document.getElementById("acct-none");
+  var rows = document.querySelectorAll("tr[data-search]");
+  search.addEventListener("input", function () {
+    var words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = 0;
+    rows.forEach(function (tr) {
+      var hit = words.every(function (w) { return tr.dataset.search.indexOf(w) !== -1; });
+      tr.style.display = hit ? "" : "none";
+      if (hit) { shown += 1; }
+    });
+    none.style.display = shown ? "none" : "";
+  });
+})();
+</script>
 <script>
 (function () {
   var dlg = document.getElementById("info-dlg");

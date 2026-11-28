@@ -325,3 +325,8 @@ def test_accounts_page_has_two_controls_per_row(app):
     page = _client_logged_in(app, "coach@lmu.edu").get("/accounts").data
     assert b"Edit info" in page and b"Edit account" in page
     assert b"Make coach" not in page and b"Make player" not in page
+
+
+def test_accounts_page_has_search(app):
+    page = _client_logged_in(app, "coach@lmu.edu").get("/accounts").data
+    assert b'id="acct-search"' in page and b'data-search="' in page

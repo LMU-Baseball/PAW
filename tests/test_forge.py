@@ -732,3 +732,18 @@ def test_sign_out_everywhere_keeps_this_browser(app):
     here.c.post("/account/sign-out-everywhere", follow_redirects=True)
     assert here.get("/account").status_code == 200
     assert other.get("/account").status_code == 302
+
+
+def test_players_only_get_unread_badges_on_their_own_channel(app):
+    a, coach = Client(app, "a@lmu.edu"), Client(app, "coach@lmu.edu")
+    mine = _chan(app, "a@lmu.edu")
+    other = _chan(app, "b@lmu.edu")
+    _say(coach, mine, "nice work")
+    _say(coach, other, "someone else's channel")
+
+    def badges(client):
+        return {ch["id"]: ch["unread"] for ch in client.get("/forge/api/channels").json["channels"]}
+
+    assert badges(a)[mine] == 1 and badges(a)[other] == 0
+    _say(a, other, "player comment")
+    assert badges(coach)[other] == 1
