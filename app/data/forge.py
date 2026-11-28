@@ -222,15 +222,20 @@ def get_channel(channel_id: int) -> ForgeChannel | None:
 
 def channels_for(viewer) -> list[dict]:
     """The pitcher channels, with the coach-only test channel first for
-    coaches."""
+    coaches. Coaches get unread badges on every channel; players only on
+    their own, so they aren't clicking through teammates' channels just to
+    clear badges."""
     channels = sync_channels()
     if viewer.is_coach:
         channels = [sandbox_channel()] + channels
     unread = unread_counts(viewer.id)
-    return [{"id": c.id, "name": c.name, "joined": c.joined, "sandbox": c.is_sandbox,
-             "unread": unread.get(c.id, 0),
-             "mine": c.user_id is not None and c.user_id == viewer.id}
-            for c in channels]
+    out = []
+    for c in channels:
+        mine = c.user_id is not None and c.user_id == viewer.id
+        badge = unread.get(c.id, 0) if viewer.is_coach or mine else 0
+        out.append({"id": c.id, "name": c.name, "joined": c.joined, "sandbox": c.is_sandbox,
+                    "unread": badge, "mine": mine})
+    return out
 
 
 # --- posts ---
