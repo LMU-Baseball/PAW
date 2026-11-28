@@ -19,6 +19,7 @@ from app.auth import tokens
 from app.auth.access import account_admin_required
 from app.auth.mail import mail_enabled, send_mail
 from app.auth.models import PLAYER_TYPES, User, is_coach_email
+from app.auth.models import _utcnow as _now
 from app.extensions import db, limiter
 
 auth_bp = Blueprint("auth", __name__)
@@ -250,7 +251,10 @@ def login():
             db.session.commit()
             login_user(user)
             return redirect(_safe_next(request.args.get("next")) or url_for("main.index"))
-        flash("Invalid email or password.", "error")
+        if user and not user.is_active and user.check_password(form.password.data):
+            flash(REMOVED_MSG, "error")
+        else:
+            flash("Invalid email or password.", "error")
     return render_template("auth/login.html", form=form)
 
 
@@ -270,7 +274,10 @@ def register():
         # pre-listed individuals) OR the coach code (self-service, no
         # allowlist maintenance needed) -- either one is sufficient.
         is_coach_signup = is_coach_email(email) or _matches_coach_code(form.team_code.data)
-        if User.query.filter_by(email=email).first():
+        existing = User.query.filter_by(email=email).first()
+        if existing and not existing.is_active:
+            flash(REMOVED_MSG, "error")
+        elif existing:
             flash("An account with that email already exists. Try signing in instead.", "error")
         elif not is_coach_signup and _player_type(form.player_type.data) not in PLAYER_TYPES:
             form.player_type.errors = ["Pick position player, pitcher, or both."]
@@ -424,7 +431,7 @@ def forgot_password():
         if user is None:
             form.email.errors.append(NO_ACCOUNT)
         elif not user.is_active:
-            form.email.errors.append("That account is turned off. Ask a coach to turn it back on.")
+            form.email.errors.append(REMOVED_MSG)
         elif not _send_reset_email(user):
             form.email.errors.append("Couldn't send the email right now. Try again in a few "
                                      "minutes, or ask a coach.")
@@ -463,8 +470,11 @@ class AccountActionForm(FlaskForm):
 
 
 _ACCOUNT_ACTIONS = ("deactivate", "activate", "make-coach", "make-player",
-                    "sign-out", "send-reset", "reset-password", "delete")
-_SELF_BLOCKED = {"deactivate", "make-player", "sign-out", "reset-password", "delete"}
+                    "sign-out", "send-reset", "reset-password", "delete", "restore",
+                    "release")
+_SELF_BLOCKED = {"deactivate", "make-player", "sign-out", "reset-password", "delete",
+                 "release"}
+REMOVED_MSG = "This email was removed from the PAW. Ask a coach if you think that's a mistake."
 # Until account email is live, a coach resets a forgotten password to this
 # and tells the player to change it after signing in.
 DEFAULT_RESET_PASSWORD = "golions"
@@ -474,9 +484,11 @@ DEFAULT_RESET_PASSWORD = "golions"
 @login_required
 @account_admin_required
 def accounts():
-    users = User.query.order_by(User.is_active.desc(), User.role, User.name).all()
-    return render_template("auth/accounts.html", users=users, form=AccountActionForm(),
-                           mail_on=mail_enabled())
+    users = User.query.filter_by(is_active=True).order_by(User.role, User.name).all()
+    removed = (User.query.filter_by(is_active=False).filter(User.released_at.is_(None))
+               .order_by(User.removed_at.desc(), User.name).all())
+    return render_template("auth/accounts.html", users=users, removed=removed,
+                           form=AccountActionForm(), mail_on=mail_enabled())
 
 
 @auth_bp.route("/accounts/<int:user_id>/<action>", methods=["POST"])
@@ -498,12 +510,30 @@ def account_action(user_id, action):
         flash("You can't do that to your own account.", "error")
         return redirect(url_for("auth.accounts"))
 
-    if action == "deactivate":
+    if action in ("deactivate", "delete"):
+        # Kept, not erased: they're signed out, can't sign in, and the email
+        # stays taken so they can't sign up again. Undo with Restore account.
         user.is_active = False
-        msg = f"Turned off {user.email}. They're signed out everywhere."
-    elif action == "activate":
+        user.removed_at = _now()
+        user.sign_out_everywhere()
+        msg = (f"Deleted {user.name} ({user.email}). They can't sign in or sign up again "
+               "unless you restore them under Deleted accounts.")
+    elif action in ("activate", "restore"):
+        if user.released_at is not None:
+            flash("That account's email was already freed for a new sign-up.", "error")
+            return redirect(url_for("auth.accounts"))
         user.is_active = True
-        msg = f"Turned {user.email} back on."
+        user.removed_at = None
+        msg = f"Restored {user.name} ({user.email}). They can sign in again."
+    elif action == "release":
+        if user.is_active or user.released_at is not None:
+            flash("Delete the account first.", "error")
+            return redirect(url_for("auth.accounts"))
+        email = user.email
+        # Rename rather than erase, so their old Forge posts keep an author.
+        user.email = f"released-{user.id}.{email}"
+        user.released_at = _now()
+        msg = f"{email} can sign up for a new PAW account now."
     elif action == "make-coach":
         user.role = "coach"
         msg = f"{user.email} is now a coach."
@@ -518,12 +548,6 @@ def account_action(user_id, action):
         user.sign_out_everywhere()
         msg = (f"Reset {user.email}'s password to \"{DEFAULT_RESET_PASSWORD}\". "
                "Have them change it after signing in.")
-    elif action == "delete":
-        email = user.email
-        db.session.delete(user)
-        db.session.commit()
-        flash(f"Deleted the account for {email}.", "info")
-        return redirect(url_for("auth.accounts"))
     else:
         if not (mail_enabled() and user.is_active and _send_reset_email(user)):
             flash(f"Couldn't send a reset email to {user.email}.", "error")

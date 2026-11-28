@@ -156,7 +156,7 @@ def test_forgot_password_turned_off_account_sends_nothing(client, app):
         User.query.filter_by(email="verified@lmu.edu").one().is_active = False
         db.session.commit()
     resp = client.post("/forgot-password", data={"email": "verified@lmu.edu"})
-    assert resp.status_code == 200 and b"turned off" in resp.data
+    assert resp.status_code == 200 and b"removed from the PAW" in resp.data
     assert not mail.outbox
 
 
