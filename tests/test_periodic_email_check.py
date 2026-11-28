@@ -19,7 +19,7 @@ EMAIL = "player@lmu.edu"
 @pytest.fixture()
 def app(monkeypatch):
     monkeypatch.setenv("PAW_MAIL_BACKEND", "console")
-    monkeypatch.delenv("PAW_REVERIFY_DAYS", raising=False)
+    monkeypatch.setenv("PAW_REVERIFY_DAYS", "30")
     monkeypatch.delenv("PAW_REVERIFY_EXEMPT_EMAILS", raising=False)
     mail.outbox.clear()
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -176,3 +176,11 @@ def test_password_reset_counts_as_check(app):
     client.post("/login", data={"email": EMAIL, "password": "brand-new-pw"})
     assert _logged_in(client)
     assert not mail.outbox
+
+
+def test_monthly_code_is_off_by_default(app, monkeypatch):
+    monkeypatch.delenv("PAW_REVERIFY_DAYS")
+    _age_check(app, 400)
+    client = app.test_client()
+    _login(client)
+    assert _logged_in(client)

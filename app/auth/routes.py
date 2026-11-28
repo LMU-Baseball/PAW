@@ -407,6 +407,9 @@ def resend_verification():
                            action=url_for("auth.resend_verification"))
 
 
+NO_ACCOUNT = "There's no PAW account for that email. Check the spelling, or create an account."
+
+
 @auth_bp.route("/forgot-password", methods=["GET", "POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def forgot_password():
@@ -414,12 +417,20 @@ def forgot_password():
         return redirect(url_for("auth.change_password"))
     form = EmailForm()
     if mail_enabled() and form.validate_on_submit():
+        # Coaches chose a clear "no account" answer over hiding who has one:
+        # it's a team-only app and a typo'd email otherwise looks like a lost
+        # email. The 5/hour limit above still caps lookups.
         user = _lookup(form.email.data)
-        if user and user.is_active:
-            _send_reset_email(user)
-        flash("If there's a PAW account for that email, a reset link is on its way. "
-              f"It expires in 1 hour. {_JUNK_HINT}", "info")
-        return redirect(url_for("auth.login"))
+        if user is None:
+            form.email.errors.append(NO_ACCOUNT)
+        elif not user.is_active:
+            form.email.errors.append("That account is turned off. Ask a coach to turn it back on.")
+        elif not _send_reset_email(user):
+            form.email.errors.append("Couldn't send the email right now. Try again in a few "
+                                     "minutes, or ask a coach.")
+        else:
+            flash(f"Reset link sent to {user.email}. It expires in 1 hour. {_JUNK_HINT}", "info")
+            return redirect(url_for("auth.login"))
     return render_template("auth/email_form.html", form=form, title="Forgot password",
                            intro="Enter your LMU email and we'll send you a link to choose "
                                  "a new password.",

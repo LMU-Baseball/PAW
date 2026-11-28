@@ -11,7 +11,8 @@
     {{ form.hidden_tag() }}
     <label for="email">Email</label>
     {{ form.email(id="email", type="text", autofocus=true) }}
-    {% for e in form.email.errors %}<div class="flash error">{{ e }}</div>{% endfor %}
+    {% for e in form.email.errors %}<div class="flash error">{{ e }}{% if "no PAW account" in e %}
+      <a href="{{ url_for('auth.register') }}">Create an account</a>{% endif %}</div>{% endfor %}
     <div style="margin-top: 20px;">{{ form.submit(class="btn") }}</div>
   </form>
   {% endif %}

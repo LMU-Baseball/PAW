@@ -52,8 +52,9 @@
 <div class="card">
   <h2 style="margin-top: 0;">Account management</h2>
   <p style="font-size: 14px; color: #555; margin-top: 0;">
-    Every action asks you to confirm first. "Reset password" sets the password to
-    <strong>golions</strong> -- tell the player to change it from the menu after signing in.
+    Every action asks you to confirm first. Players reset their own password with
+    <strong>Forgot your password?</strong> on the sign-in page, or pick <strong>Email reset link</strong>
+    under Edit account. "Reset to golions" is the backup if email isn't working.
   </p>
   <input type="search" id="acct-search" placeholder="Search by name or email"
          aria-label="Search accounts" autocomplete="off"
@@ -84,11 +85,11 @@
           {% if not self_row or (mail_on and u.is_active) %}
           <select data-account aria-label="Edit account for {{ u.email }}">
             <option value="" selected>Edit account</option>
+            {% if mail_on and u.is_active %}{{ action(u, 'send-reset', 'Email reset link', 'Emails them a link to choose a new password.') }}{% endif %}
             {% if not self_row %}
               {{ action(u, 'sign-out', 'Log out', 'Ends every login for this account on every device. They can sign right back in.') }}
-              {{ action(u, 'reset-password', 'Reset password', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
+              {{ action(u, 'reset-password', 'Reset to golions', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
             {% endif %}
-            {% if mail_on and u.is_active %}{{ action(u, 'send-reset', 'Email reset link', 'Emails them a link to choose a new password.') }}{% endif %}
             {% if not self_row %}
               {% if not u.is_active %}{{ action(u, 'activate', 'Turn on', 'Lets this account sign in again.') }}{% endif %}
               {{ action(u, 'delete', 'Delete account', 'Permanently deletes this account. This cannot be undone -- they would have to register again.') }}

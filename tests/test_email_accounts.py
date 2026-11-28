@@ -144,14 +144,27 @@ def test_reset_link_is_single_use(client):
     assert "/forgot-password" in resp.headers["Location"]
 
 
-def test_forgot_password_unknown_or_inactive_sends_nothing(client, app):
+def test_forgot_password_says_when_theres_no_account(client):
+    resp = client.post("/forgot-password", data={"email": "nobody@lmu.edu"})
+    assert resp.status_code == 200
+    assert b"no PAW account for that email" in resp.data and b"Create an account" in resp.data
+    assert not mail.outbox
+
+
+def test_forgot_password_turned_off_account_sends_nothing(client, app):
     with app.app_context():
         User.query.filter_by(email="verified@lmu.edu").one().is_active = False
         db.session.commit()
-    a = client.post("/forgot-password", data={"email": "verified@lmu.edu"})
-    b = client.post("/forgot-password", data={"email": "nobody@lmu.edu"})
-    assert a.status_code == b.status_code == 302
+    resp = client.post("/forgot-password", data={"email": "verified@lmu.edu"})
+    assert resp.status_code == 200 and b"turned off" in resp.data
     assert not mail.outbox
+
+
+def test_forgot_password_confirms_where_it_sent(client):
+    resp = client.post("/forgot-password", data={"email": "verified@lmu.edu"},
+                       follow_redirects=True)
+    assert b"Reset link sent to verified@lmu.edu" in resp.data
+    assert len(mail.outbox) == 1
 
 
 def test_forgot_password_page_explains_when_mail_disabled(client, monkeypatch):

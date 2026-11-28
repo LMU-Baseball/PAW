@@ -139,9 +139,9 @@ def _utcnow() -> datetime:
 
 def reverify_days() -> int:
     try:
-        return max(0, int(os.getenv("PAW_REVERIFY_DAYS", "30")))
+        return max(0, int(os.getenv("PAW_REVERIFY_DAYS", "0")))
     except ValueError:
-        return 30
+        return 0
 
 
 def _reverify_exempt() -> set[str]:
