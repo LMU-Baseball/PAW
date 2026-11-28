@@ -91,8 +91,7 @@
               {{ action(u, 'reset-password', 'Reset to golions', 'Sets their password to "golions" and signs them out everywhere. Their current password stops working immediately.') }}
             {% endif %}
             {% if not self_row %}
-              {% if not u.is_active %}{{ action(u, 'activate', 'Turn on', 'Lets this account sign in again.') }}{% endif %}
-              {{ action(u, 'delete', 'Delete account', 'Permanently deletes this account. This cannot be undone -- they would have to register again.') }}
+              {{ action(u, 'delete', 'Delete account', 'Signs them out and blocks this email from signing in or signing up again. Their Forge history is kept. You can undo this under Deleted accounts.') }}
             {% endif %}
           </select>
           {% endif %}
@@ -102,6 +101,41 @@
     </tbody>
   </table>
   </div>
+
+  <h3 style="margin: 28px 0 4px;">Deleted accounts</h3>
+  <p style="font-size: 14px; color: #555; margin: 0 0 10px;">
+    These emails can't sign in or sign up. <strong>Restore account</strong> brings the account back
+    as it was. <strong>Allow new sign-up</strong> lets the email create a brand-new account (the old
+    one can't be restored after that).
+  </p>
+  {% if removed %}
+  <div class="acct-wrap">
+  <table class="acct">
+    <thead><tr><th>Name</th><th>Email</th><th>Deleted</th><th></th></tr></thead>
+    <tbody>
+    {% for u in removed %}
+      <tr class="off" data-search="{{ (u.name ~ ' ' ~ u.email)|lower }}">
+        <td>{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td>{{ (u.removed_at.strftime('%b ') ~ u.removed_at.day ~ u.removed_at.strftime(', %Y')) if u.removed_at else '—' }}</td>
+        <td class="actions">
+          <button type="button" data-confirm
+                  data-url="{{ url_for('auth.account_action', user_id=u.id, action='restore') }}"
+                  data-label="Restore account" data-who="{{ u.name }} ({{ u.email }})"
+                  data-warning="They can sign in again with their old password, and their Forge channel comes back.">Restore account</button>
+          <button type="button" data-confirm
+                  data-url="{{ url_for('auth.account_action', user_id=u.id, action='release') }}"
+                  data-label="Allow new sign-up" data-who="{{ u.name }} ({{ u.email }})"
+                  data-warning="Lets this email sign up for a brand-new account. The old account can't be restored after this.">Allow new sign-up</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="font-size: 14px; color: #888;">No deleted accounts.</p>
+  {% endif %}
 </div>
 
 <dialog class="confirm" id="confirm-dlg">
@@ -220,20 +254,25 @@
   var form = document.getElementById("confirm-form");
   var box = document.getElementById("confirm-box");
   var go = document.getElementById("confirm-go");
+  var open = function (d) {
+    form.action = d.url;
+    document.getElementById("confirm-title").textContent = d.label + "?";
+    document.getElementById("confirm-who").textContent = d.who;
+    document.getElementById("confirm-warn").textContent = d.warning;
+    go.textContent = d.label;
+    box.checked = false;
+    go.disabled = true;
+    dlg.showModal();
+  };
   document.querySelectorAll("[data-account]").forEach(function (sel) {
     sel.addEventListener("change", function () {
       var opt = sel.options[sel.selectedIndex];
       sel.value = "";
-      if (!opt.value) { return; }
-      form.action = opt.dataset.url;
-      document.getElementById("confirm-title").textContent = opt.dataset.label + "?";
-      document.getElementById("confirm-who").textContent = opt.dataset.who;
-      document.getElementById("confirm-warn").textContent = opt.dataset.warning;
-      go.textContent = opt.dataset.label;
-      box.checked = false;
-      go.disabled = true;
-      dlg.showModal();
+      if (opt.value) { open(opt.dataset); }
     });
+  });
+  document.querySelectorAll("[data-confirm]").forEach(function (btn) {
+    btn.addEventListener("click", function () { open(btn.dataset); });
   });
   box.addEventListener("change", function () { go.disabled = !box.checked; });
   document.getElementById("confirm-cancel").addEventListener("click", function () { dlg.close(); });

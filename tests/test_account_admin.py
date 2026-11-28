@@ -184,7 +184,8 @@ def test_coach_role_change_and_sign_out(app):
 def test_coach_cannot_lock_out_self(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
     cid = _uid(app, "coach@lmu.edu")
-    for action in ("deactivate", "make-player", "sign-out", "reset-password", "delete"):
+    for action in ("deactivate", "make-player", "sign-out", "reset-password", "delete",
+                   "release"):
         coach.post(f"/accounts/{cid}/{action}", data=_OK)
     me = _user(app, "coach@lmu.edu")
     assert me.is_active and me.role == "coach"
@@ -220,13 +221,53 @@ def test_coach_resets_password_to_default(app):
     assert not _logged_in(player)
 
 
-def test_coach_deletes_account(app):
+def test_delete_blocks_sign_in_and_sign_up_until_restored(app):
     coach = _client_logged_in(app, "coach@lmu.edu")
     player = _client_logged_in(app, "player@lmu.edu")
-    coach.post(f"/accounts/{_uid(app, 'player@lmu.edu')}/delete", data=_OK)
-    with app.app_context():
-        assert User.query.filter_by(email="player@lmu.edu").first() is None
+    pid = _uid(app, "player@lmu.edu")
+    coach.post(f"/accounts/{pid}/delete", data=_OK)
+    user = _user(app, "player@lmu.edu")
+    assert not user.is_active and user.removed_at is not None
     assert not _logged_in(player)
+
+    coach.get("/accounts")  # shows (and clears) the confirmation message
+    page = coach.get("/accounts").data.decode()
+    assert "Deleted accounts" in page and "Restore account" in page
+    assert page.index("player@lmu.edu") > page.index("Deleted accounts")
+
+    fresh = app.test_client()
+    resp = fresh.post("/login", data={"email": "player@lmu.edu", "password": "password123"},
+                      follow_redirects=True)
+    assert b"removed from the PAW" in resp.data and not _logged_in(fresh)
+    resp = fresh.post("/register", data={"name": "Player Again", "email": "player@lmu.edu",
+                                         "password": "password123", "confirm": "password123",
+                                         "player_type": ["pitcher"]}, follow_redirects=True)
+    assert b"removed from the PAW" in resp.data
+    with app.app_context():
+        assert User.query.filter_by(email="player@lmu.edu").count() == 1
+
+    coach.post(f"/accounts/{pid}/restore", data=_OK)
+    user = _user(app, "player@lmu.edu")
+    assert user.is_active and user.removed_at is None
+    _client_logged_in(app, "player@lmu.edu")
+
+
+def test_allow_new_sign_up_frees_the_email(app):
+    coach = _client_logged_in(app, "coach@lmu.edu")
+    pid = _uid(app, "player@lmu.edu")
+    coach.post(f"/accounts/{pid}/release", data=_OK)
+    assert _user(app, "player@lmu.edu").is_active  # must delete first
+    coach.post(f"/accounts/{pid}/delete", data=_OK)
+    coach.post(f"/accounts/{pid}/release", data=_OK)
+    with app.app_context():
+        old = db.session.get(User, pid)
+        assert old.released_at is not None and old.email != "player@lmu.edu"
+        assert not old.is_active
+    coach.get("/accounts")
+    assert b"player@lmu.edu" not in coach.get("/accounts").data
+    coach.post(f"/accounts/{pid}/restore", data=_OK)
+    with app.app_context():
+        assert not db.session.get(User, pid).is_active
 
 
 def test_header_menu_shows_account_management_to_coaches_only(app):

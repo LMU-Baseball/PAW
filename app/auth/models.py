@@ -68,6 +68,12 @@ class User(UserMixin, db.Model):
     # Last time this person proved they still read this inbox (verify link,
     # reset link, or emailed sign-in code). Drives reverify_due().
     email_checked_at = db.Column(db.DateTime, nullable=True)
+    # "Delete account" on the Accounts page: the account is turned off and its
+    # email stays taken, so a cut player can't sign in or sign up again.
+    removed_at = db.Column(db.DateTime, nullable=True)
+    # "Allow new sign-up": the old account's email was renamed out of the way
+    # so the address can register fresh (the old row keeps their history).
+    released_at = db.Column(db.DateTime, nullable=True)
 
     def get_id(self) -> str:
         return f"{self.id}:{self.session_epoch or 0}"
@@ -161,6 +167,8 @@ _USER_COLUMNS = (
     # Start every existing account's 30-day clock at deploy, not "overdue".
     ("email_checked_at", "DATETIME NULL", "UPDATE users SET email_checked_at = :now"),
     ("player_type", "VARCHAR(16) NULL", None),
+    ("removed_at", "DATETIME NULL", None),
+    ("released_at", "DATETIME NULL", None),
 )
 
 
